@@ -31,10 +31,12 @@ function mergeSampleObjects(objects) {
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
     for (const [key, val] of Object.entries(obj)) {
       if (!fieldMeta.has(key)) {
-        fieldMeta.set(key, { count: 0, values: [], isArray: false, isObject: false });
+        fieldMeta.set(key, { count: 0, hasNull: false, values: [], isArray: false, isObject: false });
       }
       const meta = fieldMeta.get(key);
-      if (val !== null && val !== undefined) {
+      if (val === null) {
+        meta.hasNull = true;
+      } else if (val !== undefined) {
         meta.count++;
         meta.values.push(val);
         if (Array.isArray(val)) meta.isArray = true;
@@ -83,7 +85,8 @@ function renderSequenceFields(objects, indent = '        ') {
       } else if (types.has('xsd:decimal') && types.has('xsd:integer') && types.size === 2) {
         resolvedType = 'xsd:decimal';
       }
-      lines.push(`${indent}<xsd:element name="${key}" type="${resolvedType}" minOccurs="${minOccurs}" maxOccurs="1"/>`);
+      const nillableAttr = meta.hasNull ? ' nillable="true"' : '';
+      lines.push(`${indent}<xsd:element name="${key}" type="${resolvedType}" minOccurs="${minOccurs}" maxOccurs="1"${nillableAttr}/>`);
     }
   }
 
@@ -172,7 +175,20 @@ export function validateXsdForSapCpi(xsdContent) {
     errors.push('El esquema no define ningún `<xsd:element>`.');
   }
 
-  // 5. Closing tag check
+  // 5. Check nillable="true" without minOccurs="0" (SAP Note 2624922 / JSON-to-XML Converter compatibility)
+  const elemRegex = /<(?:xsd|xs):element\b([^>]*)\/?>/gi;
+  let em;
+  while ((em = elemRegex.exec(withoutComments)) !== null) {
+    const eAttrs = em[1];
+    if (/\bnillable\s*=\s*"true"/i.test(eAttrs) && !/\bminOccurs\s*=\s*"0"/i.test(eAttrs)) {
+      const nameMatch = eAttrs.match(/\bname\s*=\s*"([^"]+)"/);
+      warnings.push(
+        `El elemento \`${nameMatch ? nameMatch[1] : 'element'}\` declara \`nillable="true"\` sin \`minOccurs="0"\`. Si un JSON-to-XML Converter omite la etiqueta cuando el valor es null, el XML Validator o Message Mapping fallará; combina \`minOccurs="0" nillable="true"\`.`
+      );
+    }
+  }
+
+  // 6. Closing tag check
   if (!/<\/(?:xsd|xs):schema>\s*$/i.test(withoutComments)) {
     errors.push('El documento XSD no cierra correctamente con `</xsd:schema>`.');
   }

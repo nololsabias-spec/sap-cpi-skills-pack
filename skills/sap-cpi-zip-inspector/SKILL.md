@@ -46,6 +46,10 @@ Review the deterministic output from `inspect-iflow-zip.mjs` across these 5 mand
    - Detects `<bpmn2:serviceTask>` or `<bpmn2:callActivity>` with `activityType="ExternalCall"` missing an explicit `timeout` property, which risks exhausting worker node threads.
 5. **Heap-Risk Content Modifiers (`CRITICAL` -30 pts each)**:
    - Detects Content Modifiers copying `${body}` or `in.body` into an Exchange Property, which duplicates the entire payload in JVM Heap memory.
+6. **CPILint & SAP Design Guideline Advisory Checks**:
+   - **Splitter Streaming (`splittersWithoutStreaming`)**: Flags `General`/`Iterating Splitter` steps with `streaming="false"`.
+   - **Router Default Route (`routersWithoutDefaultRoute`)**: Flags `<bpmn2:exclusiveGateway>` elements missing a `default` route.
+   - **Basic Auth & CSRF Protection (`basicAuthChannels` / `csrfDisabledChannels`)**: Flags channels using `BasicAuthentication` (CPILint `CleartextBasicAuth`) or disabling CSRF protection (`xsrfProtection=0` — CPILint `CsrfProtectionRequired`).
 
 ### Step 3: Cross-Module Code Audit (When Groovy Scripts Exist)
 If `inspect-iflow-zip.mjs` detects Groovy scripts in `src/main/resources/script/*.groovy`, run the Groovy Code Auditor skill (`sap-cpi-code-auditor`) on each extracted script to check for Heap OOM, XXE, and `static def` memory leaks.

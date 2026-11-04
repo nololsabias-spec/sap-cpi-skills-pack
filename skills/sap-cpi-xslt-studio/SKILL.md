@@ -40,9 +40,10 @@ Follow these mandatory SAP CPI rules:
    - Always include `<xsl:strip-space elements="*"/>` and `<xsl:output method="xml" encoding="UTF-8" indent="no"/>`.
    - Avoid unrestricted descendant axes (`//Node`) and heavy global `<xsl:key>` indexes on massive XML documents (> 50 MB); prefer explicit relative paths (`/Root/Items/Item`).
    - When designing XSLT 3.0 stylesheets on Saxon-HE for ultra-large streaming payloads, structure templates sequentially and use `<xsl:mode streamable="yes"/>` where supported.
-3. **SAP CPI Exchange Extension Functions (when reading/writing Headers or Properties)**:
-   - Declare `xmlns:cpi="com.sap.it.rt.adapter.xpath.api.XmlExtFunctions"` and `<xsl:param name="exchange"/>`.
-   - Use `cpi:getHeader($exchange, 'HeaderName')`, `cpi:setHeader($exchange, 'HeaderName', 'Val')`, `cpi:getProperty($exchange, 'PropName')`, `cpi:setProperty($exchange, 'PropName', 'Val')`.
+3. **SAP CPI Exchange Headers, Properties & Native JSON-to-XML (XSLT 3.0)**:
+   - **Inbound Headers & Properties (Zero-Extension Binding)**: SAP CPI automatically injects any Message Header or Exchange Property into a global `<xsl:param name="HeaderOrPropertyName" select="'DEFAULT'"/>` declared directly under `<xsl:stylesheet>`. Prefer `<xsl:param>` with a default `select` fallback for read-only access.
+   - **Outbound Headers & Properties (Extension Functions)**: Declare `xmlns:cpi="com.sap.it.rt.adapter.xpath.api.XmlExtFunctions"` (or `xmlns:sapci="http://sap.com/it/"`) and `<xsl:param name="exchange"/>`. Use `cpi:setHeader($exchange, 'HeaderName', 'Val')` and `cpi:setProperty($exchange, 'PropName', 'Val')`.
+   - **Native XSLT 3.0 `json-to-xml()` & Identity Mode**: In XSLT 3.0 (`version="3.0"` on Saxon-HE), you can parse raw JSON strings directly via `json-to-xml(.)` using `xpath-default-namespace="http://www.w3.org/2005/xpath-functions"`, and replace verbose identity templates with `<xsl:mode on-no-match="shallow-copy"/>`.
 
 ### Step 3: Validate the Stylesheet with `validate-xslt.mjs`
 Save the generated XSLT and run the deterministic validator:

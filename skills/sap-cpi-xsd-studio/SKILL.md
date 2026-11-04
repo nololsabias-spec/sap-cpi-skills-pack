@@ -36,7 +36,11 @@ node ./scripts/validate-xsd.mjs --infer <sample1.json> [<sample2.json> ...] --ro
 
 Ensure the schema obeys all SAP CPI Type System rules in [xsd-guidelines.md](./references/xsd-guidelines.md):
 - Use `<xsd:sequence>` for complex types (**never** `<xsd:all>`).
-- Define a **single** top-level root `<xsd:element>`.
+- Define a **single** top-level root `<xsd:element>`. When an iFlow converts JSON to XML before validation or mapping, ensure the **Add XML Root Element** option is enabled on the *JSON to XML Converter* step so the root tag matches the XSD root element.
+- **`minOccurs="0"` vs. `nillable="true"` (SAP Note 2624922 & JSON-to-XML Compatibility)**:
+  - `nillable="true"` alone (`minOccurs="1"` by default) requires the XML tag to be physically present with `xsi:nil="true"`. Because SAP CPI's standard *JSON to XML Converter* either omits `null` JSON properties or renders `<field/>` without `xsi:nil="true"`, always combine `minOccurs="0" nillable="true"` for nullable fields so neither the XML Validator nor Message Mapping fails with *"Queue has not enough values in context"*.
+- **Namespace Qualification Alignment (`elementFormDefault`)**:
+  - If the XSD declares `targetNamespace` and `elementFormDefault="qualified"`, runtime XML payloads must include namespace prefixes (or configure Runtime Namespace Mapping in the iFlow); if mapping flat/prefix-less intermediate XML produced by a JSON-to-XML Converter, use `elementFormDefault="unqualified"` or omit `targetNamespace`.
 - Use canonical types: `xsd:date` (`YYYY-MM-DD`), `xsd:dateTime` (`YYYY-MM-DDTHH:mm:ss...`), `xsd:decimal`, `xsd:integer`, `xsd:boolean`, `xsd:string`.
 - Keep total `<xsd:element>` + `<xsd:attribute>` nodes under the 20,000-node CPI Type System limit.
 

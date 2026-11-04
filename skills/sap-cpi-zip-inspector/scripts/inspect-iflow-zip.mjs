@@ -107,10 +107,12 @@ export function analyzeIflwLocally(iflwXml) {
     properties.push({ key: pm[2].trim(), val: (pm[3] || '').trim(), rawOffset: pm.index });
   }
 
-  // 2. Unencrypted channels (http://)
+  // 2. Unencrypted channels (http://) & CPILint Security Checks (BasicAuth & CSRF)
   const unencryptedChannels = [];
   const hardcodedSensitivePatterns = [];
   const contentModifiersReadingBodyToProperty = [];
+  const basicAuthChannels = [];
+  const csrfDisabledChannels = [];
 
   for (const prop of properties) {
     const keyLower = prop.key.toLowerCase();
@@ -119,6 +121,14 @@ export function analyzeIflwLocally(iflwXml) {
 
     if ((keyLower.includes('address') || keyLower.includes('url') || keyLower.includes('httpaddress')) && valLower.startsWith('http://')) {
       unencryptedChannels.push({ key: prop.key, val, tag: 'Adapter Channel' });
+    }
+
+    if (keyLower === 'authenticationtype' && valLower === 'basicauthentication') {
+      basicAuthChannels.push({ key: prop.key, val, reason: 'CPILint CleartextBasicAuth: Se recomienda OAuth2 o Client Certificate en lugar de Basic Auth' });
+    }
+
+    if (keyLower === 'xsrfprotection' && (val === '0' || valLower === 'false')) {
+      csrfDisabledChannels.push({ key: prop.key, val, reason: 'CPILint CsrfProtectionRequired: Protección CSRF desactivada en adaptador HTTP/HTTPS' });
     }
 
     // 3. Hardcoded sensitive credentials or URLs without {{externalized}} syntax
@@ -253,6 +263,8 @@ export function analyzeIflwLocally(iflwXml) {
     syncTasksWithoutTimeout,
     splittersWithoutStreaming,
     routersWithoutDefaultRoute,
+    basicAuthChannels,
+    csrfDisabledChannels,
     contentModifiersReadingBodyToProperty,
     referencedScripts,
     referencedScriptCollections,

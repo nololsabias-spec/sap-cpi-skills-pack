@@ -17,6 +17,7 @@ Aplicadas por `inspect-iflow-zip.mjs` y `build-cpi-package.mjs`:
 | `IFLW-005` | `HIGH` | **Prevención de Fuga de Memoria en Content Modifier** | Bloquea el almacenamiento de `${body}` o `${in.body}` dentro de Exchange Properties o Headers en pasos `Enricher` (Content Modifier), ya que las propiedades persisten durante toda la vida del Exchange. |
 | `IFLW-006` | `ADVISORY` | **Streaming en Splitters (`streaming=true`)** | Detecta pasos `Splitter` (`General`/`Iterating Splitter`) con `<key>streaming</key><value>false</value>`, recomendando activar streaming para evitar cargar lotes XML/JSON completos en memoria DOM. |
 | `IFLW-007` | `ADVISORY` | **Ruta por Defecto en Routers (`default`)** | Verifica que todo `<bpmn2:exclusiveGateway>` defina su atributo `default` para evitar fallos por mensajes sin ruta coincidente. |
+| `IFLW-008` | `ADVISORY` | **CPILint `CleartextBasicAuth` y `CsrfProtectionRequired`** | Detecta canales configurados con `BasicAuthentication` (recomendando OAuth2 / Client Certificate) o con `xsrfProtection=0` (CSRF deshabilitado). |
 
 ---
 
@@ -64,7 +65,8 @@ Todo script parte de **100 puntos** y se restan puntos según la severidad de ca
    - Prohibido usar `exclude-result-prefixes="#all"` (exclusivo de XSLT 2.0).
    - Prohibido usar `<xsl:for-each-group>` en XSLT 1.0 (requiere Muenchian Grouping con `<xsl:key>` y `generate-id()`).
 3. **Limpieza de Nodos en Blanco:** Verifica la presencia de `<xsl:strip-space elements="*"/>`.
-4. **Funciones de Extensión SAP CPI (`--scenario=headers`):** Exige declarar `xmlns:cpi="com.sap.it.rt.adapter.xpath.api.XmlExtFunctions"`, `exclude-result-prefixes="cpi"` y `<xsl:param name="exchange"/>`.
+4. **Funciones de Extensión SAP CPI (`--scenario=headers`):** Exige declarar `xmlns:cpi="com.sap.it.rt.adapter.xpath.api.XmlExtFunctions"` o `xmlns:sapci="http://sap.com/it/"`, `exclude-result-prefixes` y `<xsl:param name="exchange"/>`. Para lecturas de cabeceras/propiedades entrantes se recomienda la inyección directa mediante `<xsl:param name="HeaderName" select="'DEFAULT'"/>`.
+5. **XSLT 3.0 `json-to-xml()` (Saxon-HE):** Verifica que si se utiliza `json-to-xml()`, el atributo `version="3.0"` esté declarado junto con `xpath-default-namespace="http://www.w3.org/2005/xpath-functions"`.
 
 ---
 
@@ -72,6 +74,7 @@ Todo script parte de **100 puntos** y se restan puntos según la severidad de ca
 
 1. **Anclaje Estricto:** Toda expresión regular de validación debe iniciar con `^` y finalizar con `$` para evitar coincidencias parciales accidentales en el Router de SAP CPI.
 2. **Prevención de ReDoS (*Catastrophic Backtracking*):** Detecta cuantificadores anidados ambiguos como `(.+)+`, `(.*)+` o `([a-zA-Z]+)*` que pueden bloquear los hilos de trabajo del tenant SAP CPI.
+3. **Listas de Inclusión/Exclusión (`not in`) y Fechas con Zona Horaria:** Uso de alternancia anclada `^(US|CA|MX)$` con `regex` / `not regex` y expresiones `${date-with-timezone:now:UTC:yyyy-MM-dd'T'HH:mm:ss'Z'}`.
 
 ---
 
@@ -79,7 +82,8 @@ Todo script parte de **100 puntos** y se restan puntos según la severidad de ca
 
 1. **Prohibición de `<xsd:all>`:** El motor gráfico de Message Mapping de SAP CPI presenta limitaciones severas con `<xsd:all>`; todos los elementos hijos complejos deben modelarse con `<xsd:sequence>`.
 2. **Prevención de *Namespace Prefix Conflict*:** Cuando el esquema define `targetNamespace`, exige declarar también el prefijo propio (`xmlns:tns="..."`) junto con `elementFormDefault="qualified"`.
-3. **Límite de Nodos:** Verifica que el esquema no supere los `20.000` nodos XML para evitar bloqueos de memoria en el editor de mapeos.
+3. **Compatibilidad `nillable="true"` + `minOccurs="0"` (SAP Note 2624922):** Advierte cuando un elemento declara `nillable="true"` sin `minOccurs="0"`, ya que el *JSON to XML Converter* de SAP CPI puede omitir etiquetas nulas en lugar de emitir `xsi:nil="true"`.
+4. **Límite de Nodos:** Verifica que el esquema no supere los `20.000` nodos XML para evitar bloqueos de memoria en el editor de mapeos.
 
 ---
 

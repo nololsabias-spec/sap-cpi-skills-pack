@@ -69,14 +69,32 @@ export function validateXsltStylesheet(xml, requestedEngine = null) {
     }
   }
 
-  // 4. SAP CPI Extension Functions validation (cpi:getHeader, cpi:setHeader, cpi:getProperty, cpi:setProperty)
-  const usesCpiExt = /\bcpi:(?:getHeader|setHeader|getProperty|setProperty)\s*\(/.test(withoutComments);
+  // 4. SAP CPI Extension Functions validation (cpi:* or sapci:* via XmlExtFunctions or http://sap.com/it/)
+  const usesCpiExt = /\b(?:cpi|sapci):(?:getHeader|setHeader|getProperty|setProperty)\s*\(/.test(withoutComments);
   if (usesCpiExt) {
-    if (!/xmlns:cpi\s*=\s*"com\.sap\.it\.rt\.adapter\.xpath\.api\.XmlExtFunctions"/.test(rootAttrs)) {
-      errors.push('Se invocan funciones `cpi:*` pero falta `xmlns:cpi="com.sap.it.rt.adapter.xpath.api.XmlExtFunctions"` en `<xsl:stylesheet>`.');
+    const hasOfficialExtNs =
+      /xmlns:(?:cpi|sapci)\s*=\s*"(?:com\.sap\.it\.rt\.adapter\.xpath\.api\.XmlExtFunctions|http:\/\/sap\.com\/it\/?)"/.test(
+        rootAttrs
+      );
+    if (!hasOfficialExtNs) {
+      errors.push(
+        'Se invocan funciones `cpi:*` / `sapci:*` pero falta `xmlns:cpi="com.sap.it.rt.adapter.xpath.api.XmlExtFunctions"` o `xmlns:sapci="http://sap.com/it/"` en `<xsl:stylesheet>`.'
+      );
     }
     if (!/<xsl:param\s+name\s*=\s*"exchange"\s*\/?>/.test(withoutComments)) {
-      errors.push('Se invocan funciones `cpi:*` pero falta declarar `<xsl:param name="exchange"/>` a nivel raíz.');
+      errors.push('Se invocan funciones de Exchange (`setHeader`/`setProperty`) pero falta declarar `<xsl:param name="exchange"/>` a nivel raíz.');
+    }
+  }
+
+  // 4b. XSLT 3.0 json-to-xml() namespace validation
+  if (/\bjson-to-xml\s*\(/.test(withoutComments)) {
+    if (engine !== '3.0') {
+      errors.push('La función `json-to-xml()` requiere `version="3.0"` (motor Saxon-HE XSLT 3.0 en SAP CPI).');
+    }
+    if (!/http:\/\/www\.w3\.org\/2005\/xpath-functions/.test(withoutComments)) {
+      warnings.push(
+        'Se detectó `json-to-xml()` sin `xpath-default-namespace="http://www.w3.org/2005/xpath-functions"`; recuerda que los nodos generados (`map`, `array`, `string`, `number`) pertenecen a ese namespace.'
+      );
     }
   }
 

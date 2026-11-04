@@ -21,7 +21,10 @@ Before generating the mock test suite, check if the user's prompt defines the fu
 
 ### Step 1: Define Integration Contracts & Correlation Rules
 1. **Contracts**: Identify each payload contract (`name`, `format` [`json` | `xml`], base schema/sample, `count` [1–10], and edge-case instructions such as Spanish NIF/CIF, zero/decimal boundary values, or varied order statuses `NEW`, `APPROVED`, `REJECTED`, `ON_HOLD`).
-2. **Cross-Contract Correlation (`correlateData`)**:
+2. **Official SAP Payload Standards (IDoc `EDI_DC40`, OData `$batch` & SOAP)**:
+   - **SAP IDoc XML (`EDI_DC40`)**: Always include the mandatory control record `<EDI_DC40 SEGMENT="1">` with `<TABNAM>EDI_DC40</TABNAM>`, `<DIRECT>` (`1` Outbound / `2` Inbound), `<IDOCTYP>` (e.g., `ORDERS05`), `<MESTYP>` (e.g., `ORDERS`), `<SNDPOR>`, `<SNDPRT>LS</SNDPRT>`, `<SNDPRN>`, `<RCVPOR>`, `<RCVPRT>LS</RCVPRT>`, and `<RCVPRN>` aligned with `WE20`/`BD54` partner profiles.
+   - **OData V2/V4 `$batch` Payloads**: Group modifying operations (`POST`, `PUT`, `DELETE`) inside atomic `<batchChangeSet>` / `--changeset_<UUID>` blocks, while keeping `GET` queries in standalone `<batchQueryPart>` blocks (recommended chunk size: 50–100 records per batch).
+3. **Cross-Contract Correlation (`correlateData`)**:
    - When generating for 2+ contracts (e.g., `Pedido Request` JSON + `Customer Lookup` XML), Example `#k` in every contract MUST share the exact same business identifiers (`customerId` / `CustomerID`, `orderId` / `OrderID`, `currency`, etc.) so the files can be used together in an End-to-End iFlow simulation.
    - See [correlation-rules.md](./references/correlation-rules.md) for the delimiter format and correlation checks.
 
