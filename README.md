@@ -1,91 +1,194 @@
-# SAP CPI AI Skills & Deterministic Validation Pack (`sap-cpi-skills-pack`)
+# SAP CPI Skills & Deterministic Validation Pack (`sap-cpi-skills-pack`)
 
-Paquete portable de **8 Skills especializadas** y **scripts ejecutables de validación, linteo estático, inferencia y empaquetado OSGi (`.zip`)** para **SAP Cloud Integration (SAP Integration Suite / CPI)**.
+Suite modular de **8 Skills especializadas para Agentes IA** y **herramientas CLI de validación estática, auditoría de arquitectura, inferencia de esquemas y empaquetado OSGi (`.zip`)** para **SAP Cloud Integration (SAP Integration Suite / CPI)**.
 
-Diseñado con **cero dependencias externas** (usa únicamente módulos nativos de Node.js `node:fs`, `node:zlib`, `node:path`, `node:child_process`) para que cualquier desarrollador o arquitecto de integración pueda clonarlo y usarlo al instante en **Antigravity**, **Claude Code**, **Cursor** o directamente desde la terminal.
+Construido íntegramente con módulos nativos de **Node.js (`v18+`) sin dependencias externas** (`node:fs`, `node:zlib`, `node:path`), permitiendo ejecutar validaciones deterministas, auditorías de código y generación de paquetes importables en SAP CPI tanto a través de asistentes de IA (**Antigravity**, **Claude Code**, **Cursor**) como desde la terminal o pipelines CI/CD.
 
 ---
 
-## 1. Estructura del Proyecto
+## Tabla de Contenidos
+
+1. [Requisitos Previos](#1-requisitos-previos)
+2. [Instalación y Configuración Rápida](#2-instalación-y-configuración-rápida)
+3. [Estructura del Proyecto](#3-estructura-del-proyecto)
+4. [Catálogo de las 8 Skills y Motores CLI](#4-catálogo-de-las-8-skills-y-motores-cli)
+5. [Guía de Uso por Módulo (CLI y Agentes IA)](#5-guía-de-uso-por-módulo-cli-y-agentes-ia)
+6. [Documentación Técnica Detallada](#6-documentación-técnica-detallada)
+
+---
+
+## 1. Requisitos Previos
+
+- **Node.js `>= 18.0.0`** (no requiere `npm install` ni paquetes de terceros).
+- Compatible con Windows, macOS y Linux.
+
+---
+
+## 2. Instalación y Configuración Rápida
+
+### Clonar y verificar el entorno
+
+```bash
+git clone https://github.com/nololsabias-spec/sap-cpi-skills-pack.git
+cd sap-cpi-skills-pack
+
+# Ejecutar la suite de auto-verificación (valida los 8 módulos)
+npm test
+```
+
+### Instalar las Skills en un espacio de trabajo
+
+El script `setup-skills.mjs` instala automáticamente las 8 skills y la librería compartida `shared/zip-utils.mjs` en las carpetas estándar de descubrimiento de agentes (`.agents/skills/` y `.claude/skills/`):
+
+```bash
+# Instalar en el directorio de un proyecto específico
+node setup-skills.mjs --target /ruta/a/tu/proyecto
+
+# Opciones adicionales de instalación:
+node setup-skills.mjs --target /ruta/a/tu/proyecto --agents-only   # Solo en .agents/skills
+node setup-skills.mjs --target /ruta/a/tu/proyecto --claude-only   # Solo en .claude/skills
+```
+
+---
+
+## 3. Estructura del Proyecto
 
 ```text
 sap-cpi-skills-pack/
-├── README.md                           # Guía de instalación, arquitectura y uso de scripts
-├── .gitignore                          # Reglas de exclusión para Git
-├── package.json                        # Comandos rápidos (npm test y demos)
-├── setup-skills.mjs                    # Instalador automático hacia .agents/ y .claude/
-├── verify-all.mjs                      # Suite de auto-verificación de las 8 skills y scripts
+├── README.md                           # Guía principal de instalación y uso
+├── package.json                        # Scripts de verificación (npm test) y demostraciones
+├── setup-skills.mjs                    # Instalador de skills en .agents/ y .claude/
+├── verify-all.mjs                      # Suite de pruebas integrales de los 8 módulos
 ├── shared/
-│   └── zip-utils.mjs                   # Motor ZIP nativo en Node.js (lectura y escritura DEFLATE sin dependencias)
+│   └── zip-utils.mjs                   # Motor ZIP nativo (lectura/escritura DEFLATE y CRC32)
+├── docs/
+│   ├── ARCHITECTURE.md                 # Arquitectura interna, flujo IA + CLI y motor ZIP
+│   ├── CLI_REFERENCE.md                # Referencia completa de comandos, argumentos y flags
+│   ├── VALIDATION_RULES.md             # Reglas de validación SAP CPI, scoring y seguridad
+│   └── WORKFLOWS_GUIDE.md              # Flujos de trabajo prácticos paso a paso
 └── skills/
-    ├── sap-cpi-zip-inspector/          # 1. Inspector de paquetes .zip y auditor de arquitectura BPMN 2.0 (.iflw)
-    ├── sap-cpi-groovy-generator/       # 2. Generador de scripts Groovy con 10 directivas y validador estático
-    ├── sap-cpi-code-auditor/           # 3. Auditor de seguridad/memoria Heap Groovy y Fast Refactor (Score 0-100)
-    ├── sap-cpi-xslt-studio/            # 4. Generador y validador XSLT 1.0 (Xalan) y 2.0/3.0 (Saxon-HE)
-    ├── sap-cpi-regex-studio/           # 5. Diseñador y Sandbox de Regex + Apache Camel Simple (Router/Modifier)
-    ├── sap-cpi-xsd-studio/             # 6. Inferencia multi-muestra y validador W3C XSD 1.0 para Message Mapping
-    ├── sap-cpi-mock-data-generator/    # 7. Generador, correlacionador E2E y empaquetador .zip de baterías de prueba
-    └── sap-cpi-architect/              # 8. Generador de bundles OSGi (iFlow + Script Collection) y Documentador (8 secciones)
+    ├── sap-cpi-zip-inspector/          # 1. Inspector de paquetes .zip y auditor BPMN 2.0 (.iflw)
+    ├── sap-cpi-groovy-generator/       # 2. Generador Groovy (10 directivas) y linter estático
+    ├── sap-cpi-code-auditor/           # 3. Auditor de calidad/seguridad Groovy (Score 0-100)
+    ├── sap-cpi-xslt-studio/            # 4. Validador y generador XSLT 1.0 (Xalan) y 2.0/3.0 (Saxon-HE)
+    ├── sap-cpi-regex-studio/           # 5. Sandbox Regex + Apache Camel Simple (Router/Modifier)
+    ├── sap-cpi-xsd-studio/             # 6. Inferencia multi-muestra y validador W3C XSD 1.0
+    ├── sap-cpi-mock-data-generator/    # 7. Validador de correlación E2E y empaquetador de pruebas
+    └── sap-cpi-architect/              # 8. Constructor de bundles OSGi (.zip) y Documentador técnico
 ```
 
 ---
 
-## 2. Cómo subirlo a Git y compartirlo con un amigo
+## 4. Catálogo de las 8 Skills y Motores CLI
 
-### Subir esta carpeta a su propio repositorio Git
-```bash
-cd sap-cpi-skills-pack
-git init
-git add .
-git commit -m "feat: SAP CPI Skills & Validation Scripts Pack"
-git branch -M main
-git remote add origin <URL_DE_TU_REPO_GIT>
-git push -u origin main
-```
-
-### Cómo lo instala tu amigo en su entorno
-Tu amigo solo necesita tener **Node.js (v18+)** instalado:
-```bash
-# 1. Clonar el repositorio
-git clone <URL_DE_TU_REPO_GIT>
-cd sap-cpi-skills-pack
-
-# 2. Verificar que los 8 motores de validación pasan al 100% (cero npm install necesario)
-npm test
-
-# 3. Instalar las 8 skills en su proyecto de trabajo (crea .agents/skills y .claude/skills)
-node ./setup-skills.mjs --target /ruta/a/su/proyecto
-```
+| # | Skill | Funcionalidad Principal | Script CLI |
+| :- | :--- | :--- | :--- |
+| **1** | `sap-cpi-zip-inspector` | Descomprime artefactos `.zip` de SAP CPI, inventaría recursos (`MANIFEST.MF`, `.iflw`, `.groovy`, `.xslt`, `.prop`) y audita 5 riesgos críticos en BPMN 2.0. | `inspect-iflow-zip.mjs` |
+| **2** | `sap-cpi-groovy-generator` | Genera y valida scripts Groovy 2.4+ aplicando 10 directivas de arquitectura, prevención de OOM, anti-XXE y *Ensure Upgrade Readiness*. | `validate-groovy.mjs` |
+| **3** | `sap-cpi-code-auditor` | Audita scripts Groovy calculando una puntuación determinista (`0-100`), desglosa vulnerabilidades por severidad y verifica refactorizaciones. | `audit-groovy.mjs` |
+| **4** | `sap-cpi-xslt-studio` | Genera y valida transformaciones XSLT 1.0 (Xalan) y XSLT 2.0/3.0 (Saxon-HE), bloqueando sintaxis híbrida inválida y validando `cpi:setHeader`/`cpi:setProperty`. | `validate-xslt.mjs` |
+| **5** | `sap-cpi-regex-studio` | Diseña y prueba expresiones regulares con anclaje `^...$`, detector estático de *Catastrophic Backtracking (ReDoS)* y expresiones Apache Camel Simple. | `test-camel-regex.mjs` |
+| **6** | `sap-cpi-xsd-studio` | Infiere esquemas W3C XSD 1.0 combinando múltiples muestras JSON (`minOccurs="0"` automático) y valida las restricciones del Message Mapping de SAP CPI. | `validate-xsd.mjs` |
+| **7** | `sap-cpi-mock-data-generator` | Valida sintaxis XML/JSON, comprueba la correlación E2E de identificadores de negocio entre múltiples contratos y empaqueta suites `.zip`. | `pack-mock-suite.mjs` |
+| **8** | `sap-cpi-architect` | **Modo 1:** Construye paquetes OSGi `.zip` duales (iFlow + Script Collection) listos para importar en SAP CPI. **Modo 2:** Extrae metadatos y valida documentación técnica en 8 secciones. | `build-cpi-package.mjs`<br>`extract-for-docs.mjs` |
 
 ---
 
-## 3. Catálogo de las 8 Skills y Validaciones Deterministas
+## 5. Guía de Uso por Módulo (CLI y Agentes IA)
 
-| # | Skill (`skills/<nombre>/SKILL.md`) | Funcionalidad Cubierta | Script Ejecutable (`scripts/*.mjs`) | Validaciones Deterministas Incluidas |
-| :- | :--- | :--- | :--- | :--- |
-| **1** | `sap-cpi-zip-inspector` | **iFlow ZIP Package Inspector & BPMN 2.0 Auditor** | `inspect-iflow-zip.mjs` | Descomprime bundles `.zip` de SAP CPI, cataloga `MANIFEST.MF`, `.iflw`, `.groovy`, `.xslt`, `.prop` y audita los 5 puntos críticos BPMN2 (`Exception Subprocess`, canales `http://` sin TLS, credenciales/URLs hardcoded sin `{{param}}`, `ExternalCall` sin timeout, y Content Modifiers que copian `${body}` a Properties). |
-| **2** | `sap-cpi-groovy-generator` | **Groovy Script Generator (10 Directivas + 5 Patrones)** | `validate-groovy.mjs` | Valida firma `def Message processData(Message message)`, `return message`, *Ensure Upgrade Readiness* (cero wildcards `.*`, cero imports no usados, cero APIs internas de Camel), protección XXE (`disallow-doctype-decl`), `JsonSlurperClassic`, streaming con `Reader` cerrado en `finally`, `ZoneId.of("UTC")`, MPL condicional, `setBody` de 1 argumento y prefijo `CPI-ERR:`. |
-| **3** | `sap-cpi-code-auditor` | **Groovy Fast Refactor & Smart Auditor (2 Etapas)** | `audit-groovy.mjs` | Calcula el `Score de Calidad Original: X/100` con deducciones exactas (`CRÍTICA -30`, `ALTA -15`, `MEDIA -5`, `BAJA -2`), aplica el patrón One-Shot de refactorización y compara el script original contra el refactorizado verificando que alcance `100/100`. |
-| **4** | `sap-cpi-xslt-studio` | **XSLT 1.0 (Xalan) & 2.0/3.0 (Saxon-HE) Studio** | `validate-xslt.mjs` | Detecta alucinaciones de llaves `{campo}` en texto de elementos XML, valida compatibilidad con XSLT 1.0 (prohíbe `#all` en `exclude-result-prefixes` y `xsl:for-each-group`) vs XSLT 2.0, verifica `<xsl:strip-space elements="*"/>` y valida `xmlns:cpi="com.sap.it.rt.adapter.xpath.api.XmlExtFunctions"` + `<xsl:param name="exchange"/>`. |
-| **5** | `sap-cpi-regex-studio` | **CPI Regex & Apache Camel Simple Studio** | `test-camel-regex.mjs` | Verifica anclaje obligatorio `^...$`, detecta cuantificadores anidados con riesgo de **Catastrophic Backtracking (ReDoS)**, genera expresiones Camel Simple para Router (`regex`) y Content Modifier (`replaceAll`), y ejecuta un Sandbox en vivo contra casos `MATCH` y `NO_MATCH` extrayendo grupos `$1, $2...`. |
-| **6** | `sap-cpi-xsd-studio` | **XSD 1.0 Schema Studio (Multi-Muestra)** | `validate-xsd.mjs` | Infiere esquemas W3C XSD 1.0 haciendo merge de N muestras JSON (asignando `minOccurs="0"` a campos opcionales/parciales) y valida compatibilidad con SAP CPI Message Mapping (prohíbe `<xsd:all>`, previene *Namespace Prefix Conflict* en `targetNamespace`, verifica `< 20.000` nodos y `elementFormDefault="qualified"`). |
-| **7** | `sap-cpi-mock-data-generator` | **Multi-Payload Mock Data Suite Generator** | `pack-mock-suite.mjs` | Valida sintaxis JSON y XML de cada ejemplo generado, comprueba la **correlación E2E de claves de negocio** (`customerId`, `orderId`, `kunnr`, etc.) entre múltiples contratos y empaqueta la batería de pruebas en un `.zip` organizado por carpetas con `README_SUITE.txt`. |
-| **8** | `sap-cpi-architect` | **CPI Architect (Modo 1: Generar iFlow + Script Collection / Modo 2: Documentar iFlow)** | `build-cpi-package.mjs` y `extract-for-docs.mjs` | **Modo 1**: Valida el `.iflw` BPMN2 y los scripts Groovy, y construye los 3 paquetes OSGi `.zip` reales (`<Iflow>.zip`, `<SC_Iflow>.zip` con `Require-Capability`/`Provide-Capability` y `Paquete_<Iflow>.zip`). **Modo 2**: Extrae metadatos/heurísticas de un `.zip` y valida que la documentación técnica cumpla las 8 secciones obligatorias. |
+### 5.1. Inspector y Auditor de Paquetes iFlow (`sap-cpi-zip-inspector`)
+
+Analiza un paquete `.zip` exportado de SAP CPI y detecta ausencia de `Exception Subprocess`, llamadas `http://` sin TLS, credenciales o URLs rígidas sin `{{param}}`, `ExternalCall` sin timeout y copias de `${body}` en propiedades del Exchange:
+
+```bash
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --json
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --extract-to ./inspeccion
+```
+
+### 5.2. Validador y Linter de Scripts Groovy (`sap-cpi-groovy-generator`)
+
+Verifica el cumplimiento de la firma oficial SAP CPI, `Ensure Upgrade Readiness` (cero wildcards `.*`, cero imports sin usar, cero APIs internas de Camel), protección anti-XXE y activación selectiva de las 10 directivas (`jsonSlurper`, `streaming`, `xmlParser`, `mpl`, `secureStore`, `valueMapping`, `utcDates`, `headers`, `sql`, `throwEx`):
+
+```bash
+node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./script.groovy --directives=jsonSlurper,mpl,utcDates --strict
+```
+
+### 5.3. Auditor de Calidad y Refactorización Groovy (`sap-cpi-code-auditor`)
+
+Calcula el `Score de Calidad Original (0-100)` aplicando penalizaciones estáticas (`CRÍTICA: -30`, `ALTA: -15`, `MEDIA: -5`, `BAJA: -2`) y permite comparar un script original frente a su versión refactorizada:
+
+```bash
+# Auditar un script existente
+node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs ./legacy.groovy
+
+# Comparar el script original con el script refactorizado (exige 100/100 en el refactorizado)
+node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs ./legacy.groovy --refactored ./refactored.groovy
+```
+
+### 5.4. Validador de Transformaciones XSLT (`sap-cpi-xslt-studio`)
+
+Valida hojas de estilo XSLT para motores Xalan (1.0) o Saxon-HE (2.0/3.0), detectando llaves `{campo}` fuera de atributos, uso indebido de `#all` en XSLT 1.0 y configuración de funciones de extensión SAP CPI:
+
+```bash
+node skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs ./mapping.xslt --version=2.0 --scenario=headers
+```
+
+### 5.5. Sandbox de Expresiones Regulares y Camel Simple (`sap-cpi-regex-studio`)
+
+Evalúa una expresión regular frente a casos de prueba positivos y negativos, detecta patrones vulnerables a ReDoS y genera expresiones listas para Router y Content Modifier:
+
+```bash
+node skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs \
+  --pattern "^INV-([0-9]{4})-([A-Z]{2})$" \
+  --prop "invoiceCode" \
+  --replacement '$1/$2' \
+  --match "INV-2026-ES,INV-9999-DE" \
+  --no-match "INV-26-ES,ABC-2026-ES"
+```
+
+### 5.6. Inferencia Multi-Muestra y Validación XSD 1.0 (`sap-cpi-xsd-studio`)
+
+Infiere esquemas W3C XSD 1.0 a partir de una o varias muestras JSON (marcando automáticamente como `minOccurs="0"` los campos que no aparecen en todas las muestras) y valida un XSD frente a las reglas del Message Mapping de SAP CPI:
+
+```bash
+# Inferir un XSD combinando múltiples muestras JSON y validarlo
+node skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs \
+  --infer ./muestra1.json ./muestra2.json \
+  --root OrderRequest \
+  --namespace "http://sap.com/xi/Orders" \
+  --out ./OrderRequest.xsd
+
+# Validar un archivo XSD existente
+node skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs ./OrderRequest.xsd
+```
+
+### 5.7. Empaquetador de Baterías de Prueba E2E (`sap-cpi-mock-data-generator`)
+
+Valida sintaxis XML/JSON, verifica que los identificadores de negocio (`orderId`, `customerId`, `kunnr`, etc.) estén correlacionados entre múltiples contratos y genera un paquete `.zip` estructurado por escenarios (`ok/`, `edge/`, `error/`):
+
+```bash
+node skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs --spec ./suite-spec.json --out ./MockSuite.zip
+```
+
+### 5.8. Arquitecto SAP CPI: Empaquetado OSGi y Documentación (`sap-cpi-architect`)
+
+- **Modo 1 (`build-cpi-package.mjs`):** Construye los paquetes `.zip` con estructura OSGi (`META-INF/MANIFEST.MF`, `.project`, `.iflw`, `parameters.prop` y `Script Collection` independiente vinculada por `Provide-Capability` / `Require-Capability`):
+  ```bash
+  node skills/sap-cpi-architect/scripts/build-cpi-package.mjs --spec ./bundle-spec.json --out-dir ./dist
+  ```
+- **Modo 2 (`extract-for-docs.mjs`):** Extrae la topología completa de un paquete `.zip` y valida que el documento técnico Markdown cumpla las 8 secciones corporativas:
+  ```bash
+  node skills/sap-cpi-architect/scripts/extract-for-docs.mjs ./Paquete_iFlow.zip --validate-doc ./Documentacion_Tecnica.md
+  ```
 
 ---
 
-## 4. Comandos Rápidos de Uso y Demos
+## 6. Documentación Técnica Detallada
 
-```bash
-# Ejecutar la suite completa de verificación de las 8 skills:
-npm test
+Para profundizar en la arquitectura, reglas de validación y parámetros de cada herramienta, consulta la carpeta [`docs/`](./docs/):
 
-# Demos individuales incluidas:
-npm run demo:zip
-npm run demo:auditor
-npm run demo:xslt
-npm run demo:regex
-npm run demo:xsd
-npm run demo:mock
-npm run demo:architect
-```
+- [**Arquitectura del Proyecto (`docs/ARCHITECTURE.md`)**](./docs/ARCHITECTURE.md): Diseño sin dependencias, estructura de las Skills, motor ZIP nativo y flujo de trabajo híbrido IA + CLI.
+- [**Referencia de Línea de Comandos (`docs/CLI_REFERENCE.md`)**](./docs/CLI_REFERENCE.md): Sintaxis detallada, opciones, esquemas JSON de entrada y códigos de retorno de todos los scripts.
+- [**Reglas de Validación Determinista (`docs/VALIDATION_RULES.md`)**](./docs/VALIDATION_RULES.md): Catálogo completo de reglas BPMN 2.0, Groovy, XSLT, Regex, XSD y OSGi aplicadas por los validadores.
+- [**Guía de Flujos de Trabajo (`docs/WORKFLOWS_GUIDE.md`)**](./docs/WORKFLOWS_GUIDE.md): Ejemplos prácticos de extremo a extremo para desarrollo, auditoría y empaquetado en SAP CPI.
