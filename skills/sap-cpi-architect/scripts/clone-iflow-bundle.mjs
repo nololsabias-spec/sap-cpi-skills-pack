@@ -16,9 +16,30 @@ import { readZipEntries, createZipBuffer } from '../../../shared/zip-utils.mjs';
 import { lintGroovyScript } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
 import { buildDemoBundleZipBuffer, inspectBundle } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
 
+function stripRootFolderPrefix(entryPath, rootPrefix) {
+  if (rootPrefix && entryPath.startsWith(rootPrefix)) {
+    return entryPath.slice(rootPrefix.length);
+  }
+  return entryPath;
+}
+
+function detectRootFolderPrefix(entries) {
+  const manifestEntry = entries.find((e) => e.path.endsWith('META-INF/MANIFEST.MF'));
+  if (manifestEntry && manifestEntry.path !== 'META-INF/MANIFEST.MF') {
+    return manifestEntry.path.slice(0, manifestEntry.path.indexOf('META-INF/MANIFEST.MF'));
+  }
+  return '';
+}
+
+function sortBundleEntries(entries) {
+  const rank = (p) => (p === '.project' ? 0 : p === 'META-INF/MANIFEST.MF' ? 1 : p === 'metainfo.prop' ? 3 : 2);
+  return [...entries].sort((a, b) => rank(a.path) - rank(b.path) || a.path.localeCompare(b.path));
+}
+
 /**
- * Clones an IntegrationFlow .zip bundle under a new SymbolicName / iFlow ID
- * and applies deterministic replacements to .project, MANIFEST.MF, metainfo.prop, and .iflw.
+ * Clones an IntegrationFlow .zip bundle under a new SymbolicName / iFlow ID,
+ * strips any accidental top-level parent directory wrapper so META-INF/MANIFEST.MF
+ * sits strictly at the root of the ZIP archive, and applies deterministic replacements.
  */
 export function cloneIflowBundleZip(sourceZipPathOrBuf, options) {
   const {
@@ -33,13 +54,18 @@ export function cloneIflowBundleZip(sourceZipPathOrBuf, options) {
   }
 
   const entries = readZipEntries(sourceZipPathOrBuf);
+  const rootPrefix = detectRootFolderPrefix(entries);
+  const manifestEntry = entries.find((e) => e.path.endsWith('META-INF/MANIFEST.MF'));
+  const symbolicMatch = manifestEntry?.text?.match(/Bundle-SymbolicName:\s*([^\s;\r\n]+)/);
   const iflwEntry = entries.find((e) => e.path.toLowerCase().endsWith('.iflw'));
+
   const oldName =
     explicitOldName ||
+    (symbolicMatch ? symbolicMatch[1].trim() : null) ||
     (iflwEntry ? path.basename(iflwEntry.path, '.iflw') : path.basename(String(sourceZipPathOrBuf), '.zip'));
 
   const outEntries = entries.map((entry) => {
-    let newPath = entry.path;
+    let newPath = stripRootFolderPrefix(entry.path, rootPrefix);
     let content = entry.data;
 
     if (newPath.endsWith(`${oldName}.iflw`)) {
@@ -48,9 +74,8 @@ export function cloneIflowBundleZip(sourceZipPathOrBuf, options) {
 
     if (
       newPath === '.project' ||
-      newPath.endsWith('/.project') ||
-      newPath.endsWith('MANIFEST.MF') ||
-      newPath.endsWith('metainfo.prop') ||
+      newPath === 'META-INF/MANIFEST.MF' ||
+      newPath === 'metainfo.prop' ||
       newPath.endsWith('.propdef') ||
       newPath.endsWith('.iflw')
     ) {
@@ -75,19 +100,21 @@ export function cloneIflowBundleZip(sourceZipPathOrBuf, options) {
     return { path: newPath, content };
   });
 
-  return createZipBuffer(outEntries);
+  return createZipBuffer(sortBundleEntries(outEntries));
 }
 
 /**
  * Updates an existing ScriptCollection .zip by adding or replacing .groovy/.gsh scripts
- * from a directory or array, validating each script before packaging.
+ * from a directory or array, validating each script before packaging and ensuring root-level paths.
  */
 export function updateScriptCollectionBundleZip(sourceScZipPathOrBuf, newScripts = [], strictValidation = false) {
   const entries = readZipEntries(sourceScZipPathOrBuf);
+  const rootPrefix = detectRootFolderPrefix(entries);
   const existingMap = new Map();
 
   for (const entry of entries) {
-    existingMap.set(entry.path, { path: entry.path, content: entry.data });
+    const cleanPath = stripRootFolderPrefix(entry.path, rootPrefix);
+    existingMap.set(cleanPath, { path: cleanPath, content: entry.data });
   }
 
   const auditResults = [];
@@ -106,7 +133,7 @@ export function updateScriptCollectionBundleZip(sourceScZipPathOrBuf, newScripts
   }
 
   return {
-    zipBuffer: createZipBuffer(Array.from(existingMap.values())),
+    zipBuffer: createZipBuffer(sortBundleEntries(Array.from(existingMap.values()))),
     totalEntries: existingMap.size,
     auditResults
   };

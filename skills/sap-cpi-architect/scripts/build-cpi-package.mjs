@@ -58,38 +58,63 @@ export function buildProjectXml(name) {
 `;
 }
 
-export function buildIflowManifest(iflowName, scriptCollectionName) {
-  const requireCapability = scriptCollectionName
-    ? `\nRequire-Capability: scriptcollection.${scriptCollectionName};resolution:=optional;bundleType:String="ScriptCollection";source:String="reference"`
-    : '';
+export function wrapManifestLine72(headerLine) {
+  const full = String(headerLine || '');
+  if (Buffer.byteLength(full, 'utf8') <= 72) return full;
+  const outLines = [];
+  let current = '';
+  let maxLen = 72;
 
-  return `Manifest-Version: 1.0
-Bundle-ManifestVersion: 2
-Bundle-Name: ${iflowName}
-Bundle-SymbolicName: ${iflowName}; singleton:=true
-Bundle-Version: 1.0.0
-SAP-BundleType: IntegrationFlow
-SAP-NodeType: IFLMAP
-SAP-RuntimeProfile: iflmap
-Import-Package: ${IFLOW_IMPORT_PACKAGE}
-Origin-Bundle-Name: ${iflowName}
-Origin-Bundle-SymbolicName: ${iflowName}${requireCapability}
-`;
+  for (const ch of full) {
+    if (Buffer.byteLength(current + ch, 'utf8') > maxLen) {
+      outLines.push(current);
+      current = ' ' + ch;
+      maxLen = 72;
+    } else {
+      current += ch;
+    }
+  }
+  if (current) outLines.push(current);
+  return outLines.join('\r\n');
+}
+
+export function buildIflowManifest(iflowName, scriptCollectionName) {
+  const headers = [
+    'Manifest-Version: 1.0',
+    'Bundle-ManifestVersion: 2',
+    `Bundle-Name: ${iflowName}`,
+    `Bundle-SymbolicName: ${iflowName}`,
+    'Bundle-Version: 1.0.0',
+    'SAP-BundleType: IntegrationFlow',
+    'SAP-NodeType: IFLMAP',
+    'SAP-RuntimeProfile: iflmap',
+    `Import-Package: ${IFLOW_IMPORT_PACKAGE}`,
+    `Origin-Bundle-Name: ${iflowName}`,
+    `Origin-Bundle-SymbolicName: ${iflowName}`
+  ];
+  if (scriptCollectionName) {
+    headers.push(
+      `Require-Capability: scriptcollection.${scriptCollectionName};resolution:=optional;bundleType:String="ScriptCollection";source:String="reference"`
+    );
+  }
+  return headers.map(wrapManifestLine72).join('\r\n') + '\r\n\r\n';
 }
 
 export function buildScriptCollectionManifest(scName) {
-  return `Manifest-Version: 1.0
-Bundle-ManifestVersion: 2
-Bundle-Name: ${scName}
-Bundle-SymbolicName: ${scName}
-Bundle-Version: 1.0.0
-SAP-BundleType: ScriptCollection
-SAP-NodeType: IFLMAP
-Import-Package: org.osgi.framework
-Provide-Capability: scriptcollection.${scName};version:Version="1.0.0"
-Origin-Bundle-Name: ${scName}
-Origin-Bundle-SymbolicName: ${scName}
-`;
+  const headers = [
+    'Manifest-Version: 1.0',
+    'Bundle-ManifestVersion: 2',
+    `Bundle-Name: ${scName}`,
+    `Bundle-SymbolicName: ${scName}`,
+    'Bundle-Version: 1.0.0',
+    'SAP-BundleType: ScriptCollection',
+    'SAP-NodeType: IFLMAP',
+    'Import-Package: org.osgi.framework',
+    `Provide-Capability: scriptcollection.${scName};version:Version="1.0.0"`,
+    `Origin-Bundle-Name: ${scName}`,
+    `Origin-Bundle-SymbolicName: ${scName}`
+  ];
+  return headers.map(wrapManifestLine72).join('\r\n') + '\r\n\r\n';
 }
 
 export function buildParametersProp(parameters = {}) {

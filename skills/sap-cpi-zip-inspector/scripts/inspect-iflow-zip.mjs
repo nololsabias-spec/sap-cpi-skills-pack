@@ -412,6 +412,23 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
   }
 
   const manifestData = parseManifestContent(manifestFiles[0]?.text || '');
+  const manifestIssues = [];
+  if (manifestFiles.length > 0) {
+    const mf = manifestFiles[0];
+    if (mf.path !== 'META-INF/MANIFEST.MF') {
+      manifestIssues.push(`CRÍTICO: MANIFEST.MF está anidado en una subcarpeta (${mf.path}) en lugar de la raíz 'META-INF/MANIFEST.MF'. SAP CPI rechazará el ZIP con 'The project must contain a valid manifest file'.`);
+    }
+    const rawLines = (mf.text || '').split(/\r?\n/);
+    for (let i = 0; i < rawLines.length; i++) {
+      const byteLen = Buffer.byteLength(rawLines[i], 'utf8');
+      if (byteLen > 72) {
+        manifestIssues.push(`CRÍTICO: Línea ${i + 1} de MANIFEST.MF supera los 72 bytes UTF-8 (${byteLen} bytes), violando la especificación OSGi/JAR de SAP CPI.`);
+      }
+    }
+  } else if (nestedZipFiles.length === 0 && !sourceName.toLowerCase().endsWith('.iflw') && !sourceName.toLowerCase().endsWith('.xml')) {
+    manifestIssues.push(`CRÍTICO: No se encontró 'META-INF/MANIFEST.MF' en el paquete.`);
+  }
+
   const isScriptCollection = manifestData.bundleType === 'ScriptCollection' || (iflwFiles.length === 0 && groovyScripts.length > 0 && manifestFiles.length > 0);
   const heuristics = isScriptCollection
     ? {
@@ -423,7 +440,8 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
         contentModifiersReadingBodyToProperty: [],
         referencedScripts: groovyScripts.map((g) => g.name),
         referencedScriptCollections: [],
-        score: manifestData.provideCapability && groovyScripts.length > 0 ? 100 : 85,
+        manifestIssues,
+        score: Math.max(0, (manifestData.provideCapability && groovyScripts.length > 0 ? 100 : 85) - manifestIssues.length * 40),
         stats: {
           subprocesses: 0,
           groovyCalls: groovyScripts.length,
@@ -434,6 +452,12 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
         }
       }
     : analyzeIflwLocally(iflwFiles[0]?.text || '');
+  if (!isScriptCollection) {
+    heuristics.manifestIssues = manifestIssues;
+    if (manifestIssues.length > 0) {
+      heuristics.score = Math.max(0, heuristics.score - manifestIssues.length * 40);
+    }
+  }
 
   const nestedBundles = nestedZipFiles.map((nz) => {
     try {
@@ -496,6 +520,9 @@ if (isMain) {
       console.log(`=== SAP CPI ZIP INSPECTOR & BPMN 2.0 HEURISTIC AUDITOR ===`);
       console.log(`Paquete: ${report.fileName} (${report.totalFiles} archivos)`);
       console.log(`Bundle-SymbolicName: ${report.manifestData.symbolicName} (v${report.manifestData.version}) | Tipo: ${report.manifestData.bundleType}`);
+      if (report.heuristics.manifestIssues && report.heuristics.manifestIssues.length > 0) {
+        report.heuristics.manifestIssues.forEach((mi) => console.log(`  [!] ${mi}`));
+      }
       console.log(`Catálogo: ${report.catalog.iflwFiles.length} .iflw | ${report.catalog.groovyScripts.length} .groovy | ${report.catalog.xsltMappings.length} .xslt | ${report.catalog.parameterFiles.length} .prop`);
       if (report.nestedBundles && report.nestedBundles.length > 0) {
         console.log(`\n--- PAQUETES ANIDADOS DETECTADOS (${report.nestedBundles.length}) ---`);
