@@ -83,14 +83,14 @@ sap-cpi-skills-pack/
 
 | # | Skill | Funcionalidad Principal | Script CLI |
 | :- | :--- | :--- | :--- |
-| **1** | `sap-cpi-zip-inspector` | Descomprime artefactos `.zip` de SAP CPI, inventaría recursos (`MANIFEST.MF`, `.iflw`, `.groovy`, `.xslt`, `.prop`) y audita 5 riesgos críticos en BPMN 2.0. | `inspect-iflow-zip.mjs` |
-| **2** | `sap-cpi-groovy-generator` | Genera y valida scripts Groovy 2.4+ aplicando 10 directivas de arquitectura, prevención de OOM, anti-XXE y *Ensure Upgrade Readiness*. | `validate-groovy.mjs` |
+| **1** | `sap-cpi-zip-inspector` | Descomprime artefactos `.zip` (`IntegrationFlow`, `ScriptCollection` o paquetes anidados), redacta `.prop` por privacidad, inventaría recursos y audita riesgos BPMN 2.0 y reglas CPILint. | `inspect-iflow-zip.mjs` |
+| **2** | `sap-cpi-groovy-generator` | Genera y valida scripts Groovy (Script v1 y Groovy 4 v2 API) individualmente o en lote (carpetas/`.zip`), aplicando prevención de OOM, anti-XXE, `@Field final` y *Ensure Upgrade Readiness*. | `validate-groovy.mjs` |
 | **3** | `sap-cpi-code-auditor` | Audita scripts Groovy calculando una puntuación determinista (`0-100`), desglosa vulnerabilidades por severidad y verifica refactorizaciones. | `audit-groovy.mjs` |
-| **4** | `sap-cpi-xslt-studio` | Genera y valida transformaciones XSLT 1.0 (Xalan) y XSLT 2.0/3.0 (Saxon-HE), bloqueando sintaxis híbrida inválida y validando `cpi:setHeader`/`cpi:setProperty`. | `validate-xslt.mjs` |
-| **5** | `sap-cpi-regex-studio` | Diseña y prueba expresiones regulares con anclaje `^...$`, detector estático de *Catastrophic Backtracking (ReDoS)* y expresiones Apache Camel Simple. | `test-camel-regex.mjs` |
-| **6** | `sap-cpi-xsd-studio` | Infiere esquemas W3C XSD 1.0 combinando múltiples muestras JSON (`minOccurs="0"` automático) y valida las restricciones del Message Mapping de SAP CPI. | `validate-xsd.mjs` |
-| **7** | `sap-cpi-mock-data-generator` | Valida sintaxis XML/JSON, comprueba la correlación E2E de identificadores de negocio entre múltiples contratos y empaqueta suites `.zip`. | `pack-mock-suite.mjs` |
-| **8** | `sap-cpi-architect` | **Modo 1:** Construye paquetes OSGi `.zip` duales (iFlow + Script Collection) listos para importar en SAP CPI. **Modo 2:** Extrae metadatos y valida documentación técnica en 8 secciones. | `build-cpi-package.mjs`<br>`extract-for-docs.mjs` |
+| **4** | `sap-cpi-xslt-studio` | Genera y valida transformaciones XSLT 1.0 (Xalan) y XSLT 2.0/3.0 (Saxon-HE), incluyendo `json-to-xml()`, `<xsl:param>` e interacción con cabeceras/propiedades del Exchange (`cpi:*` / `sapci:*`). | `validate-xslt.mjs` |
+| **5** | `sap-cpi-regex-studio` | Diseña y prueba expresiones regulares con anclaje `^...$`, detector estático de *Catastrophic Backtracking (ReDoS)* y expresiones Apache Camel Simple (`date-with-timezone`, listas `not in`). | `test-camel-regex.mjs` |
+| **6** | `sap-cpi-xsd-studio` | Infiere esquemas W3C XSD 1.0 combinando múltiples muestras JSON (`minOccurs="0"` y `nillable="true"` automático según SAP Note `2624922`) y valida reglas de Message Mapping. | `validate-xsd.mjs` |
+| **7** | `sap-cpi-mock-data-generator` | Valida sintaxis XML/JSON (incluyendo estándares IDoc `EDI_DC40` y OData `$batch`), comprueba la correlación E2E entre múltiples contratos y empaqueta suites `.zip`. | `pack-mock-suite.mjs` |
+| **8** | `sap-cpi-architect` | **Modo 1:** Construye paquetes OSGi `.zip` duales (iFlow + Script Collection). **Modo 2:** Extrae metadatos y valida documentación técnica en 8 secciones. **Modo 3:** Clona y adapta bundles `.zip` de referencia según nuevas especificaciones API. | `build-cpi-package.mjs`<br>`extract-for-docs.mjs`<br>`clone-iflow-bundle.mjs` |
 
 ---
 
@@ -98,20 +98,22 @@ sap-cpi-skills-pack/
 
 ### 5.1. Inspector y Auditor de Paquetes iFlow (`sap-cpi-zip-inspector`)
 
-Analiza un paquete `.zip` exportado de SAP CPI y detecta ausencia de `Exception Subprocess`, llamadas `http://` sin TLS, credenciales o URLs rígidas sin `{{param}}`, `ExternalCall` sin timeout y copias de `${body}` en propiedades del Exchange:
+Analiza un paquete `.zip` exportado de SAP CPI (`IntegrationFlow`, `ScriptCollection` o paquetes compuestos con `.zip` anidados), redacta automáticamente los valores sensibles de `.prop` como `[REDACTED]` y detecta ausencia de `Exception Subprocess`, llamadas `http://` sin TLS, credenciales o URLs sin `{{param}}`, `ExternalCall` sin timeout, copias de `${body}` en propiedades, Splitters sin streaming y reglas CPILint (`CleartextBasicAuth`, `CsrfProtectionRequired`):
 
 ```bash
 node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip
 node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --json
-node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --extract-to ./inspeccion
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --extract-dir ./inspeccion
 ```
 
 ### 5.2. Validador y Linter de Scripts Groovy (`sap-cpi-groovy-generator`)
 
-Verifica el cumplimiento de la firma oficial SAP CPI, `Ensure Upgrade Readiness` (cero wildcards `.*`, cero imports sin usar, cero APIs internas de Camel), protección anti-XXE y activación selectiva de las 10 directivas (`jsonSlurper`, `streaming`, `xmlParser`, `mpl`, `secureStore`, `valueMapping`, `utcDates`, `headers`, `sql`, `throwEx`):
+Verifica el cumplimiento de la firma oficial SAP CPI (`com.sap.gateway.ip.core.customdev.util.Message` v1 o `com.sap.it.script.v2.api.Message` v2 en Groovy 4), `Ensure Upgrade Readiness` (cero wildcards `.*`, cero imports sin usar, bloqueo de frameworks restringidos como Camel interno, OSGi, Spring, HikariCP, Groovy SQL, Quartz o Saxon), inmutabilidad `@Field final`, prevención de `GroovyShell` Metaspace OOM y protección anti-XXE. Soporta validar un script individual, una carpeta completa o un `.zip`:
 
 ```bash
-node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./script.groovy --directives=jsonSlurper,mpl,utcDates --strict
+node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./script.groovy --strict
+node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./carpeta_scripts --strict
+node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./SC_Collection.zip --strict
 ```
 
 ### 5.3. Auditor de Calidad y Refactorización Groovy (`sap-cpi-code-auditor`)
@@ -171,15 +173,24 @@ Valida sintaxis XML/JSON, verifica que los identificadores de negocio (`orderId`
 node skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs --spec ./suite-spec.json --out ./MockSuite.zip
 ```
 
-### 5.8. Arquitecto SAP CPI: Empaquetado OSGi y Documentación (`sap-cpi-architect`)
+### 5.8. Arquitecto SAP CPI: Empaquetado OSGi, Clonación y Documentación (`sap-cpi-architect`)
 
 - **Modo 1 (`build-cpi-package.mjs`):** Construye los paquetes `.zip` con estructura OSGi (`META-INF/MANIFEST.MF`, `.project`, `.iflw`, `parameters.prop` y `Script Collection` independiente vinculada por `Provide-Capability` / `Require-Capability`):
   ```bash
-  node skills/sap-cpi-architect/scripts/build-cpi-package.mjs --spec ./bundle-spec.json --out-dir ./dist
+  node skills/sap-cpi-architect/scripts/build-cpi-package.mjs ./bundle-spec.json --out-dir ./dist
   ```
 - **Modo 2 (`extract-for-docs.mjs`):** Extrae la topología completa de un paquete `.zip` y valida que el documento técnico Markdown cumpla las 8 secciones corporativas:
   ```bash
   node skills/sap-cpi-architect/scripts/extract-for-docs.mjs ./Paquete_iFlow.zip --validate-doc ./Documentacion_Tecnica.md
+  ```
+- **Modo 3 (`clone-iflow-bundle.mjs`):** Clona un iFlow `.zip` de referencia adaptando su identificador OSGi, scripts `.groovy` invocados y rutas XPath del Splitter (manteniendo intactos sus diagramas BPMN2 y archivos `.prop`), o inyecta nuevos scripts validados dentro de una `ScriptCollection.zip`:
+  ```bash
+  node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \
+    --source ./Referencia_iFlow.zip \
+    --target-name Nuevo_iFlow_v1 \
+    --out ./dist/Nuevo_iFlow_v1.zip \
+    --replace ScriptOrigen.groovy=ScriptNuevo.groovy \
+    --xpath //nodoOrigen=//nodoNuevo
   ```
 
 ---

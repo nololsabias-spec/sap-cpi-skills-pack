@@ -19,3 +19,8 @@
 ## 5. Content Modifiers que Copian `${body}` a Exchange Property (Severidad: CRÍTICA, -30 pts c/u)
 - **Regla**: Evitar asignar `${body}` o `${in.body}` en una Exchange Property dentro de un Content Modifier.
 - **Impacto**: Duplica el payload completo en la memoria Heap de la JVM durante toda la vida del Exchange, provocando `OutOfMemoryError: Java heap space` con mensajes medianos o grandes.
+
+## 6. Reglas Adicionales de Gobernanza SAP CPI y CPILint (Severidad: ADVISORY)
+- **Streaming en Splitters (`splittersWithoutStreaming`)**: Los pasos `General Splitter` e `Iterating Splitter` deben activar `<key>streaming</key><value>true</value>` para procesar lotes XML/JSON por fragmentos sin cargar todo el árbol DOM en memoria.
+- **Ruta por Defecto en Routers (`routersWithoutDefaultRoute`)**: Todo `<bpmn2:exclusiveGateway>` debe definir una ruta `default` para evitar errores en tiempo de ejecución cuando un mensaje no cumple ninguna condición.
+- **Autenticación y Protección CSRF (`CleartextBasicAuth` / `CsrfProtectionRequired`)**: Se recomienda sustituir `BasicAuthentication` por OAuth2 o Client Certificate, y mantener activa la protección CSRF (`xsrfProtection=1`) en endpoints modificadores HTTP/HTTPS.

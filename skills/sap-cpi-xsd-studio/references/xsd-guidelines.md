@@ -18,6 +18,7 @@
 - Booleanos (`true`/`false`): `xsd:boolean`
 - Textos e identificadores alfanuméricos: `xsd:string`
 
-## 4. Fusión Multi-Muestra (Multi-Payload Merge)
+## 4. Fusión Multi-Muestra (Multi-Payload Merge) y Regla `nillable` (SAP Note 2624922)
 - Al recibir 2 o más payloads de ejemplo (p. ej., un pedido nacional sin aduanas y un pedido internacional con bloque de aduanas), el esquema XSD debe incluir la unión de todos los campos, asignando `minOccurs="0"` a aquellos campos que no aparezcan en el 100% de las muestras.
+- **Compatibilidad `nillable="true"` + `minOccurs="0"`**: Si un campo puede venir con valor `null` en JSON, combina siempre `minOccurs="0" nillable="true"`. Declarar únicamente `nillable="true"` (`minOccurs="1"`) exige que la etiqueta XML exista físicamente con `xsi:nil="true"`, lo que provoca errores en *XML Validator* y *Message Mapping* (`"Queue has not enough values in context"`) cuando el *JSON to XML Converter* de SAP CPI omite propiedades nulas.
 - Los arrays se modelan con `minOccurs="0" maxOccurs="unbounded"`.

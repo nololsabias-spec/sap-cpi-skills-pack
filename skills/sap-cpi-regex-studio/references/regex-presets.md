@@ -32,3 +32,8 @@
 - **Campo**: `${header.X-Correlation-ID}`
 - **Patrón**: `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`
 - **Muestra MATCH**: `c9bf9e57-1685-4c89-bafb-ff5af830be8a`
+
+## 6. Lista de Inclusión / Exclusión (`in` / `not in`) y Fechas con Zona Horaria
+- **Alternativa oficial a `not in` en Router**: `${property.CountryCode} not regex '^(ES|PT|FR|IT)$'`
+- **Timestamp con Zona Horaria en Content Modifier (sin Groovy)**: `${date-with-timezone:now:UTC:yyyy-MM-dd'T'HH:mm:ss'Z'}`
+- **XPath resiliente a Namespaces en Content Modifier**: `//*[local-name()='OrderNumber']/text()` (extraer siempre a una Exchange Property tipada `java.lang.String` antes del Router).
