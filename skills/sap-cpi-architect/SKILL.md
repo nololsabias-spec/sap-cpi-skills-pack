@@ -1,0 +1,73 @@
+---
+name: sap-cpi-architect
+description: >-
+  Use this skill when the user wants to: (Mode 1) Design and package a complete SAP Cloud
+  Integration (CPI / Integration Suite) iFlow + Script Collection OSGi .zip bundle from a
+  natural-language functional specification using the 3-stage pipeline (Plan -> BPMN2 .iflw
+  XML -> Groovy Scripts), OR (Mode 2) Reverse-engineer and generate comprehensive 8-section
+  technical documentation from an existing iFlow .zip bundle.
+---
+
+# SAP CPI Architect: iFlow Generator & Reverse-Engineering Documentor
+
+Operates in two specialized modes matching `CpiArchitect.jsx`:
+- **Modo 1 · Generar iFlow + Script Collection (`.zip`)**: Designs an enterprise-grade iFlow in 3 stages (Plan -> BPMN2 `.iflw` XML -> Groovy Scripts), validates all artifacts, and builds real OSGi `.zip` bundles importable into SAP Integration Suite.
+- **Modo 2 · Documentar iFlow Existente**: Extracts an existing `.zip` bundle, runs static heuristics, and generates the 8-section technical & architectural documentation.
+
+---
+
+## Modo 1: Generar iFlow + Script Collection (Pipeline en 3 Etapas)
+
+### Etapa 1: Plan Arquitectónico (`plan.json`)
+Design the JSON plan containing:
+- `iflowName` (PascalCase with underscores, e.g., `Order_Sync_S4HANA`)
+- `scriptCollectionName` (`SC_<iflowName>`)
+- `businessDescription` & `technicalSummary`
+- `parameters` (every external URL, credential alias, or timeout externalized as `KEY: defaultValue`)
+- `components[]` (ordered steps: `StartEvent`, `ContentModifier`, `RequestReply`, `Router`, `ScriptTask`, `ExceptionSubprocess`, `EndEvent`)
+- `groovyScriptsPlan[]` (`{ fileName, purpose }`)
+
+### Etapa 2: BPMN 2.0 XML (`<iflowName>.iflw`)
+Generate the complete BPMN 2.0 XML implementing every step of the plan:
+- Must include `<bpmn2:definitions>` with namespaces `bpmn2`, `bpmndi`, `ifl`, `dc`, `di`.
+- Must include `<bpmn2:collaboration>` (Sender, Receiver, Integration Process) and `<bpmn2:process>`.
+- Must include `<bpmn2:subProcess triggeredByEvent="true" ifl:type="ExceptionSubProcess">`.
+- All external endpoints must use `https://` and externalized parameters `{{PARAM_NAME}}`.
+- All synchronous `ExternalCall` tasks must declare an explicit `timeout` property (e.g., `60000`).
+- Every Script Task must reference `<ifl:property key="scriptFunction" value="processData"/>` and `<ifl:property key="script" value="<fileName>"/>`.
+- Must include `<bpmndi:BPMNDiagram>` coordinates so the SAP CPI Web UI editor renders the diagram cleanly.
+
+### Etapa 3: Scripts Groovy (`src/main/resources/script/*.groovy`)
+Author each Groovy script planned in `groovyScriptsPlan[]` following all SAP CPI Scripting Guidelines (`def Message processData(Message message)`, `Reader` streaming, `JsonSlurperClassic`, `XmlSlurper` with `disallow-doctype-decl`, `ZoneId.of("UTC")`, conditional MPL attachments, `CPI-ERR:` exception rethrow).
+
+### Etapa 4: Validación y Construcción de los Bundles OSGi (`.zip`)
+Save your specification JSON (containing `iflowName`, `scriptCollectionName`, `businessDescription`, `parameters`, `iflwXml`, and `groovyScripts`) and execute `build-cpi-package.mjs`:
+
+```bash
+node ./scripts/build-cpi-package.mjs <spec.json | --demo> --out-dir ./dist-packages
+```
+
+* OSGi Packager & Validator script: [build-cpi-package.mjs](./scripts/build-cpi-package.mjs)
+* OSGi Bundle Specification: [osgi-bundle-spec.md](./references/osgi-bundle-spec.md)
+* **Verification Gate**: `build-cpi-package.mjs` validates both the `.iflw` BPMN2 XML and every Groovy script before producing `<iflowName>.zip`, `<scriptCollectionName>.zip`, and `Paquete_<iflowName>.zip`. Fix any validation error reported by the script.
+
+---
+
+## Modo 2: Documentar iFlow Existente (Ingeniería Inversa en 8 Secciones)
+
+### Paso 1: Extraer Contexto y Heurísticas del `.zip`
+Run `extract-for-docs.mjs` on the existing `.zip` bundle:
+
+```bash
+node ./scripts/extract-for-docs.mjs <existing-iflow.zip | --demo>
+```
+
+* Extractor & Doc Validator script: [extract-for-docs.mjs](./scripts/extract-for-docs.mjs)
+* 8-Section Template: [doc-template-8-sections.md](./references/doc-template-8-sections.md)
+
+### Paso 2: Redactar y Validar las 8 Secciones Obligatorias
+Write the Markdown documentation following the exact 8 headings in [doc-template-8-sections.md](./references/doc-template-8-sections.md) and validate the generated `.md` file with:
+
+```bash
+node ./scripts/extract-for-docs.mjs --validate-doc <generated-doc.md>
+```

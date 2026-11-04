@@ -1,0 +1,21 @@
+# Reglas de Auditoría de Arquitectura SAP CPI (.iflw / BPMN 2.0)
+
+## 1. Ausencia de Exception Subprocess (Severidad: CRÍTICA, -30 pts)
+- **Regla**: Todo proceso de integración (`<bpmn2:process>`) debe contar con un `<bpmn2:subProcess triggeredByEvent="true">` y `ifl:type="ExceptionSubProcess"`.
+- **Impacto**: Sin este subproceso, cualquier excepción detiene el flujo abruptamente sin registro enriquecido en el MPL ni notificación/compensación hacia los sistemas llamadores.
+
+## 2. Canales Inseguros sin Cifrado TLS (Severidad: CRÍTICA, -30 pts c/u)
+- **Regla**: Todas las propiedades de adaptadores (`address`, `httpAddress`, `url`) deben utilizar `https://` o cifrado TLS a nivel de transporte.
+- **Impacto**: La transmisión en texto plano (`http://`) expone payloads corporativos y cabeceras de autenticación en tránsito.
+
+## 3. Falta de Externalización en Parámetros Sensibles (Severidad: ALTA, -15 pts c/u)
+- **Regla**: Ninguna URL de servidor externo, credencial, token o alias debe incrustarse en duro en el XML del flujo. Debe utilizarse la sintaxis de parámetros externalizados de SAP CPI: `{{NombreParametro}}`.
+- **Impacto**: Impide el transporte limpio entre entornos (DEV -> QAS -> PRD) sin editar manualmente el artefacto y expone datos de infraestructura.
+
+## 4. Adaptadores Síncronos Request-Reply sin Timeout Explícito (Severidad: MEDIA, -5 pts c/u)
+- **Regla**: Todo `<bpmn2:serviceTask>` o `<bpmn2:callActivity>` con `activityType="ExternalCall"` debe declarar un timeout explícito razonable (p. ej., `60000` ms).
+- **Impacto**: Si el sistema destino no responde, los hilos worker del tenant de SAP CPI quedan bloqueados indefinidamente causando denegación de servicio.
+
+## 5. Content Modifiers que Copian `${body}` a Exchange Property (Severidad: CRÍTICA, -30 pts c/u)
+- **Regla**: Evitar asignar `${body}` o `${in.body}` en una Exchange Property dentro de un Content Modifier.
+- **Impacto**: Duplica el payload completo en la memoria Heap de la JVM durante toda la vida del Exchange, provocando `OutOfMemoryError: Java heap space` con mensajes medianos o grandes.

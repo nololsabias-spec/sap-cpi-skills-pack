@@ -1,0 +1,33 @@
+{
+  "name": "sap-cpi-skills-pack",
+  "version": "1.0.0",
+  "description": "Paquete portable de Skills y Scripts de validación determinista para SAP Cloud Integration (SAP Integration Suite / CPI). Cero dependencias externas.",
+  "type": "module",
+  "scripts": {
+    "test": "node ./verify-all.mjs",
+    "verify": "node ./verify-all.mjs",
+    "install-skills": "node ./setup-skills.mjs",
+    "demo:zip": "node ./skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs --demo",
+    "demo:auditor": "node ./skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs --demo",
+    "demo:xslt": "node ./skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs --demo",
+    "demo:regex": "node ./skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs --demo",
+    "demo:xsd": "node ./skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs --demo",
+    "demo:mock": "node ./skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs --demo",
+    "demo:architect": "node ./skills/sap-cpi-architect/scripts/build-cpi-package.mjs --demo"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "sap-cpi",
+    "sap-integration-suite",
+    "btp",
+    "groovy",
+    "xslt",
+    "iflow",
+    "xsd",
+    "camel-simple",
+    "agent-skills"
+  ],
+  "license": "MIT"
+}

@@ -1,0 +1,28 @@
+# Dependencias y compilaciones
+node_modules/
+dist/
+build/
+
+# Artefactos y salidas temporales de los scripts
+dist-packages/
+mock-output/
+extracted-iflows/
+*.tmp
+*.temp
+*.bak
+*.log
+npm-debug.log*
+
+# Variables de entorno y secretos locales
+.env
+.env.*
+!.env.example
+
+# Archivos de sistema operativo y editores
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
