@@ -177,20 +177,69 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
       );
     }
 
-    if (fullImport === 'groovy.util.XmlSlurper' || fullImport === 'groovy.util.XmlParser') {
+    const isGroovy4V2 = /import\s+com\.sap\.it\.script\.v2\.api\.Message\b/.test(cleanCode);
+    if (!isGroovy4V2 && (fullImport === 'groovy.xml.XmlSlurper' || fullImport === 'groovy.xml.XmlParser')) {
       addFinding(
-        'MEDIUM',
+        'CRITICAL',
+        'Upgrade Readiness & Imports',
+        'GROOVY24_INVALID_XMLSLURPER_IMPORT',
+        `Error de compilación en Groovy 2.4: unable to resolve class ${fullImport}`,
+        `En el motor Groovy 2.4 de SAP CPI (Script v1 con \`com.sap.gateway.ip.core.customdev.util.Message\`), \`${fullImport}\` no existe y falla al compilar con \`unable to resolve class ${fullImport}\`.`,
+        'Usa `import groovy.util.XmlSlurper` en scripts Groovy 2.4 (Script v1).',
+        lineNo
+      );
+    } else if (isGroovy4V2 && (fullImport === 'groovy.util.XmlSlurper' || fullImport === 'groovy.util.XmlParser')) {
+      addFinding(
+        'HIGH',
         'Upgrade Readiness & Imports',
         'DEPRECATED_GROOVY_UTIL_XML',
-        `Paquete deprecado (${fullImport})`,
-        '`groovy.util.Xml*` está eliminado/deprecado en Groovy 4.',
-        'Usa `groovy.xml.XmlSlurper`.',
+        `Paquete eliminado en Groovy 4 (${fullImport})`,
+        'En scripts Groovy 4 (`com.sap.it.script.v2.api.Message`), `groovy.util.Xml*` fue movido a `groovy.xml.*`.',
+        'Usa `import groovy.xml.XmlSlurper` cuando emplees la API Script v2 (Groovy 4).',
         lineNo
       );
     }
   }
 
-  // 3. Dynamic code evaluation Metaspace OOM (GroovyShell / Eval.me) (CRITICAL -30)
+  // Check inline groovy.xml.XmlSlurper in Groovy 2.4 scripts (when not caught by import line)
+  const isGroovy4V2Global = /import\s+com\.sap\.it\.script\.v2\.api\.Message\b/.test(cleanCode);
+  if (
+    !isGroovy4V2Global &&
+    /\bgroovy\.xml\.XmlSlurper\b/.test(cleanCode) &&
+    !findings.some((f) => f.ruleId === 'GROOVY24_INVALID_XMLSLURPER_IMPORT')
+  ) {
+    addFinding(
+      'CRITICAL',
+      'Upgrade Readiness & Imports',
+      'GROOVY24_INVALID_XMLSLURPER_IMPORT',
+      'Error de compilación en Groovy 2.4: unable to resolve class groovy.xml.XmlSlurper',
+      'En el motor Groovy 2.4 de SAP CPI (`com.sap.gateway.ip.core.customdev.util.Message`), `groovy.xml.XmlSlurper` no existe y falla al compilar.',
+      'Usa `import groovy.util.XmlSlurper` y `new XmlSlurper(false, false)`.',
+      findLineNumber(/\bgroovy\.xml\.XmlSlurper\b/)
+    );
+  }
+
+  // 3. Reader.getText(charset) MissingMethodException (CRITICAL -30)
+  // In Java/Groovy, Reader/BufferedReader/StringReader is already a character stream and has NO getText(String charset) overload!
+  const usesReader = /\b(?:Reader|BufferedReader|StringReader)\b/.test(cleanCode);
+  const usesInputStream = /\bInputStream\b/.test(cleanCode);
+  if (
+    (usesReader && !usesInputStream && /\.getText\s*\(\s*[^)\s]+\s*\)/.test(cleanCode)) ||
+    /\b(?:reader|bodyReader|stringReader|bufferedReader)\s*(?:\?\.|\.)getText\s*\(\s*[^)\s]+\s*\)/i.test(cleanCode) ||
+    /\.getBody\s*\(\s*(?:java\.io\.)?Reader(?:\.class)?\s*\)\s*(?:\?\.|\.)getText\s*\(\s*[^)\s]+\s*\)/.test(cleanCode)
+  ) {
+    addFinding(
+      'CRITICAL',
+      'Upgrade Readiness & Imports',
+      'READER_GETTEXT_CHARSET_ERROR',
+      'MissingMethodException: Reader.getText(String) no existe en Groovy/Java',
+      'En Java y Groovy, `Reader` (`BufferedReader`, `StringReader`) ya es un flujo de caracteres y NO dispone de un método `.getText(String charset)` (como `.getText(\'UTF-8\')`). Invocarlo lanza `MissingMethodException: No signature of method: java.io.BufferedReader.getText() is applicable for argument types: (java.lang.String)`.',
+      'Llama a `bodyReader.getText()` **sin argumentos**, pasa `bodyReader` directamente a `.parse(bodyReader)`, o usa `InputStream` si necesitas indicar codificación.',
+      findLineNumber(/\.getText\s*\(\s*[^)\s]+\s*\)/)
+    );
+  }
+
+  // 4. Dynamic code evaluation Metaspace OOM (GroovyShell / Eval.me) (CRITICAL -30)
   if (/\bGroovyShell\s*\(/.test(cleanCode) || /\bEval\.(?:me|x|xy|xyz)\s*\(/.test(cleanCode)) {
     addFinding(
       'CRITICAL',
@@ -251,7 +300,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
       'DOM_XMLPARSER_OOM',
       'Uso de XmlParser (DOM completo en memoria)',
       '`XmlParser` construye un árbol DOM mutable pesado en el Heap y carece de streaming.',
-      'Reemplaza `XmlParser` por `new groovy.xml.XmlSlurper(false, false)` con `disallow-doctype-decl = true`.',
+      'Reemplaza `XmlParser` por `new XmlSlurper(false, false)` (`import groovy.util.XmlSlurper` en Groovy 2.4 / `import groovy.xml.XmlSlurper` en Groovy 4) con `disallow-doctype-decl = true`.',
       findLineNumber(/\bXmlParser\b/)
     );
   }

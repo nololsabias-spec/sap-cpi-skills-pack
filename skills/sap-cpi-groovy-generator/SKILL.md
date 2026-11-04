@@ -31,10 +31,13 @@ Identify from the user's request:
 
 ### Step 2: Author the Canonical Groovy Script
 Write the Groovy script adhering to these mandatory SAP Help Portal rules:
-1. **Ensure Upgrade Readiness & Groovy 4 Compatibility**:
+1. **Ensure Upgrade Readiness & Groovy 2.4 vs Groovy 4 Package Compatibility**:
    - Include **only** the `import` statements actually used in the script. Never use wildcard imports (`import java.util.*`).
-   - Support either `import com.sap.gateway.ip.core.customdev.util.Message` (Script v1) or `import com.sap.it.script.v2.api.Message` (Script v2 / Groovy 4).
-   - Never import restricted/internal frameworks banned by SAP's *"Restrict usage to supported frameworks and libraries"* guideline (`org.apache.camel.impl.*`, `org.apache.camel.processor.*`, `com.sap.it.script.v2.api.proxy.*`, `org.osgi.framework.*`, `org.springframework.*`, `com.zaxxer.hikari.*`, `groovy.sql.*`, `org.quartz.*`, `net.sf.saxon.*`, or deprecated `groovy.util.XmlSlurper`).
+   - Support either `import com.sap.gateway.ip.core.customdev.util.Message` (Script v1 / Groovy 2.4) or `import com.sap.it.script.v2.api.Message` (Script v2 / Groovy 4).
+   - **`XmlSlurper` Package by Engine Version (`CRITICAL` Compile Error Prevention)**:
+     - In **SAP CPI Script v1 (Groovy 2.4 — `com.sap.gateway.ip.core.customdev.util.Message`)**, `XmlSlurper` lives in **`groovy.util.XmlSlurper`** (`import groovy.util.XmlSlurper`). **NEVER** write `import groovy.xml.XmlSlurper` in a Groovy 2.4 script — `groovy.xml.XmlSlurper` does not exist in Groovy 2.4 and fails at compilation with `unable to resolve class groovy.xml.XmlSlurper`.
+     - Only use `import groovy.xml.XmlSlurper` when explicitly writing a **Groovy 4 Script v2** (`import com.sap.it.script.v2.api.Message`).
+   - Never import restricted/internal frameworks banned by SAP's *"Restrict usage to supported frameworks and libraries"* guideline (`org.apache.camel.impl.*`, `org.apache.camel.processor.*`, `com.sap.it.script.v2.api.proxy.*`, `org.osgi.framework.*`, `org.springframework.*`, `com.zaxxer.hikari.*`, `groovy.sql.*`, `org.quartz.*`, `net.sf.saxon.*`).
 2. **Signature, Local Scoping & Return**:
    - Always use `def Message processData(Message message)` and return `message`.
    - Always declare local variables with `def` or an explicit type (`String`, `Map`, etc.) so they are never placed in the global script `Binding` (which leaks memory until iFlow redeployment).
@@ -42,13 +45,14 @@ Write the Groovy script adhering to these mandatory SAP Help Portal rules:
 3. **Single-Argument `setBody` & `GString` Safety**:
    - `message.setBody(output)` accepts **only one argument**. Always set the MIME type and charset separately via `message.setHeader("Content-Type", "application/json; charset=utf-8")`.
    - When passing Groovy interpolated strings (`"ID_${id}"`) into `setHeader` or `setProperty`, explicitly coerce them to `java.lang.String` using `.toString()` or `as String` to prevent `GStringImpl` type mismatch errors in strict Java adapters.
-4. **Heap Safety, Streaming & Thread Safety**:
-   - Never use `message.getBody(String)` or `new XmlParser()`. Always read payloads via `Reader bodyReader = message.getBody(java.io.Reader)` (or `InputStream`) and close it deterministically in a `finally { bodyReader?.close() }` block or `.withReader`.
+4. **Heap Safety, Streaming, `Reader.getText()` Signature & Thread Safety**:
+   - Prefer reading payloads via `Reader bodyReader = message.getBody(java.io.Reader)` and passing `bodyReader` directly to the parser (`jsonSlurper.parse(bodyReader)` / `xmlSlurper.parse(bodyReader)`), closing it deterministically in `finally { bodyReader?.close() }` or `.withReader`.
+   - **Prohibition of `Reader.getText('UTF-8')` (`MissingMethodException`)**: In Java and Groovy, `Reader` (`BufferedReader`, `StringReader`) is already a character stream and **does NOT have a `.getText(String charset)` method**. Calling `bodyReader.getText('UTF-8')` throws `MissingMethodException: No signature of method: java.io.BufferedReader.getText() is applicable for argument types: (java.lang.String) values: [UTF-8]` (or `java.io.StringReader.getText()`). If you must materialize text from a `Reader`, call `bodyReader.getText()` **with zero arguments**!
    - For ultra-large XML payloads (> 30–50 MB), prefer StAX (`javax.xml.stream.XMLStreamReader` / `XMLStreamWriter`) event streaming over tree parsers.
    - Never declare `static def` variables, and if `@Field` (`groovy.transform.Field`) is used for script-level constants, always declare it `@Field final` (mutable `@Field` properties cause thread-safety race conditions across concurrent messages).
 5. **JSON & XML Safety**:
    - For JSON: Always use `groovy.json.JsonSlurperClassic` (never `groovy.json.JsonSlurper`).
-   - For XML: Always use `new groovy.xml.XmlSlurper(false, false)` with `disallow-doctype-decl = true`, `external-general-entities = false`, and `external-parameter-entities = false`.
+   - For XML: Always use `new XmlSlurper(false, false)` (`import groovy.util.XmlSlurper` in Groovy 2.4 / `import groovy.xml.XmlSlurper` in Groovy 4 v2) with `disallow-doctype-decl = true`, `external-general-entities = false`, and `external-parameter-entities = false`.
 6. **Multi-Branch Gather Deduplication & Fallback Chains**:
    - When a script aggregates payloads after a `Parallel Multicast` + `Gather` step, deduplicate records in memory using a keyed `Map<String, Object>` (e.g., by `sys_id` or primary business key) before building the XML/JSON output for a downstream `Splitter`.
    - When an API specification defines primary vs. fallback/legacy fields or parent-entity dot-walking (`parent.field`), implement explicit Elvis fallback chains (`record.primaryField ?: record.legacyField ?: null`).

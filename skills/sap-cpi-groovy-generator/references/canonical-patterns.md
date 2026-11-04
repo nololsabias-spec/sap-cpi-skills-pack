@@ -5,7 +5,7 @@ Procesamiento de XML masivo sin saturar el Heap Memory usando `XmlSlurper` segur
 
 ```groovy
 import com.sap.gateway.ip.core.customdev.util.Message
-import groovy.xml.XmlSlurper
+import groovy.util.XmlSlurper
 import groovy.xml.StreamingMarkupBuilder
 import java.io.Reader
 

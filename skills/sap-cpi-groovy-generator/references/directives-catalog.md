@@ -4,10 +4,10 @@
 
 1. **`xmlSlurper` (XXE Protection & Streaming)**:
    - Prohibido `XmlParser` y `message.getBody(String)`.
-   - Obtener reader UTF-8: `Reader reader = message.getBody(java.io.Reader)`.
-   - Parsear con `XmlSlurper` seguro deshabilitando entidades externas y DOCTYPE:
+   - Obtener reader UTF-8: `Reader reader = message.getBody(java.io.Reader)` (nunca llamar a `reader.getText('UTF-8')` porque `Reader.getText()` en Groovy no acepta parámetros de charset y lanza `MissingMethodException`; pasar `reader` directo a `.parse(reader)` o usar `reader.getText()` sin argumentos).
+   - Parsear con `XmlSlurper` seguro (`import groovy.util.XmlSlurper` en Groovy 2.4 Script v1; `import groovy.xml.XmlSlurper` solo en Groovy 4 Script v2) deshabilitando entidades externas y DOCTYPE:
      ```groovy
-     def parser = new groovy.xml.XmlSlurper(false, false)
+     def parser = new XmlSlurper(false, false)
      parser.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
      parser.setFeature("http://xml.org/sax/features/external-general-entities", false)
      parser.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
@@ -46,10 +46,12 @@
      }
      ```
 
-5. **`upgradeReadiness` (Ensure Upgrade Readiness)**:
+5. **`upgradeReadiness` (Ensure Upgrade Readiness & Engine Compatibility)**:
    - Incluir única y exclusivamente los imports utilizados en el script.
    - Prohibidos comodines (`import java.util.*`).
-   - Prohibidas clases internas de Camel (`org.apache.camel.impl.*`) o `groovy.util.XmlSlurper`.
+   - Prohibidas clases internas de Camel (`org.apache.camel.impl.*`).
+   - En scripts Groovy 2.4 (`com.sap.gateway.ip.core.customdev.util.Message`), usar siempre `import groovy.util.XmlSlurper` (nunca `import groovy.xml.XmlSlurper`, que falla al compilar con `unable to resolve class groovy.xml.XmlSlurper`). En Groovy 4 Script v2 (`com.sap.it.script.v2.api.Message`), usar `import groovy.xml.XmlSlurper`.
+   - Prohibido invocar `reader.getText('UTF-8')` sobre un `Reader` (`BufferedReader` / `StringReader`), ya que en Groovy `Reader.getText()` no admite argumento de codificación y lanza `MissingMethodException`.
 
 6. **`headersProperties` (Headers & Exchange Properties)**:
    - Prohibido sobrescribir prefijos reservados `Camel*` y `SAP_*`.

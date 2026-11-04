@@ -114,7 +114,10 @@ Use this mode when the user provides an existing SAP CPI package (`.zip` contain
 
 ### Paso 1: Adaptar o Crear los Scripts en la Script Collection
 1. Crea los nuevos scripts `.groovy` (y actualiza los existentes si el usuario lo solicitó) manteniendo el patrón arquitectónico de la Script Collection original.
-2. Asegúrate de que toda constante a nivel de script con `@Field` incluya `final` (`@Field final`), que el parseo XML deshabilite `disallow-doctype-decl`, y que el parseo JSON use `JsonSlurperClassic`.
+2. Asegúrate de que:
+   - En scripts Groovy 2.4 (`com.sap.gateway.ip.core.customdev.util.Message`), se importe **`groovy.util.XmlSlurper`** (nunca `groovy.xml.XmlSlurper`, que falla al compilar con `unable to resolve class groovy.xml.XmlSlurper`).
+   - Al leer desde un `Reader` (`BufferedReader` / `StringReader`), **nunca** se invoque `bodyReader.getText('UTF-8')` con parámetro de charset (lanza `MissingMethodException`); usa `bodyReader.getText()` **sin argumentos** o pasa `bodyReader` directamente a `.parse(bodyReader)`.
+   - Toda constante a nivel de script con `@Field` incluya `final` (`@Field final`), el parseo XML deshabilite `disallow-doctype-decl`, y el parseo JSON use `JsonSlurperClassic`.
 3. Valida todos los scripts en lote con `validate-groovy.mjs`:
 
 ```bash

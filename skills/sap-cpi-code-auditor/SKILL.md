@@ -36,8 +36,8 @@ node ./scripts/audit-groovy.mjs <original-script.groovy> [--json]
 ### Step 2: Refactor & Harden the Script (Stage 1)
 Following the findings from Step 1 and the canonical One-Shot pattern in [one-shot-refactor.md](./references/one-shot-refactor.md), produce the refactored Groovy script applying all 8 mandatory remediations:
 1. Eradicate all `static def` / `static Map` / `static List` fields.
-2. Replace `JsonSlurper` with `groovy.json.JsonSlurperClassic`; replace `XmlParser` with `new groovy.xml.XmlSlurper(false, false)` + `disallow-doctype-decl = true`.
-3. Replace `message.getBody(String)` with `Reader bodyReader = message.getBody(java.io.Reader)` and close it in `finally { bodyReader?.close() }`.
+2. Replace `JsonSlurper` with `groovy.json.JsonSlurperClassic`; replace `XmlParser` with `new XmlSlurper(false, false)` (`import groovy.util.XmlSlurper` in Groovy 2.4 Script v1 / `import groovy.xml.XmlSlurper` in Groovy 4 Script v2) + `disallow-doctype-decl = true`.
+3. Replace `message.getBody(String)` with `Reader bodyReader = message.getBody(java.io.Reader)` and close it in `finally { bodyReader?.close() }`. Never call `bodyReader.getText('UTF-8')` on a `Reader` (`BufferedReader` / `StringReader`) because `Reader.getText()` in Groovy takes **no** charset argument (calling `.getText('UTF-8')` throws `MissingMethodException`); pass `bodyReader` directly to `.parse(bodyReader)` or call `bodyReader.getText()` without arguments.
 4. Replace `new Date().format(...)` or `TimeZone.getDefault()` with `java.time.Instant` + `DateTimeFormatter` + `ZoneId.of("UTC")`.
 5. Make `messageLog.addAttachmentAsString(...)` strictly conditional (`if (message.getProperty("LogAttachments") == "Yes")` or inside `catch`); index business IDs with `messageLog?.addCustomHeaderProperty(...)`.
 6. Keep **only** used imports; remove all wildcard imports (`import java.util.*`).

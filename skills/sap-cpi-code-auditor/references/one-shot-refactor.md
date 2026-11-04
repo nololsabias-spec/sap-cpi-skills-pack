@@ -5,6 +5,8 @@
   - Vulnerabilidad XXE (`XmlSlurper` / `DocumentBuilderFactory` sin `disallow-doctype-decl = true`).
   - Variables estáticas (`static def`, `static Map`, `static List`) que retienen memoria entre mensajes en el worker node.
   - Heap OOM por `message.getBody(String)` o `new XmlParser()`.
+  - `READER_GETTEXT_CHARSET_ERROR`: Llamar a `bodyReader.getText('UTF-8')` sobre un `Reader` (`BufferedReader`, `StringReader`), lo que lanza `MissingMethodException` en ejecución porque `Reader.getText()` en Groovy no admite parámetro de codificación.
+  - `GROOVY24_INVALID_XMLSLURPER_IMPORT`: Importar `groovy.xml.XmlSlurper` en un script Groovy 2.4 (`com.sap.gateway.ip.core.customdev.util.Message`), lo que falla al compilar con `unable to resolve class groovy.xml.XmlSlurper` (en Groovy 2.4 debe usarse `import groovy.util.XmlSlurper`).
 - **Severidad ALTA (-15 pts c/u)**:
   - Uso de `groovy.json.JsonSlurper` en lugar de `groovy.json.JsonSlurperClassic`.
   - Uso de `TimeZone.getDefault()` o formateo de fecha sin zona horaria explícita UTC.
@@ -14,7 +16,6 @@
 - **Severidad MEDIA (-5 pts c/u)**:
   - Creación incondicional de MPL Attachments (`addAttachmentAsString`) en cada ejecución normal.
   - Imports no utilizados o con comodines (`import java.util.*`).
-  - Clases deprecadas (`groovy.util.XmlSlurper`).
   - Sobrescribir cabeceras reservadas (`Camel*`, `SAP_*`).
   - Llamada a `message.setBody()` con más de un argumento.
 - **Severidad BAJA (-2 pts c/u)**:
