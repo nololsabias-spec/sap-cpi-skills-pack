@@ -17,11 +17,12 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { readZipEntries } from '../../../shared/zip-utils.mjs';
 
 export function stripComments(code) {
   return code
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/\/\/.*$/gm, '');
+    .replace(/(?<!:)\/\/.*$/gm, '');
 }
 
 function hasMultipleTopLevelSetBodyArgs(code) {
@@ -174,7 +175,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
     }
   }
 
-  // 3. Static state memory leak (CRITICAL -30)
+  // 3. Static state memory leak (CRITICAL -30) & Mutable @Field state (HIGH -15)
   if (/\bstatic\s+(?:def|Map|List|HashMap|ArrayList|Set|Object|String)\b/.test(cleanCode)) {
     addFinding(
       'CRITICAL',
@@ -184,6 +185,21 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
       'Las variables `static` persisten en la JVM entre ejecuciones de distintos mensajes y provocan fugas de memoria y colisión de datos entre hilos.',
       'Elimina `static` y usa variables locales dentro de `processData` o Exchange Properties.',
       findLineNumber(/\bstatic\s+(?:def|Map|List|HashMap|ArrayList|Set|Object|String)\b/)
+    );
+  }
+
+  const fieldLines = lines
+    .map((line, idx) => ({ line: line.trim(), lineNo: idx + 1 }))
+    .filter((item) => /^@Field\b/.test(item.line) && !/\bfinal\b/.test(item.line));
+  if (fieldLines.length > 0) {
+    addFinding(
+      'HIGH',
+      'Rendimiento y Heap Memory',
+      'MUTABLE_FIELD_STATE',
+      'Anotación @Field sin modificador final (Estado compartido entre hilos)',
+      'En SAP CPI una instancia compilada del script puede ser reutilizada por múltiples hilos concurrentes; un `@Field` mutable provoca condiciones de carrera (race conditions).',
+      'Declara `@Field final` únicamente para constantes inmutables o mueve la variable dentro de `processData`.',
+      fieldLines[0].lineNo
     );
   }
 
@@ -420,41 +436,90 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso: node validate-groovy.mjs <archivo.groovy> [--strict] [--json]');
+    console.log('Uso: node validate-groovy.mjs <archivo.groovy | carpeta | paquete.zip> [--strict] [--json]');
     process.exit(0);
   }
 
-  const filePath = path.resolve(args[0]);
+  const targetPath = path.resolve(args[0]);
   const jsonFlag = args.includes('--json');
   const strictFlag = args.includes('--strict');
 
-  if (!fs.existsSync(filePath)) {
-    console.error(`Archivo no encontrado: ${filePath}`);
+  if (!fs.existsSync(targetPath)) {
+    console.error(`Archivo o carpeta no encontrado: ${targetPath}`);
     process.exit(1);
   }
 
-  const code = fs.readFileSync(filePath, 'utf8');
-  const result = lintGroovyScript(code, path.basename(filePath));
+  const stat = fs.statSync(targetPath);
+  let scriptsToValidate = [];
 
-  if (jsonFlag) {
-    console.log(JSON.stringify(result, null, 2));
-  } else {
-    console.log(`Score de Calidad Original: ${result.score}/100`);
-    console.log(`Archivo: ${result.fileName} | Estado: ${result.passed ? 'APROBADO (Production-Ready)' : 'REQUIERE CORRECCIÓN'}`);
-    console.log(`Resumen: ${result.counts.CRITICAL} Críticas (-30) | ${result.counts.HIGH} Altas (-15) | ${result.counts.MEDIUM} Medias (-5) | ${result.counts.LOW} Bajas (-2)\n`);
-
-    if (result.findings.length > 0) {
-      console.log('| Dimensión | Regla / Vulnerabilidad | Severidad | Línea | Diagnóstico Técnico | Corrección Recomendada |');
-      console.log('| :--- | :--- | :--- | :--- | :--- | :--- |');
-      for (const f of result.findings) {
-        console.log(`| ${f.dimension} | ${f.title} (\`${f.ruleId}\`) | **${f.severity}** | ${f.line ?? '-'} | ${f.description} | ${f.remediation} |`);
+  if (stat.isDirectory()) {
+    const entries = fs.readdirSync(targetPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isFile() && (entry.name.endsWith('.groovy') || entry.name.endsWith('.gsh'))) {
+        const full = path.join(targetPath, entry.name);
+        scriptsToValidate.push({ name: entry.name, code: fs.readFileSync(full, 'utf8') });
       }
-    } else {
-      console.log('Cero hallazgos: El script cumple el 100% de las directrices oficiales de SAP Cloud Integration.');
     }
+  } else if (targetPath.toLowerCase().endsWith('.zip')) {
+    const zipEntries = readZipEntries(targetPath);
+    for (const ze of zipEntries) {
+      const pLower = ze.path.toLowerCase();
+      if (pLower.endsWith('.groovy') || pLower.endsWith('.gsh')) {
+        scriptsToValidate.push({ name: path.basename(ze.path), code: ze.text });
+      }
+    }
+  } else {
+    scriptsToValidate.push({ name: path.basename(targetPath), code: fs.readFileSync(targetPath, 'utf8') });
   }
 
-  if (!result.passed || (strictFlag && result.score < 100)) {
+  if (scriptsToValidate.length === 0) {
+    console.error(`No se encontraron scripts Groovy (.groovy/.gsh) en: ${targetPath}`);
     process.exit(1);
+  }
+
+  if (scriptsToValidate.length === 1 && !stat.isDirectory() && !targetPath.toLowerCase().endsWith('.zip')) {
+    const result = lintGroovyScript(scriptsToValidate[0].code, scriptsToValidate[0].name);
+
+    if (jsonFlag) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`Score de Calidad Original: ${result.score}/100`);
+      console.log(`Archivo: ${result.fileName} | Estado: ${result.passed ? 'APROBADO (Production-Ready)' : 'REQUIERE CORRECCIÓN'}`);
+      console.log(`Resumen: ${result.counts.CRITICAL} Críticas (-30) | ${result.counts.HIGH} Altas (-15) | ${result.counts.MEDIUM} Medias (-5) | ${result.counts.LOW} Bajas (-2)\n`);
+
+      if (result.findings.length > 0) {
+        console.log('| Dimensión | Regla / Vulnerabilidad | Severidad | Línea | Diagnóstico Técnico | Corrección Recomendada |');
+        console.log('| :--- | :--- | :--- | :--- | :--- | :--- |');
+        for (const f of result.findings) {
+          console.log(`| ${f.dimension} | ${f.title} (\`${f.ruleId}\`) | **${f.severity}** | ${f.line ?? '-'} | ${f.description} | ${f.remediation} |`);
+        }
+      } else {
+        console.log('Cero hallazgos: El script cumple el 100% de las directrices oficiales de SAP Cloud Integration.');
+      }
+    }
+
+    if (!result.passed || (strictFlag && result.score < 100)) {
+      process.exit(1);
+    }
+  } else {
+    const results = scriptsToValidate.map((s) => lintGroovyScript(s.code, s.name));
+    const avgScore = Math.round(results.reduce((acc, r) => acc + r.score, 0) / results.length);
+    const allPassed = results.every((r) => r.passed && (!strictFlag || r.score === 100));
+
+    if (jsonFlag) {
+      console.log(JSON.stringify({ totalScripts: results.length, averageScore: avgScore, allPassed, results }, null, 2));
+    } else {
+      console.log(`=== VALIDACIÓN EN LOTE DE SCRIPTS GROOVY (${results.length} archivos) ===`);
+      console.log(`Score Promedio: ${avgScore}/100 | Estado Global: ${allPassed ? 'APROBADO' : 'CON OBSERVACIONES'}\n`);
+      console.log('| Script | Score | Estado | Críticas | Altas | Medias | Bajas |');
+      console.log('| :--- | :---: | :---: | :---: | :---: | :---: | :---: |');
+      for (const r of results) {
+        console.log(`| \`${r.fileName}\` | **${r.score}/100** | ${r.passed ? 'PASS' : 'FAIL'} | ${r.counts.CRITICAL} | ${r.counts.HIGH} | ${r.counts.MEDIUM} | ${r.counts.LOW} |`);
+      }
+    }
+
+    if (!allPassed) {
+      process.exit(1);
+    }
   }
 }

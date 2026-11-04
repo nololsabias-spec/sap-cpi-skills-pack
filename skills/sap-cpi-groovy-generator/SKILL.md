@@ -34,19 +34,22 @@ Write the Groovy script adhering to these mandatory rules:
 1. **Ensure Upgrade Readiness**: Include **only** the `import` statements actually used in the script. Never use wildcard imports (`import java.util.*`). Never import internal Camel classes (`org.apache.camel.impl.*`) or deprecated `groovy.util.XmlSlurper`.
 2. **Signature & Return**: Always use `def Message processData(Message message)` and return `message`.
 3. **Single-Argument `setBody`**: `message.setBody(output)` accepts **only one argument**. Always set the MIME type and charset separately via `message.setHeader("Content-Type", "application/json; charset=utf-8")`.
-4. **Heap Safety & Streaming**: Never use `message.getBody(String)` or `new XmlParser()`. Always read payloads via `Reader bodyReader = message.getBody(java.io.Reader)` and close it deterministically in a `finally { bodyReader?.close() }` block or `.withReader`.Never declare `static def` variables.
+4. **Heap Safety, Streaming & Thread Safety**: Never use `message.getBody(String)` or `new XmlParser()`. Always read payloads via `Reader bodyReader = message.getBody(java.io.Reader)` and close it deterministically in a `finally { bodyReader?.close() }` block or `.withReader`. Never declare `static def` variables, and if `@Field` (`groovy.transform.Field`) is used for script-level constants, always declare it `@Field final` (mutable `@Field` properties cause thread-safety race conditions across concurrent messages).
 5. **JSON & XML Safety**:
    - For JSON: Always use `groovy.json.JsonSlurperClassic` (never `groovy.json.JsonSlurper`).
    - For XML: Always use `new groovy.xml.XmlSlurper(false, false)` with `disallow-doctype-decl = true`, `external-general-entities = false`, and `external-parameter-entities = false`.
-6. **Explicit UTC Timezone**: Never use `TimeZone.getDefault()` or `new Date().format(...)`. Always use `java.time.*` with `ZoneId.of("UTC")` (or explicit business zone).
-7. **MPL Governance**: Obtain the log via `def messageLog = messageLogFactory?.getMessageLog(message)`. Index business keys with `messageLog?.addCustomHeaderProperty(key, val)`. Only create attachments (`addAttachmentAsString`) inside `catch` blocks or inside `if (message.getProperty("LogAttachments") == "Yes")`.
-8. **Defensive Exception Handling**: Wrap logic in `try / catch (Exception e) / finally` and rethrow as `throw new Exception("CPI-ERR: " + e.getMessage(), e)`.
+6. **Multi-Branch Gather Deduplication & Fallback Chains**:
+   - When a script aggregates payloads after a `Parallel Multicast` + `Gather` step, deduplicate records in memory using a keyed `Map<String, Object>` (e.g., by `sys_id` or primary business key) before building the XML/JSON output for a downstream `Splitter`.
+   - When an API specification defines primary vs. fallback/legacy fields or parent-entity dot-walking (`parent.field`), implement explicit Elvis fallback chains (`record.primaryField ?: record.legacyField ?: null`).
+7. **Explicit UTC Timezone**: Never use `TimeZone.getDefault()` or `new Date().format(...)`. Always use `java.time.*` with `ZoneId.of("UTC")` (or explicit business zone).
+8. **MPL Governance**: Obtain the log via `def messageLog = messageLogFactory?.getMessageLog(message)`. Index business keys with `messageLog?.addCustomHeaderProperty(key, val)`. Only create attachments (`addAttachmentAsString`) inside `catch` blocks or inside `if (message.getProperty("LogAttachments") == "Yes")`.
+9. **Defensive Exception Handling**: Wrap logic in `try / catch (Exception e) / finally` and rethrow as `throw new Exception("CPI-ERR: " + e.getMessage(), e)`.
 
-### Step 3: Validate the Generated Script
-Save the generated script to a file (or temporary file) and run the deterministic validator script:
+### Step 3: Validate the Generated Script (Single File, Folder, or Script Collection `.zip`)
+Save the generated script(s) and run the deterministic validator script on the `.groovy` file, an entire script folder, or a packaged `.zip`:
 
 ```bash
-node ./scripts/validate-groovy.mjs <path-to-script.groovy> [--strict] [--json]
+node ./scripts/validate-groovy.mjs <path-to-script.groovy | folder | bundle.zip> [--strict] [--json]
 ```
 
 * Validator script: [validate-groovy.mjs](./scripts/validate-groovy.mjs)

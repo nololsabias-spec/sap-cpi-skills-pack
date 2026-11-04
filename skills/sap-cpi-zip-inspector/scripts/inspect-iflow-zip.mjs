@@ -82,7 +82,8 @@ export function analyzeIflwLocally(iflwXml) {
     const isExceptionType =
       (attrs['ifl:type'] || '').toLowerCase().includes('exception') ||
       /key\s*=\s*"activityType"\s+value\s*=\s*"ExceptionSubprocess"/i.test(inner) ||
-      /value\s*=\s*"ErrorEventSubProcessTemplate"/i.test(inner);
+      /value\s*=\s*"ErrorEventSubProcessTemplate"/i.test(inner) ||
+      /<value>\s*(ErrorEventSubProcessTemplate|ExceptionSubprocess)\s*<\/value>/i.test(inner);
     if (isTriggered || isExceptionType) {
       subProcesses.push({ id: attrs.id || 'SubProcess', name: attrs.name || 'Exception Subprocess' });
     }
@@ -100,10 +101,10 @@ export function analyzeIflwLocally(iflwXml) {
       properties.push({ key: attrs.key, val: attrs.value || '', rawOffset: pm.index });
     }
   }
-  // Style B: <ifl:property><key>...</key><value>...</value></ifl:property>
-  const propNestedRegex = /<([a-zA-Z0-9_:-]*property)\b[^>]*>\s*<key>([\s\S]*?)<\/key>\s*<value>([\s\S]*?)<\/value>\s*<\/\1>/gi;
+  // Style B: <ifl:property><key>...</key><value>...</value></ifl:property> (including <value/>)
+  const propNestedRegex = /<([a-zA-Z0-9_:-]*property)\b[^>]*>\s*<key>([^<]*)<\/key>\s*(?:<value>([\s\S]*?)<\/value>|<value\s*\/>)\s*<\/\1>/gi;
   while ((pm = propNestedRegex.exec(iflwXml)) !== null) {
-    properties.push({ key: pm[2].trim(), val: pm[3].trim(), rawOffset: pm.index });
+    properties.push({ key: pm[2].trim(), val: (pm[3] || '').trim(), rawOffset: pm.index });
   }
 
   // 2. Unencrypted channels (http://)
@@ -186,6 +187,20 @@ export function analyzeIflwLocally(iflwXml) {
       (p.key === 'subActivityType' && p.val.toLowerCase().includes('groovy')) ||
       (p.key === 'script' && p.val.toLowerCase().endsWith('.groovy'))
   ).length;
+  const referencedScripts = [
+    ...new Set(
+      properties
+        .filter((p) => p.key === 'script' && (p.val.toLowerCase().endsWith('.groovy') || p.val.toLowerCase().endsWith('.gsh')))
+        .map((p) => p.val)
+    )
+  ];
+  const referencedScriptCollections = [
+    ...new Set(
+      properties
+        .filter((p) => p.key === 'scriptCollection' && p.val)
+        .map((p) => p.val)
+    )
+  ];
   const xsltCalls = properties.filter(
     (p) =>
       (p.key === 'mappingType' && p.val.toLowerCase().includes('xslt')) ||
@@ -207,6 +222,8 @@ export function analyzeIflwLocally(iflwXml) {
     hardcodedSensitivePatterns,
     syncTasksWithoutTimeout,
     contentModifiersReadingBodyToProperty,
+    referencedScripts,
+    referencedScriptCollections,
     score,
     stats: {
       subprocesses: subProcesses.length,
@@ -276,7 +293,23 @@ SAP-BundleType: IntegrationFlow
   ]);
 }
 
-export function inspectBundle(inputPathOrDemo, extractDir = null) {
+export function redactPropText(rawText) {
+  if (!rawText) return '';
+  return rawText
+    .split(/\r?\n/)
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return line;
+      const eqIdx = line.indexOf('=');
+      if (eqIdx === -1) return line;
+      const key = line.slice(0, eqIdx).trim();
+      return `${key}=[REDACTED]`;
+    })
+    .join('\n');
+}
+
+export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) {
+  const showPropValues = Boolean(options.showPropValues);
   let entries = [];
   let sourceName = '';
 
@@ -284,6 +317,9 @@ export function inspectBundle(inputPathOrDemo, extractDir = null) {
     sourceName = 'Demo_CPI_OrderFlow.zip';
     const buf = buildDemoBundleZipBuffer();
     entries = readZipEntries(buf);
+  } else if (Buffer.isBuffer(inputPathOrDemo)) {
+    sourceName = options.sourceName || 'NestedBundle.zip';
+    entries = readZipEntries(inputPathOrDemo);
   } else {
     const resolved = path.resolve(inputPathOrDemo);
     sourceName = path.basename(resolved);
@@ -309,11 +345,12 @@ export function inspectBundle(inputPathOrDemo, extractDir = null) {
   const xsltMappings = [];
   const iflwFiles = [];
   const parameterFiles = [];
+  const nestedZipFiles = [];
   const otherFiles = [];
 
   for (const rec of entries) {
     const pLower = rec.path.toLowerCase();
-    if (rec.path.startsWith('META-INF/') && rec.path.includes('MANIFEST.MF')) {
+    if ((rec.path.startsWith('META-INF/') || rec.path.includes('/META-INF/')) && rec.path.endsWith('MANIFEST.MF')) {
       manifestFiles.push(rec);
     } else if (rec.path.includes('resources/script/') || pLower.endsWith('.groovy') || pLower.endsWith('.gsh')) {
       groovyScripts.push(rec);
@@ -323,24 +360,69 @@ export function inspectBundle(inputPathOrDemo, extractDir = null) {
       iflwFiles.push(rec);
     } else if (pLower.endsWith('.prop') || pLower.endsWith('.propdef')) {
       parameterFiles.push(rec);
+    } else if (pLower.endsWith('.zip')) {
+      nestedZipFiles.push(rec);
     } else {
       otherFiles.push(rec);
     }
   }
 
   const manifestData = parseManifestContent(manifestFiles[0]?.text || '');
-  const heuristics = analyzeIflwLocally(iflwFiles[0]?.text || '');
+  const isScriptCollection = manifestData.bundleType === 'ScriptCollection' || (iflwFiles.length === 0 && groovyScripts.length > 0 && manifestFiles.length > 0);
+  const heuristics = isScriptCollection
+    ? {
+        isScriptCollection: true,
+        hasExceptionSubprocess: true,
+        unencryptedChannels: [],
+        hardcodedSensitivePatterns: [],
+        syncTasksWithoutTimeout: [],
+        contentModifiersReadingBodyToProperty: [],
+        referencedScripts: groovyScripts.map((g) => g.name),
+        referencedScriptCollections: [],
+        score: manifestData.provideCapability && groovyScripts.length > 0 ? 100 : 85,
+        stats: {
+          subprocesses: 0,
+          groovyCalls: groovyScripts.length,
+          xsltCalls: xsltMappings.length,
+          routers: 0,
+          serviceTasks: 0,
+          channels: 0
+        }
+      }
+    : analyzeIflwLocally(iflwFiles[0]?.text || '');
+
+  const nestedBundles = nestedZipFiles.map((nz) => {
+    try {
+      const subReport = inspectBundle(nz.data, null, { sourceName: nz.name, showPropValues });
+      return {
+        fileName: nz.name,
+        bundleType: subReport.manifestData.bundleType,
+        symbolicName: subReport.manifestData.symbolicName,
+        score: subReport.heuristics.score,
+        iflwCount: subReport.catalog.iflwFiles.length,
+        groovyCount: subReport.catalog.groovyScripts.length
+      };
+    } catch {
+      return { fileName: nz.name, error: 'No se pudo inspeccionar el ZIP anidado' };
+    }
+  });
 
   return {
     fileName: sourceName,
     totalFiles: entries.length,
     manifestData,
+    nestedBundles,
     catalog: {
       manifestFiles: manifestFiles.map((f) => ({ name: f.name, path: f.path, size: f.size })),
       iflwFiles: iflwFiles.map((f) => ({ name: f.name, path: f.path, size: f.size })),
       groovyScripts: groovyScripts.map((f) => ({ name: f.name, path: f.path, size: f.size, content: f.text })),
       xsltMappings: xsltMappings.map((f) => ({ name: f.name, path: f.path, size: f.size })),
-      parameterFiles: parameterFiles.map((f) => ({ name: f.name, path: f.path, size: f.size, content: f.text })),
+      parameterFiles: parameterFiles.map((f) => ({
+        name: f.name,
+        path: f.path,
+        size: f.size,
+        content: showPropValues || f.path.toLowerCase().endsWith('.propdef') ? f.text : redactPropText(f.text)
+      })),
       otherFiles: otherFiles.map((f) => ({ name: f.name, path: f.path, size: f.size }))
     },
     heuristics
@@ -352,35 +434,57 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso: node inspect-iflow-zip.mjs <archivo.zip | archivo.iflw | --demo> [--extract-dir <carpeta>] [--json]');
+    console.log('Uso: node inspect-iflow-zip.mjs <archivo.zip | archivo.iflw | --demo> [--extract-dir <carpeta>] [--show-prop-values] [--json]');
     process.exit(0);
   }
 
   const target = args[0];
   const jsonFlag = args.includes('--json');
+  const showPropValues = args.includes('--show-prop-values');
   const extractIdx = args.indexOf('--extract-dir');
   const extractDir = extractIdx !== -1 ? args[extractIdx + 1] : null;
 
   try {
-    const report = inspectBundle(target, extractDir);
+    const report = inspectBundle(target, extractDir, { showPropValues });
     if (jsonFlag) {
       console.log(JSON.stringify(report, null, 2));
     } else {
       console.log(`=== SAP CPI ZIP INSPECTOR & BPMN 2.0 HEURISTIC AUDITOR ===`);
       console.log(`Paquete: ${report.fileName} (${report.totalFiles} archivos)`);
-      console.log(`Bundle-SymbolicName: ${report.manifestData.symbolicName} (v${report.manifestData.version})`);
+      console.log(`Bundle-SymbolicName: ${report.manifestData.symbolicName} (v${report.manifestData.version}) | Tipo: ${report.manifestData.bundleType}`);
       console.log(`Catálogo: ${report.catalog.iflwFiles.length} .iflw | ${report.catalog.groovyScripts.length} .groovy | ${report.catalog.xsltMappings.length} .xslt | ${report.catalog.parameterFiles.length} .prop`);
-      console.log(`\n--- PRE-AUDITORÍA DETERMINISTA (.iflw) ---`);
-      console.log(`Score de Arquitectura: ${report.heuristics.score}/100`);
-      console.log(`1. Exception Subprocess: ${report.heuristics.hasExceptionSubprocess ? 'OK (Presente)' : 'CRÍTICO (Ausente -30 pts)'}`);
-      console.log(`2. Canales HTTP sin TLS: ${report.heuristics.unencryptedChannels.length} detectado(s)`);
-      report.heuristics.unencryptedChannels.forEach((c) => console.log(`   - [CRÍTICO] ${c.key} = ${c.val}`));
-      console.log(`3. Parámetros Sensibles/URLs Hardcoded: ${report.heuristics.hardcodedSensitivePatterns.length} detectado(s)`);
-      report.heuristics.hardcodedSensitivePatterns.forEach((h) => console.log(`   - [ALTA] ${h.key}: ${h.val} (${h.reason})`));
-      console.log(`4. Request-Reply sin Timeout: ${report.heuristics.syncTasksWithoutTimeout.length} detectado(s)`);
-      report.heuristics.syncTasksWithoutTimeout.forEach((t) => console.log(`   - [MEDIA] Task: ${t.name} (${t.id})`));
-      console.log(`5. Content Modifiers copiando \${body} a Property: ${report.heuristics.contentModifiersReadingBodyToProperty.length} detectado(s)`);
-      report.heuristics.contentModifiersReadingBodyToProperty.forEach((cm) => console.log(`   - [CRÍTICO] ${cm.key} = ${cm.val}`));
+      if (report.nestedBundles && report.nestedBundles.length > 0) {
+        console.log(`\n--- PAQUETES ANIDADOS DETECTADOS (${report.nestedBundles.length}) ---`);
+        report.nestedBundles.forEach((nb) => {
+          console.log(`  - ${nb.fileName} [${nb.bundleType || 'ZIP'}] | SymbolicName: ${nb.symbolicName || '-'} | Score: ${nb.score ?? '-'}/100 | .iflw: ${nb.iflwCount ?? 0} | .groovy: ${nb.groovyCount ?? 0}`);
+        });
+      } else if (report.heuristics.isScriptCollection) {
+        console.log(`\n--- AUDITORÍA DE SCRIPT COLLECTION ---`);
+        console.log(`Score de Empaquetado OSGi: ${report.heuristics.score}/100`);
+        console.log(`Provide-Capability: ${report.manifestData.provideCapability || 'No declarado'}`);
+        console.log(`Scripts incluidos (${report.catalog.groovyScripts.length}): ${report.catalog.groovyScripts.map((g) => g.name).join(', ')}`);
+      } else {
+        console.log(`\n--- PRE-AUDITORÍA DETERMINISTA (.iflw) ---`);
+        console.log(`Score de Arquitectura: ${report.heuristics.score}/100`);
+        console.log(`1. Exception Subprocess: ${report.heuristics.hasExceptionSubprocess ? 'OK (Presente)' : 'CRÍTICO (Ausente -30 pts)'}`);
+        console.log(`2. Canales HTTP sin TLS: ${report.heuristics.unencryptedChannels.length} detectado(s)`);
+        report.heuristics.unencryptedChannels.forEach((c) => console.log(`   - [CRÍTICO] ${c.key} = ${c.val}`));
+        console.log(`3. Parámetros Sensibles/URLs Hardcoded: ${report.heuristics.hardcodedSensitivePatterns.length} detectado(s)`);
+        report.heuristics.hardcodedSensitivePatterns.forEach((h) => console.log(`   - [ALTA] ${h.key}: ${h.val} (${h.reason})`));
+        console.log(`4. Request-Reply sin Timeout: ${report.heuristics.syncTasksWithoutTimeout.length} detectado(s)`);
+        report.heuristics.syncTasksWithoutTimeout.forEach((t) => console.log(`   - [MEDIA] Task: ${t.name} (${t.id})`));
+        console.log(`5. Content Modifiers copiando \${body} a Property: ${report.heuristics.contentModifiersReadingBodyToProperty.length} detectado(s)`);
+        report.heuristics.contentModifiersReadingBodyToProperty.forEach((cm) => console.log(`   - [CRÍTICO] ${cm.key} = ${cm.val}`));
+        if (report.heuristics.referencedScriptCollections?.length > 0 || report.heuristics.referencedScripts?.length > 0) {
+          console.log(`6. Dependencias de Scripts:`);
+          if (report.heuristics.referencedScriptCollections?.length > 0) {
+            console.log(`   - Script Collections: ${report.heuristics.referencedScriptCollections.join(', ')}`);
+          }
+          if (report.heuristics.referencedScripts?.length > 0) {
+            console.log(`   - Scripts invocados: ${report.heuristics.referencedScripts.join(', ')}`);
+          }
+        }
+      }
       if (extractDir) {
         console.log(`\nArchivos extraídos en: ${path.resolve(extractDir)}`);
       }

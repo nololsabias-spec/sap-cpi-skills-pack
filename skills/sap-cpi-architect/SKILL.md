@@ -4,15 +4,17 @@ description: >-
   Use this skill when the user wants to: (Mode 1) Design and package a complete SAP Cloud
   Integration (CPI / Integration Suite) iFlow + Script Collection OSGi .zip bundle from a
   natural-language functional specification using the 3-stage pipeline (Plan -> BPMN2 .iflw
-  XML -> Groovy Scripts), OR (Mode 2) Reverse-engineer and generate comprehensive 8-section
-  technical documentation from an existing iFlow .zip bundle.
+  XML -> Groovy Scripts), (Mode 2) Reverse-engineer and generate comprehensive 8-section
+  technical documentation from an existing iFlow .zip bundle, OR (Mode 3) Clone and adapt
+  an existing reference iFlow and Script Collection .zip bundle to a new API specification.
 ---
 
-# SAP CPI Architect: iFlow Generator & Reverse-Engineering Documentor
+# SAP CPI Architect: iFlow Generator, Cloner & Reverse-Engineering Documentor
 
-Operates in two specialized modes matching `CpiArchitect.jsx`:
+Operates in three specialized modes:
 - **Modo 1 · Generar iFlow + Script Collection (`.zip`)**: Designs an enterprise-grade iFlow in 3 stages (Plan -> BPMN2 `.iflw` XML -> Groovy Scripts), validates all artifacts, and builds real OSGi `.zip` bundles importable into SAP Integration Suite.
 - **Modo 2 · Documentar iFlow Existente**: Extracts an existing `.zip` bundle, runs static heuristics, and generates the 8-section technical & architectural documentation.
+- **Modo 3 · Clonar y Adaptar Bundles de Referencia (`.zip`) según Nueva Especificación**: Clones an existing working iFlow + Script Collection `.zip` template, adapts scripts, XPath splitters, and OSGi descriptors to a new functional/API specification, and preserves private `.prop` files untouched.
 
 ---
 
@@ -85,3 +87,40 @@ Write the Markdown documentation following the exact 8 headings in [doc-template
 ```bash
 node ./scripts/extract-for-docs.mjs --validate-doc <generated-doc.md>
 ```
+
+---
+
+## Modo 3: Clonar y Adaptar Bundles de Referencia (`.zip`) según Nueva Especificación
+
+Use this mode when the user provides an existing SAP CPI package (`.zip` containing one or more iFlows and/or a `ScriptCollection`) and asks to create new integrations or update existing ones based on an API specification document (PDF, Markdown, OpenAPI).
+
+### Paso 0: Análisis de Brechas (Gap Analysis) y Regla de Privacidad
+1. **Inspección sin Exposición de Datos Privados (Privacy-First)**:
+   - Inspecciona la estructura de los `.zip` con `inspect-iflow-zip.mjs` (que redacta automáticamente los valores de `.prop` como `[REDACTED]`).
+   - **NUNCA** leas ni imprimas valores sensibles de `parameters.prop` (credenciales, endpoints privados, colas internas) ni subas paquetes de cliente al repositorio Git salvo instrucción explícita.
+2. **Contraste Especificación vs. Implementación y Preguntas de Clarificación**:
+   - Compara los filtros de consulta, campos solicitados, tablas de resolución de referencias y esquemas JSON/XML entre el bundle de referencia y el documento de especificación.
+   - Si el documento presenta puntos abiertos, campos heredados de entidades padre (dot-walking vs `null`), o discrepancias de nombres de campo (ej. campo canónico vs campo alternativo), **pregunta al usuario antes de escribir código** proponiendo la opción recomendada primero.
+
+### Paso 1: Adaptar o Crear los Scripts en la Script Collection
+1. Crea los nuevos scripts `.groovy` (y actualiza los existentes si el usuario lo solicitó) manteniendo el patrón arquitectónico de la Script Collection original.
+2. Asegúrate de que toda constante a nivel de script con `@Field` incluya `final` (`@Field final`), que el parseo XML deshabilite `disallow-doctype-decl`, y que el parseo JSON use `JsonSlurperClassic`.
+3. Valida todos los scripts en lote con `validate-groovy.mjs`:
+
+```bash
+node ../sap-cpi-groovy-generator/scripts/validate-groovy.mjs <carpeta-scripts> --strict
+```
+
+### Paso 2: Clonar los iFlows y Empaquetar la Script Collection
+Ejecuta `clone-iflow-bundle.mjs` para clonar cada iFlow de referencia (actualizando `.project`, `META-INF/MANIFEST.MF`, `metainfo.prop`, `<NuevoNombre>.iflw`, referencias a scripts `.groovy` y expresiones XPath del Splitter) y para inyectar los nuevos scripts en la Script Collection `.zip`:
+
+```bash
+# 1. Clonar y adaptar un iFlow .zip manteniendo intactos sus diagramas BPMN2 y .prop
+node ./scripts/clone-iflow-bundle.mjs --source <Referencia_iFlow.zip> --target-name <Nuevo_iFlow> --out <Nuevo_iFlow.zip> --replace <ScriptViejo.groovy=ScriptNuevo.groovy> --xpath <//nodoViejo=//nodoNuevo>
+
+# 2. Actualizar la Script Collection .zip con los nuevos scripts validados
+node ./scripts/clone-iflow-bundle.mjs --update-sc <SC_Origen.zip> --scripts-dir <carpeta-scripts> --out <SC_Actualizada.zip> --strict
+```
+
+* Cloner & SC Updater script: [clone-iflow-bundle.mjs](./scripts/clone-iflow-bundle.mjs)
+* Verifica finalmente todos los `.zip` generados ejecutando `inspect-iflow-zip.mjs` sobre cada paquete resultante.

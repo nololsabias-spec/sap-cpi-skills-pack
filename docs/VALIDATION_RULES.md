@@ -35,9 +35,10 @@ Todo script parte de **100 puntos** y se restan puntos según la severidad de ca
 3. **Cero Imports No Utilizados (`UPGRADE-UNUSED-IMPORT`):** Todo `import` declarado debe referenciarse en el cuerpo del script.
 4. **Prohibición de APIs Internas de Apache Camel (`UPGRADE-INTERNAL-CAMEL`):** Prohibido importar `org.apache.camel.impl.*` o `org.apache.camel.support.*` debido a cambios incompatibles entre Camel 2.x y Camel 3.x+.
 5. **Prohibición de `setBody` con 2 argumentos (`API-SETBODY-ARGS`):** `message.setBody(payload, Class)` no existe en la interfaz `Message` de SAP CPI; debe usarse únicamente `message.setBody(payload)`.
-6. **Seguridad XML Anti-XXE (`SEC-XXE`):** Todo uso de `XmlSlurper` o `XmlParser` debe deshabilitar DTDs externos mediante `setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)`.
-7. **Gestión de Zona Horaria (`TZ-DEFAULT`):** Prohibido usar `new Date()` o `LocalDateTime.now()` sin `ZoneId.of("UTC")` explícito.
-8. **Higiene del Message Processing Log (`MPL-UNCONDITIONAL`):** Todo `addAttachmentAsString` debe ejecutarse únicamente dentro de bloques `catch` o condicionado a `SAP_MessageProcessingLogLevel` (`DEBUG` / `TRACE`).
+6. **Seguridad XML Anti-XXE (`SEC-XXE`):** Todo uso de `XmlSlurper` o `XmlParser` debe deshabilitar DTDs externos mediante `setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)`. El analizador de comentarios preserva literales URL (`http://`, `https://`) para evitar falsos positivos al verificar features SAX/DOM.
+7. **Inmutabilidad y Seguridad de Hilos en `@Field` (`MUTABLE_FIELD_STATE`):** Si se emplea `@Field` (`groovy.transform.Field`) para constantes a nivel de script, debe declararse obligatoriamente con `final` (`@Field final`). Un `@Field` mutable se comparte entre hilos concurrentes del worker node provocando condiciones de carrera.
+8. **Gestión de Zona Horaria (`TZ-DEFAULT`):** Prohibido usar `new Date()` o `LocalDateTime.now()` sin `ZoneId.of("UTC")` explícito.
+9. **Higiene del Message Processing Log (`MPL-UNCONDITIONAL`):** Todo `addAttachmentAsString` debe ejecutarse únicamente dentro de bloques `catch` o condicionado a `SAP_MessageProcessingLogLevel` (`DEBUG` / `TRACE`).
 
 ### 2.3. Reglas por Directiva Activa (`--directives`)
 - `jsonSlurper`: Exige `groovy.json.JsonSlurperClassic` en lugar de `JsonSlurper` (`LazyMap` no serializable en CPI).

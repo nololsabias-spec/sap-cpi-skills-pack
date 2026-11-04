@@ -80,6 +80,15 @@ const CHECKS = [
       const data = JSON.parse(out);
       return data.manifestData.symbolicName === 'com.sap.demo.order.processing.flow';
     }
+  },
+  {
+    skill: 'sap-cpi-architect (Mode 3: Clone & Adapt Bundles)',
+    script: 'skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs',
+    args: ['--demo', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.valid === true && data.iflwFile === 'ClonedOrderFlow_v2.iflw';
+    }
   }
 ];
 

@@ -20,19 +20,24 @@ Before running the audit or generating the remediation plan, check if any contex
 3. **Remediation Depth**: Ask whether they want only the diagnostic audit report (`0–100` score + findings matrix) or if they also want the refactored Groovy scripts and patched `.iflw` generated automatically.
 
 ### Step 1: Run Deterministic Bundle Extraction & Static Heuristics
-Execute the inspection script against the user's `.zip` package or `.iflw` XML file (or run with `--demo` to generate and inspect a sample vulnerable iFlow bundle):
+Execute the inspection script against the user's `.zip` package (`IntegrationFlow`, `ScriptCollection`, or multi-bundle outer `.zip`) or `.iflw` XML file (or run with `--demo` to generate and inspect a sample vulnerable iFlow bundle):
 
 ```bash
-node ./scripts/inspect-iflow-zip.mjs <path-to-iflow.zip-or-.iflw> [--extract-dir <output-folder>] [--json]
+node ./scripts/inspect-iflow-zip.mjs <path-to-iflow.zip-or-.iflw> [--extract-dir <output-folder>] [--show-prop-values] [--json]
 ```
 
 * Resource script: [inspect-iflow-zip.mjs](./scripts/inspect-iflow-zip.mjs)
 * Audit rules reference: [iflw-audit-rules.md](./references/iflw-audit-rules.md)
+* **Privacy-First Default**: By default, `inspect-iflow-zip.mjs` redacts all parameter values in `.prop` files (`key=[REDACTED]`) so private endpoints, queue names, or credentials are never exposed in logs or AI context unless `--show-prop-values` is explicitly requested.
+* **Multi-Bundle & Script Collection Support**:
+  - Automatically detects outer `.zip` deliveries containing nested `.zip` bundles (`nestedBundles`) and inspects each inner bundle.
+  - Distinguishes `SAP-BundleType: ScriptCollection` bundles from `IntegrationFlow` bundles, verifying `Provide-Capability` and cataloged `.groovy` scripts instead of penalizing for the absence of an `.iflw` file.
+  - Extracts external `scriptCollection` and `.groovy` script dependencies referenced inside `<ifl:property>` blocks of an `.iflw` file.
 
 ### Step 2: Validate the 5 Critical Architecture Control Points
 Review the deterministic output from `inspect-iflow-zip.mjs` across these 5 mandatory SAP CPI architectural dimensions:
 1. **Exception Subprocess Presence (`CRITICAL` -30 pts if absent)**:
-   - Verifies that `<bpmn2:process>` contains a `<bpmn2:subProcess triggeredByEvent="true">` with `ifl:type="ExceptionSubProcess"`. Without it, unhandled runtime errors terminate the flow silently without alerting or compensation.
+   - Verifies that `<bpmn2:process>` contains a `<bpmn2:subProcess triggeredByEvent="true">` or `ErrorEventSubProcessTemplate` / `ExceptionSubProcess`. Without it, unhandled runtime errors terminate the flow silently without alerting or compensation.
 2. **Unencrypted Channels (`CRITICAL` / `HIGH` -15 pts each)**:
    - Flags any `<ifl:property key="address">` or endpoint using plain `http://` instead of `https://` / TLS.
 3. **Unexternalized / Hardcoded Parameters (`HIGH` -15 pts each)**:

@@ -83,3 +83,39 @@ Para empaquetar un Integration Flow junto con su Script Collection listos para i
    - Audita el XML BPMN 2.0 (`.iflw`).
    - Valida cada script Groovy incluido en la colección.
    - Genera `dist/<IflowId>.zip`, `dist/<SC_IflowId>.zip` y `dist/Paquete_<IflowId>.zip` con sus `META-INF/MANIFEST.MF` y `.project` vinculados mediante `Provide-Capability` y `Require-Capability`.
+
+---
+
+## Escenario 5: Clonar y Adaptar una Integración de Referencia (`.zip`) según una Nueva Especificación API
+
+Cuando dispones de una integración funcional en producción (uno o varios iFlows `.zip` + una `ScriptCollection.zip`) y necesitas crear nuevas integraciones o adaptar las existentes a partir de un documento de especificación técnica (PDF, Markdown u OpenAPI) sin exponer datos privados:
+
+### Paso 1: Inspeccionar el paquete de referencia (modo seguro sin exponer `.prop`)
+```bash
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_Referencia.zip
+```
+El inspector detecta automáticamente los `.zip` anidados, identifica el tipo de cada bundle (`IntegrationFlow` vs `ScriptCollection`), lista los scripts invocados y redacta los valores sensibles de `.prop` como `[REDACTED]`.
+
+### Paso 2: Generar y validar en lote los nuevos scripts de la Script Collection
+Tras resolver cualquier ambigüedad funcional de la especificación (prioridad de campos alternativos, herencia de entidades padre o puntos abiertos), valida toda la carpeta de scripts Groovy en un solo comando:
+```bash
+node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./scripts_nuevos --strict
+```
+
+### Paso 3: Clonar los iFlows y actualizar la Script Collection
+```bash
+# Clonar el iFlow de referencia cambiando su identificador OSGi, scripts asociados y ruta XPath del Splitter
+node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \
+  --source ./Flujo_Origen.zip \
+  --target-name Flujo_Nueva_Entidad_v1 \
+  --out ./dist/Flujo_Nueva_Entidad_v1.zip \
+  --replace ScriptOrigen.groovy=ScriptNuevaEntidad.groovy \
+  --xpath //items=//nuevosItems
+
+# Inyectar los nuevos scripts validados dentro de la Script Collection existente
+node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \
+  --update-sc ./SC_Origen.zip \
+  --scripts-dir ./scripts_nuevos \
+  --out ./dist/SC_Actualizada.zip \
+  --strict
+```

@@ -33,30 +33,29 @@ npm test
 ## 2. Scripts por Módulo
 
 ### 2.1. `inspect-iflow-zip.mjs` (`sap-cpi-zip-inspector`)
-Descomprime en memoria un paquete `.zip` de SAP CPI (incluso paquetes anidados), clasifica sus archivos internos y ejecuta la auditoría de 5 puntos sobre el modelo BPMN 2.0 (`.iflw`).
+Descomprime en memoria un paquete `.zip` de SAP CPI (`IntegrationFlow`, `ScriptCollection` o paquetes compuestos con `.zip` anidados), clasifica sus archivos internos, redacta por defecto los valores de `.prop` (`[REDACTED]`) y ejecuta la auditoría de 5 puntos sobre el modelo BPMN 2.0 (`.iflw`).
 
 ```bash
-node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs <archivo.zip> [--extract-to <carpeta>] [--json]
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs <archivo.zip | archivo.iflw> [--extract-dir <carpeta>] [--show-prop-values] [--json]
 ```
 
-- `<archivo.zip>`: Ruta al paquete iFlow o paquete dual exportado de SAP CPI.
-- `--extract-to <carpeta>`: Extrae físicamente todos los recursos internos del `.zip` en la carpeta indicada.
+- `<archivo.zip>`: Ruta al paquete iFlow, Script Collection o paquete compuesto exportado de SAP CPI.
+- `--extract-dir <carpeta>`: Extrae físicamente todos los recursos internos del `.zip` en la carpeta indicada.
+- `--show-prop-values`: Muestra los valores reales de los archivos `.prop` (por defecto se redactan como `[REDACTED]` por privacidad).
 - `--json`: Devuelve el inventario de archivos y los hallazgos de auditoría en formato JSON.
 
 ---
 
 ### 2.2. `validate-groovy.mjs` (`sap-cpi-groovy-generator`)
-Valida estáticamente un script Groovy de SAP CPI frente a las reglas base (*Upgrade Readiness*, firma `processData`, protección anti-XXE) y las directivas seleccionadas.
+Valida estáticamente uno o varios scripts Groovy de SAP CPI (archivo individual, carpeta de scripts o paquete `.zip` de una Script Collection) frente a las reglas de *Upgrade Readiness*, firma `processData`, protección anti-XXE, inmutabilidad `@Field final` y streaming.
 
 ```bash
-node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs <script.groovy> [--directives=d1,d2,...] [--strict] [--json]
+node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs <script.groovy | carpeta | paquete.zip> [--strict] [--json]
 ```
 
-- `<script.groovy>`: Ruta al archivo `.groovy` a validar.
-- `--directives=<lista>`: Lista separada por comas de las directivas activas:
-  - `jsonSlurper`, `streaming`, `xmlParser`, `mpl`, `secureStore`, `valueMapping`, `utcDates`, `headers`, `sql`, `throwEx`.
-- `--strict`: Hace que las advertencias (`WARN`) también provoquen código de salida `1`.
-- `--json`: Devuelve el resultado (`valid`, `score`, `findings`, `metrics`) en JSON.
+- `<script.groovy | carpeta | paquete.zip>`: Ruta a un archivo `.groovy`, a un directorio completo de scripts o a un `.zip` que contenga scripts Groovy.
+- `--strict`: Exige puntuación perfecta de `100/100` en todos los scripts analizados.
+- `--json`: Devuelve el resultado individual o en lote en formato JSON.
 
 ---
 
@@ -157,13 +156,33 @@ Estructura de `<suite-spec.json>`:
 
 ---
 
-### 2.8. `build-cpi-package.mjs` y `extract-for-docs.mjs` (`sap-cpi-architect`)
+### 2.8. `build-cpi-package.mjs`, `clone-iflow-bundle.mjs` y `extract-for-docs.mjs` (`sap-cpi-architect`)
 
 #### Constructor de Paquetes OSGi (`build-cpi-package.mjs`)
 Genera `<IflowId>.zip`, `<ScriptCollectionId>.zip` y el paquete combinado `Paquete_<IflowId>.zip`.
 
 ```bash
-node skills/sap-cpi-architect/scripts/build-cpi-package.mjs --spec <bundle-spec.json> --out-dir <carpeta-salida>
+node skills/sap-cpi-architect/scripts/build-cpi-package.mjs <bundle-spec.json> --out-dir <carpeta-salida>
+```
+
+#### Clonador y Adaptador de Bundles de Referencia (`clone-iflow-bundle.mjs`)
+Permite clonar un iFlow existente (`.zip`) renombrando sus descriptores OSGi (`.project`, `MANIFEST.MF`, `metainfo.prop`, `<NuevoNombre>.iflw`), reemplazando referencias a scripts `.groovy` y rutas XPath del Splitter sin alterar ni exponer los archivos privados `.prop`. También permite actualizar un paquete `ScriptCollection.zip` inyectando nuevos scripts validados.
+
+```bash
+# Clonar y adaptar un iFlow de referencia
+node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \
+  --source <Referencia_iFlow.zip> \
+  --target-name <Nuevo_iFlow> \
+  --out <Nuevo_iFlow.zip> \
+  [--replace <ScriptOrigen.groovy=ScriptDestino.groovy>] \
+  [--xpath <//nodoOrigen=//nodoDestino>]
+
+# Actualizar una Script Collection con nuevos scripts Groovy validados
+node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \
+  --update-sc <SC_Origen.zip> \
+  --scripts-dir <carpeta-scripts> \
+  --out <SC_Actualizada.zip> \
+  [--strict]
 ```
 
 #### Extractor y Validador de Documentación Técnica (`extract-for-docs.mjs`)
