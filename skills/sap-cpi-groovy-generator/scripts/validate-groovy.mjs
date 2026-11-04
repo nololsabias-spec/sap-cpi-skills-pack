@@ -78,15 +78,18 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
     return null;
   };
 
-  // 1. Canonical signature & Message import
-  if (!/import\s+com\.sap\.gateway\.ip\.core\.customdev\.util\.Message\b/.test(cleanCode)) {
+  // 1. Canonical signature & Message import (supports both Script v1 and Groovy 4 Script v2 API)
+  if (
+    !/import\s+com\.sap\.gateway\.ip\.core\.customdev\.util\.Message\b/.test(cleanCode) &&
+    !/import\s+com\.sap\.it\.script\.v2\.api\.Message\b/.test(cleanCode)
+  ) {
     addFinding(
       'HIGH',
       'Upgrade Readiness & Imports',
       'MISSING_MESSAGE_IMPORT',
-      'Falta import oficial de Message',
-      'No se encontró `import com.sap.gateway.ip.core.customdev.util.Message`.',
-      'Añade `import com.sap.gateway.ip.core.customdev.util.Message` al inicio del script.',
+      'Falta import oficial de Message (v1 o v2)',
+      'No se encontró `import com.sap.gateway.ip.core.customdev.util.Message` (v1) ni `import com.sap.it.script.v2.api.Message` (v2 / Groovy 4).',
+      'Añade `import com.sap.gateway.ip.core.customdev.util.Message` (o `com.sap.it.script.v2.api.Message` en Script v2) al inicio del script.',
       1
     );
   }
@@ -116,6 +119,18 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 2. Ensure Upgrade Readiness: Wildcard imports & Unused imports & Restricted packages
+  const restrictedPrefixes = [
+    'org.apache.camel.impl',
+    'org.apache.camel.processor',
+    'com.sap.it.script.v2.api.proxy',
+    'org.osgi.framework',
+    'org.springframework',
+    'com.zaxxer.hikari',
+    'groovy.sql',
+    'org.quartz',
+    'net.sf.saxon'
+  ];
+
   const importRegex = /^\s*import\s+(?:static\s+)?([a-zA-Z0-9_.]+(?:\.\*)?)\s*;?\s*$/gm;
   let impMatch;
   while ((impMatch = importRegex.exec(cleanCode)) !== null) {
@@ -150,14 +165,14 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
       }
     }
 
-    if (fullImport.startsWith('org.apache.camel.impl') || fullImport.startsWith('org.apache.camel.processor')) {
+    if (restrictedPrefixes.some((prefix) => fullImport.startsWith(prefix))) {
       addFinding(
         'HIGH',
         'Upgrade Readiness & Imports',
         'INTERNAL_CAMEL_IMPORT',
-        `Acceso a API interna de Camel (${fullImport})`,
-        'El uso de clases internas de Apache Camel rompe la compatibilidad en actualizaciones de SAP BTP.',
-        'Usa exclusivamente la interfaz pública `com.sap.gateway.ip.core.customdev.util.Message` e `ITApiFactory`.',
+        `Framework interno o restringido en SAP CPI (${fullImport})`,
+        'La directriz oficial SAP "Restrict usage to supported frameworks and libraries" prohíbe importar clases internas de Camel, OSGi, Spring, HikariCP, Groovy SQL, Quartz o Saxon.',
+        'Usa exclusivamente la interfaz pública `Message` (`v1`/`v2`) e `ITApiFactory` con componentes nativos del iFlow.',
         lineNo
       );
     }
@@ -168,11 +183,24 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
         'Upgrade Readiness & Imports',
         'DEPRECATED_GROOVY_UTIL_XML',
         `Paquete deprecado (${fullImport})`,
-        '`groovy.util.Xml*` está deprecado en Groovy 3+.',
+        '`groovy.util.Xml*` está eliminado/deprecado en Groovy 4.',
         'Usa `groovy.xml.XmlSlurper`.',
         lineNo
       );
     }
+  }
+
+  // 3. Dynamic code evaluation Metaspace OOM (GroovyShell / Eval.me) (CRITICAL -30)
+  if (/\bGroovyShell\s*\(/.test(cleanCode) || /\bEval\.(?:me|x|xy|xyz)\s*\(/.test(cleanCode)) {
+    addFinding(
+      'CRITICAL',
+      'Rendimiento y Heap Memory',
+      'DYNAMIC_CODE_EVAL_OOM',
+      'Evaluación dinámica de código (GroovyShell / Eval) en tiempo de ejecución',
+      'Instanciar `GroovyShell` o `Eval.me()` en cada mensaje crea nuevos ClassLoaders y agota la memoria Metaspace del Worker Node.',
+      'Reemplaza la evaluación dinámica por funciones compiladas dentro del script o en una Script Collection.',
+      findLineNumber(/\b(?:GroovyShell|Eval\.)/)
+    );
   }
 
   // 3. Static state memory leak (CRITICAL -30) & Mutable @Field state (HIGH -15)

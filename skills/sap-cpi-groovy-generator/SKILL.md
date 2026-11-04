@@ -30,11 +30,22 @@ Identify from the user's request:
    - Consult [canonical-patterns.md](./references/canonical-patterns.md) if the request matches one of the 5 architectural patterns (Pattern A: XML Streaming, Pattern B: Headers/Properties, Pattern C: MPL Logging, Pattern D: JSON Manipulation, Pattern E: HMAC/Crypto & SecureStore).
 
 ### Step 2: Author the Canonical Groovy Script
-Write the Groovy script adhering to these mandatory rules:
-1. **Ensure Upgrade Readiness**: Include **only** the `import` statements actually used in the script. Never use wildcard imports (`import java.util.*`). Never import internal Camel classes (`org.apache.camel.impl.*`) or deprecated `groovy.util.XmlSlurper`.
-2. **Signature & Return**: Always use `def Message processData(Message message)` and return `message`.
-3. **Single-Argument `setBody`**: `message.setBody(output)` accepts **only one argument**. Always set the MIME type and charset separately via `message.setHeader("Content-Type", "application/json; charset=utf-8")`.
-4. **Heap Safety, Streaming & Thread Safety**: Never use `message.getBody(String)` or `new XmlParser()`. Always read payloads via `Reader bodyReader = message.getBody(java.io.Reader)` and close it deterministically in a `finally { bodyReader?.close() }` block or `.withReader`. Never declare `static def` variables, and if `@Field` (`groovy.transform.Field`) is used for script-level constants, always declare it `@Field final` (mutable `@Field` properties cause thread-safety race conditions across concurrent messages).
+Write the Groovy script adhering to these mandatory SAP Help Portal rules:
+1. **Ensure Upgrade Readiness & Groovy 4 Compatibility**:
+   - Include **only** the `import` statements actually used in the script. Never use wildcard imports (`import java.util.*`).
+   - Support either `import com.sap.gateway.ip.core.customdev.util.Message` (Script v1) or `import com.sap.it.script.v2.api.Message` (Script v2 / Groovy 4).
+   - Never import restricted/internal frameworks banned by SAP's *"Restrict usage to supported frameworks and libraries"* guideline (`org.apache.camel.impl.*`, `org.apache.camel.processor.*`, `com.sap.it.script.v2.api.proxy.*`, `org.osgi.framework.*`, `org.springframework.*`, `com.zaxxer.hikari.*`, `groovy.sql.*`, `org.quartz.*`, `net.sf.saxon.*`, or deprecated `groovy.util.XmlSlurper`).
+2. **Signature, Local Scoping & Return**:
+   - Always use `def Message processData(Message message)` and return `message`.
+   - Always declare local variables with `def` or an explicit type (`String`, `Map`, etc.) so they are never placed in the global script `Binding` (which leaks memory until iFlow redeployment).
+   - Never instantiate `new GroovyShell().evaluate(...)` or `Eval.me(...)` (causes Metaspace `OutOfMemoryError`).
+3. **Single-Argument `setBody` & `GString` Safety**:
+   - `message.setBody(output)` accepts **only one argument**. Always set the MIME type and charset separately via `message.setHeader("Content-Type", "application/json; charset=utf-8")`.
+   - When passing Groovy interpolated strings (`"ID_${id}"`) into `setHeader` or `setProperty`, explicitly coerce them to `java.lang.String` using `.toString()` or `as String` to prevent `GStringImpl` type mismatch errors in strict Java adapters.
+4. **Heap Safety, Streaming & Thread Safety**:
+   - Never use `message.getBody(String)` or `new XmlParser()`. Always read payloads via `Reader bodyReader = message.getBody(java.io.Reader)` (or `InputStream`) and close it deterministically in a `finally { bodyReader?.close() }` block or `.withReader`.
+   - For ultra-large XML payloads (> 30–50 MB), prefer StAX (`javax.xml.stream.XMLStreamReader` / `XMLStreamWriter`) event streaming over tree parsers.
+   - Never declare `static def` variables, and if `@Field` (`groovy.transform.Field`) is used for script-level constants, always declare it `@Field final` (mutable `@Field` properties cause thread-safety race conditions across concurrent messages).
 5. **JSON & XML Safety**:
    - For JSON: Always use `groovy.json.JsonSlurperClassic` (never `groovy.json.JsonSlurper`).
    - For XML: Always use `new groovy.xml.XmlSlurper(false, false)` with `disallow-doctype-decl = true`, `external-general-entities = false`, and `external-parameter-entities = false`.

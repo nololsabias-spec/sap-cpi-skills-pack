@@ -15,6 +15,8 @@ Aplicadas por `inspect-iflow-zip.mjs` y `build-cpi-package.mjs`:
 | `IFLW-003` | `MEDIUM` | **Externalización de Parámetros (`{{param}}`)** | Detecta URLs fijas o credenciales incrustadas en propiedades `<ifl:property>` en lugar de parámetros externalizados `{{Host_Endpoint}}`. |
 | `IFLW-004` | `MEDIUM` | **Timeouts Explícitos en `ExternalCall`** | Verifica que todo paso `Request-Reply` (`ExternalCall`) tenga configurado un `httpConnectionTimeout` o `timeout` en su `messageFlow` asociado. |
 | `IFLW-005` | `HIGH` | **Prevención de Fuga de Memoria en Content Modifier** | Bloquea el almacenamiento de `${body}` o `${in.body}` dentro de Exchange Properties o Headers en pasos `Enricher` (Content Modifier), ya que las propiedades persisten durante toda la vida del Exchange. |
+| `IFLW-006` | `ADVISORY` | **Streaming en Splitters (`streaming=true`)** | Detecta pasos `Splitter` (`General`/`Iterating Splitter`) con `<key>streaming</key><value>false</value>`, recomendando activar streaming para evitar cargar lotes XML/JSON completos en memoria DOM. |
+| `IFLW-007` | `ADVISORY` | **Ruta por Defecto en Routers (`default`)** | Verifica que todo `<bpmn2:exclusiveGateway>` defina su atributo `default` para evitar fallos por mensajes sin ruta coincidente. |
 
 ---
 
@@ -29,11 +31,12 @@ Todo script parte de **100 puntos** y se restan puntos según la severidad de ca
 - **MEDIA (`MEDIUM`):** `-5` puntos
 - **BAJA (`LOW`):** `-2` puntos
 
-### 2.2. Reglas Base y *Ensure Upgrade Readiness*
-1. **Firma Oficial:** Debe declarar `import com.sap.gateway.ip.core.customdev.util.Message` y `def Message processData(Message message)` retornando `message`.
+### 2.2. Reglas Base y *Ensure Upgrade Readiness* (Groovy 2.4 / Groovy 4)
+1. **Firma Oficial (Script v1 y v2):** Debe declarar `import com.sap.gateway.ip.core.customdev.util.Message` (v1) o `import com.sap.it.script.v2.api.Message` (v2 / Groovy 4) y `def Message processData(Message message)` retornando `message`.
 2. **Prohibición de Wildcards (`UPGRADE-WILDCARD`):** Prohibido usar `import paquete.*`. Toda clase debe importarse explícitamente para superar el chequeo *Ensure Upgrade Readiness* de SAP CPI.
 3. **Cero Imports No Utilizados (`UPGRADE-UNUSED-IMPORT`):** Todo `import` declarado debe referenciarse en el cuerpo del script.
-4. **Prohibición de APIs Internas de Apache Camel (`UPGRADE-INTERNAL-CAMEL`):** Prohibido importar `org.apache.camel.impl.*` o `org.apache.camel.support.*` debido a cambios incompatibles entre Camel 2.x y Camel 3.x+.
+4. **Prohibición de Frameworks Restringidos e Internos (`INTERNAL_CAMEL_IMPORT`):** Según la directriz oficial SAP *"Restrict usage to supported frameworks and libraries"*, está prohibido importar `org.apache.camel.impl.*`, `org.apache.camel.processor.*`, `com.sap.it.script.v2.api.proxy.*`, `org.osgi.framework.*`, `org.springframework.*`, `com.zaxxer.hikari.*`, `groovy.sql.*`, `org.quartz.*` o `net.sf.saxon.*`.
+5. **Prevención de Fuga en Metaspace (`DYNAMIC_CODE_EVAL_OOM`):** Prohibido instanciar `GroovyShell` o `Eval.me()` en tiempo de ejecución, ya que genera ClassLoaders por cada mensaje hasta agotar la memoria Metaspace del Worker Node.
 5. **Prohibición de `setBody` con 2 argumentos (`API-SETBODY-ARGS`):** `message.setBody(payload, Class)` no existe en la interfaz `Message` de SAP CPI; debe usarse únicamente `message.setBody(payload)`.
 6. **Seguridad XML Anti-XXE (`SEC-XXE`):** Todo uso de `XmlSlurper` o `XmlParser` debe deshabilitar DTDs externos mediante `setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)`. El analizador de comentarios preserva literales URL (`http://`, `https://`) para evitar falsos positivos al verificar features SAX/DOM.
 7. **Inmutabilidad y Seguridad de Hilos en `@Field` (`MUTABLE_FIELD_STATE`):** Si se emplea `@Field` (`groovy.transform.Field`) para constantes a nivel de script, debe declararse obligatoriamente con `final` (`@Field final`). Un `@Field` mutable se comparte entre hilos concurrentes del worker node provocando condiciones de carrera.

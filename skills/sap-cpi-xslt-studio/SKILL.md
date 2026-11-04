@@ -36,8 +36,10 @@ Follow these mandatory SAP CPI rules:
 1. **No Curly Braces in Element Text Content (Anti-Hallucination Rule)**:
    - **PROHIBITED**: `<HeaderID>{//CABECERA/ID}</HeaderID>` or `<Qty>{$var}</Qty>`.
    - **REQUIRED**: Always use `<HeaderID><xsl:value-of select="//CABECERA/ID"/></HeaderID>`. Attribute Value Templates (`{...}`) are only valid inside XML attribute values (`<Order id="{OrderId}">`).
-2. **Memory Optimization**:
+2. **Memory & Streaming Optimization (SAP Official Guidelines)**:
    - Always include `<xsl:strip-space elements="*"/>` and `<xsl:output method="xml" encoding="UTF-8" indent="no"/>`.
+   - Avoid unrestricted descendant axes (`//Node`) and heavy global `<xsl:key>` indexes on massive XML documents (> 50 MB); prefer explicit relative paths (`/Root/Items/Item`).
+   - When designing XSLT 3.0 stylesheets on Saxon-HE for ultra-large streaming payloads, structure templates sequentially and use `<xsl:mode streamable="yes"/>` where supported.
 3. **SAP CPI Exchange Extension Functions (when reading/writing Headers or Properties)**:
    - Declare `xmlns:cpi="com.sap.it.rt.adapter.xpath.api.XmlExtFunctions"` and `<xsl:param name="exchange"/>`.
    - Use `cpi:getHeader($exchange, 'HeaderName')`, `cpi:setHeader($exchange, 'HeaderName', 'Val')`, `cpi:getProperty($exchange, 'PropName')`, `cpi:setProperty($exchange, 'PropName', 'Val')`.

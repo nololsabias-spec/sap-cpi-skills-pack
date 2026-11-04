@@ -39,10 +39,17 @@ Design the JSON plan containing:
 - `groovyScriptsPlan[]` (`{ fileName, purpose }`)
 
 ### Etapa 2: BPMN 2.0 XML (`<iflowName>.iflw`)
-Generate the complete BPMN 2.0 XML implementing every step of the plan:
+Generate the complete BPMN 2.0 XML implementing every step of the plan following SAP's official *Integration Flow Design Guidelines*:
 - Must include `<bpmn2:definitions>` with namespaces `bpmn2`, `bpmndi`, `ifl`, `dc`, `di`.
 - Must include `<bpmn2:collaboration>` (Sender, Receiver, Integration Process) and `<bpmn2:process>`.
-- Must include `<bpmn2:subProcess triggeredByEvent="true" ifl:type="ExceptionSubProcess">`.
+- Must include `<bpmn2:subProcess triggeredByEvent="true" ifl:type="ExceptionSubProcess">` (or `ErrorEventSubProcessTemplate`):
+  - **Resilient Error & Transaction Architecture**: Differentiate between **transient errors** (use JMS Queues with automatic retry/backoff) and **persistent/poison errors** (route to a Data Store or Dead-Letter Queue in the Exception Subprocess, and optionally forward alerts via `ProcessDirect` to a central Error Logging iFlow). Keep transaction boundaries short by isolating transactional steps inside Local Integration Processes.
+- **Splitter & Message Mapping Streaming ("Split-First" Rule)**:
+  - All `Splitter` steps (`General Splitter` / `Iterating Splitter`) must enable streaming (`<ifl:property key="streaming" value="true"/>`) and use direct XPath expressions without heavy predicates.
+  - Never pass mega-payloads (> 50 MB) directly into a graphical Message Mapping (DOM trap); always place a streaming `Splitter` before the Message Mapping.
+- **Router Optimization**:
+  - Extract XML values into typed Exchange Properties (`java.lang.String`, `java.lang.Long`) in a `Content Modifier` *before* the `Router`, and evaluate `${property.Field}` (Camel Simple) instead of evaluating repeated XPath across multiple Router branches.
+  - Order Router branches from most frequent to least frequent, and always define a `default` route on `<bpmn2:exclusiveGateway>`.
 - All external endpoints must use `https://` and externalized parameters `{{PARAM_NAME}}`.
 - All synchronous `ExternalCall` tasks must declare an explicit `timeout` property (e.g., `60000`).
 - Every Script Task must reference `<ifl:property key="scriptFunction" value="processData"/>` and `<ifl:property key="script" value="<fileName>"/>`.

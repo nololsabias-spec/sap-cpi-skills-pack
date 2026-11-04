@@ -28,6 +28,9 @@ Before designing the regular expression, check if the user's request leaves any 
 1. **Mandatory Anchoring (`^...$`)**: Every pattern MUST start with `^` and end with `$`. Never emit floating sub-patterns like `(\d+)` without modeling the full string structure (e.g., `^[A-Z]+-\d{4}-(\d+)-[A-Z]{2}$`).
 2. **Anti-ReDoS (Catastrophic Backtracking Mitigation)**: Never nest unbounded quantifiers such as `(.*)+` or `([a-zA-Z0-9]+)+` that can freeze CPI worker threads at 100% CPU.
 3. **Standard Single-Escape Syntax for CPI UI**: Use standard Java/CPI escapes (`\d`, `\w`, `\.`) and **never** escape forward slashes (`/api/v1/...`, never `\/api\/v1\/...`).
+4. **Content Modifier Pre-Extraction & Namespace-Safe XPath (SAP Router Best Practice)**:
+   - Never evaluate complex XPath or regex repeatedly across multiple Router branches. Instead, extract the XML value once in a preceding `Content Modifier` into a typed **Exchange Property** (`java.lang.String`), and evaluate `${property.FieldName} regex '^...$'` in the Router (reserving `${header.*}` only for protocol headers sent to external receivers).
+   - When extracting from XML payloads with shifting or default namespaces in a Content Modifier, use explicit namespace mappings or fallback to `//*[local-name()='ElementName']`.
 
 ### Step 3: Execute the Sandbox & Validator Script (`test-camel-regex.mjs`)
 Always validate the pattern and test cases (`MATCH` and `NO_MATCH`) using `test-camel-regex.mjs`:

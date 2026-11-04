@@ -155,8 +155,9 @@ export function analyzeIflwLocally(iflwXml) {
     }
   }
 
-  // 4. Synchronous ServiceTasks / CallActivities (ExternalCall) without timeout
+  // 4. Synchronous ServiceTasks / CallActivities (ExternalCall) without timeout & Splitters without streaming
   const syncTasksWithoutTimeout = [];
+  const splittersWithoutStreaming = [];
   const taskRegex = /<bpmn2:(serviceTask|callActivity)\b([^>]*)>([\s\S]*?)<\/bpmn2:\1>/gi;
   let tm;
   let serviceTasksCount = 0;
@@ -177,6 +178,35 @@ export function analyzeIflwLocally(iflwXml) {
           name: attrs.name || attrs.id || 'ServiceTask'
         });
       }
+    }
+
+    const isSplitter =
+      /key\s*=\s*"activityType"\s+value\s*=\s*"Splitter"/i.test(inner) ||
+      /<key>activityType<\/key>\s*<value>Splitter<\/value>/i.test(inner);
+    if (isSplitter) {
+      const streamingDisabled =
+        /key\s*=\s*"streaming"\s+value\s*=\s*"false"/i.test(inner) ||
+        /<key>streaming<\/key>\s*<value>false<\/value>/i.test(inner);
+      if (streamingDisabled) {
+        splittersWithoutStreaming.push({
+          id: attrs.id || 'Splitter',
+          name: attrs.name || attrs.id || 'Splitter'
+        });
+      }
+    }
+  }
+
+  // 5b. ExclusiveGateways (Routers) missing Default Route attribute
+  const routersWithoutDefaultRoute = [];
+  const gwRegex = /<bpmn2:exclusiveGateway\b([^>]*)\/?>/gi;
+  let gwm;
+  while ((gwm = gwRegex.exec(iflwXml)) !== null) {
+    const attrs = parseXmlAttributes(gwm[1]);
+    if (!attrs.default) {
+      routersWithoutDefaultRoute.push({
+        id: attrs.id || 'ExclusiveGateway',
+        name: attrs.name || attrs.id || 'Router'
+      });
     }
   }
 
@@ -221,6 +251,8 @@ export function analyzeIflwLocally(iflwXml) {
     unencryptedChannels,
     hardcodedSensitivePatterns,
     syncTasksWithoutTimeout,
+    splittersWithoutStreaming,
+    routersWithoutDefaultRoute,
     contentModifiersReadingBodyToProperty,
     referencedScripts,
     referencedScriptCollections,
