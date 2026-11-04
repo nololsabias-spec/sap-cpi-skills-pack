@@ -288,7 +288,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
       'HEAP_OOM_GETBODY_STRING',
       'Uso de message.getBody(String) sin streaming',
       'Materializar el payload completo como `String` en memoria satura el JVM Heap con cargas medianas o grandes.',
-      'Usa `Reader bodyReader = message.getBody(java.io.Reader)` y ciérralo en un bloque `finally` o con `.withReader`.',
+      'Usa `Reader bodyReader = message.getBody(java.io.Reader)` y pásalo a `.parse(bodyReader)` (o llama a `bodyReader.getText()` SIN argumentos si requieres manipular el String; nunca uses `bodyReader.getText("UTF-8")`). Ciérralo en `finally { bodyReader?.close() }`.',
       findLineNumber(/\.getBody\s*\(\s*(?:java\.lang\.)?String/)
     );
   }
