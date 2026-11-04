@@ -15,7 +15,13 @@ const CHECKS = [
     args: ['--demo', '--json'],
     verify: (out) => {
       const data = JSON.parse(out);
-      return data.totalFiles === 4 && data.heuristics.hasExceptionSubprocess === false && data.heuristics.unencryptedChannels.length === 1;
+      return (
+        data.totalFiles === 4 &&
+        data.heuristics.hasExceptionSubprocess === false &&
+        data.heuristics.unencryptedChannels.length === 1 &&
+        Array.isArray(data.heuristics.manifestIssues) &&
+        data.heuristics.manifestIssues.length === 0
+      );
     }
   },
   {

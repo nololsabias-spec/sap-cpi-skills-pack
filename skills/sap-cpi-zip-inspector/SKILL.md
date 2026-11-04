@@ -46,7 +46,9 @@ Review the deterministic output from `inspect-iflow-zip.mjs` across these 5 mand
    - Detects `<bpmn2:serviceTask>` or `<bpmn2:callActivity>` with `activityType="ExternalCall"` missing an explicit `timeout` property, which risks exhausting worker node threads.
 5. **Heap-Risk Content Modifiers (`CRITICAL` -30 pts each)**:
    - Detects Content Modifiers copying `${body}` or `in.body` into an Exchange Property, which duplicates the entire payload in JVM Heap memory.
-6. **CPILint & SAP Design Guideline Advisory Checks**:
+6. **OSGi Manifest & Root Structure Compliance (`CRITICAL` -40 pts each — `manifestIssues`)**:
+   - Flags any bundle where `META-INF/MANIFEST.MF` is nested inside a subfolder (e.g. `MyIflow/META-INF/MANIFEST.MF` instead of root `META-INF/MANIFEST.MF`), missing, or has any line exceeding **72 bytes UTF-8**, which causes SAP CPI to reject the upload with `Upload the artifact failed. The project must contain a valid manifest file`.
+7. **CPILint & SAP Design Guideline Advisory Checks**:
    - **Splitter Streaming (`splittersWithoutStreaming`)**: Flags `General`/`Iterating Splitter` steps with `streaming="false"`.
    - **Router Default Route (`routersWithoutDefaultRoute`)**: Flags `<bpmn2:exclusiveGateway>` elements missing a `default` route.
    - **Basic Auth & CSRF Protection (`basicAuthChannels` / `csrfDisabledChannels`)**: Flags channels using `BasicAuthentication` (CPILint `CleartextBasicAuth`) or disabling CSRF protection (`xsrfProtection=0` — CPILint `CsrfProtectionRequired`).

@@ -18,6 +18,8 @@ Aplicadas por `inspect-iflow-zip.mjs` y `build-cpi-package.mjs`:
 | `IFLW-006` | `ADVISORY` | **Streaming en Splitters (`streaming=true`)** | Detecta pasos `Splitter` (`General`/`Iterating Splitter`) con `<key>streaming</key><value>false</value>`, recomendando activar streaming para evitar cargar lotes XML/JSON completos en memoria DOM. |
 | `IFLW-007` | `ADVISORY` | **Ruta por Defecto en Routers (`default`)** | Verifica que todo `<bpmn2:exclusiveGateway>` defina su atributo `default` para evitar fallos por mensajes sin ruta coincidente. |
 | `IFLW-008` | `ADVISORY` | **CPILint `CleartextBasicAuth` y `CsrfProtectionRequired`** | Detecta canales configurados con `BasicAuthentication` (recomendando OAuth2 / Client Certificate) o con `xsrfProtection=0` (CSRF deshabilitado). |
+| `OSGI-001` | `CRITICAL` | **Raíz OSGi sin Carpeta Intermedia (`manifestIssues`)** | Verifica que `META-INF/MANIFEST.MF` esté exactamente en la raíz del `.zip` (`META-INF/MANIFEST.MF` y no `Subcarpeta/META-INF/MANIFEST.MF`). Evita el error `Upload the artifact failed. The project must contain a valid manifest file`. |
+| `OSGI-002` | `CRITICAL` | **Límite de 72 Bytes UTF-8 por Línea en `MANIFEST.MF`** | Verifica que ninguna línea física de `META-INF/MANIFEST.MF` supere los 72 bytes UTF-8 y que las continuaciones inicien con espacio simple (`\r\n `). |
 
 ---
 
@@ -87,10 +89,12 @@ Todo script parte de **100 puntos** y se restan puntos según la severidad de ca
 
 ---
 
-## 6. Reglas de Empaquetado OSGi (`build-cpi-package.mjs`)
+## 6. Reglas de Empaquetado OSGi (`build-cpi-package.mjs` y `clone-iflow-bundle.mjs`)
 
-Para que un paquete iFlow + Script Collection sea importable sin errores en SAP Integration Suite:
+Para que un paquete iFlow + Script Collection sea importable sin errores en SAP Integration Suite (`Upload the artifact failed. The project must contain a valid manifest file`):
+- **Estructura en Raíz del ZIP (`stripRootFolderPrefix`)**: `.project`, `metainfo.prop`, `META-INF/MANIFEST.MF` y `src/main/resources/...` deben residir directamente en la raíz del archivo `.zip`, sin ninguna carpeta contenedora intermedia, y ordenados con `.project` y `META-INF/MANIFEST.MF` al inicio del archivo.
+- **Plegado a 72 Bytes UTF-8 (`wrapManifestLine72`)**: Las líneas de `META-INF/MANIFEST.MF` nunca deben superar los **72 bytes UTF-8**; las continuaciones deben dividirse con `\r\n ` (CRLF + espacio inicial) y finalizar con línea en blanco (`\r\n\r\n`).
 - El `MANIFEST.MF` del **Script Collection** debe declarar `Provide-Capability: scriptcollection.<SC_ID>;version:Version="1.0.0"`.
-- El `MANIFEST.MF` del **Integration Flow** debe declarar `Require-Capability: scriptcollection.<SC_ID>;filter:="(&(version>=1.0.0))"` y `SAP-BundleType: IntegrationFlow`.
-- Las líneas de `META-INF/MANIFEST.MF` nunca deben superar los **72 bytes UTF-8** sin continuación por espacio inicial.
+- El `MANIFEST.MF` del **Integration Flow** debe declarar `Require-Capability: scriptcollection.<SC_ID>;filter:="(&(version>=1.0.0))"` (o `resolution:=optional;bundleType:String="ScriptCollection";source:String="reference"`) y `SAP-BundleType: IntegrationFlow`.
 - En el archivo `.iflw`, todo paso de script que invoque una Script Collection debe incluir `<ifl:property><key>scriptBundleId</key><value><SC_ID></value></ifl:property>`.
+- **Subida Individual**: Cada `.zip` (`<ScriptCollection>.zip` y `<Iflow>.zip`) debe importarse individualmente en SAP CPI, nunca subiendo un `.zip` contenedor que agrupe varios archivos `.zip`.

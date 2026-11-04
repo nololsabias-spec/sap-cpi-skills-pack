@@ -67,7 +67,10 @@ node ./scripts/build-cpi-package.mjs <spec.json | --demo> --out-dir ./dist-packa
 
 * OSGi Packager & Validator script: [build-cpi-package.mjs](./scripts/build-cpi-package.mjs)
 * OSGi Bundle Specification: [osgi-bundle-spec.md](./references/osgi-bundle-spec.md)
-* **Verification Gate**: `build-cpi-package.mjs` validates both the `.iflw` BPMN2 XML and every Groovy script before producing `<iflowName>.zip`, `<scriptCollectionName>.zip`, and `Paquete_<iflowName>.zip`. Fix any validation error reported by the script.
+* **Verification Gate & OSGi Manifest Compliance**:
+  - `build-cpi-package.mjs` validates both the `.iflw` BPMN2 XML and every Groovy script before producing `<iflowName>.zip`, `<scriptCollectionName>.zip`, and `Paquete_<iflowName>.zip`.
+  - Places `.project` and `META-INF/MANIFEST.MF` **directly at the root of the `.zip`** (never nested inside a top-level wrapper folder) and wraps all `MANIFEST.MF` lines at **72 bytes UTF-8** with `\r\n ` continuations so SAP CPI never fails with `The project must contain a valid manifest file`.
+  - Always remind the user to upload `<scriptCollectionName>.zip` (in *Add -> Script Collection*) and `<iflowName>.zip` (in *Add -> Integration Flow*) individually, rather than uploading the outer `Paquete_<iflowName>.zip` wrapper.
 
 ---
 
@@ -130,4 +133,5 @@ node ./scripts/clone-iflow-bundle.mjs --update-sc <SC_Origen.zip> --scripts-dir 
 ```
 
 * Cloner & SC Updater script: [clone-iflow-bundle.mjs](./scripts/clone-iflow-bundle.mjs)
-* Verifica finalmente todos los `.zip` generados ejecutando `inspect-iflow-zip.mjs` sobre cada paquete resultante.
+* **Normalización Automática de Estructura OSGi ZIP**: `clone-iflow-bundle.mjs` detecta y elimina automáticamente cualquier carpeta raíz intermedia heredada del `.zip` de origen (`stripRootFolderPrefix`), garantizando que `.project` y `META-INF/MANIFEST.MF` queden siempre en la raíz del `.zip` y con plegado de 72 bytes UTF-8 (`wrapManifestLine72`).
+* Verifica finalmente todos los `.zip` generados ejecutando `inspect-iflow-zip.mjs` sobre cada paquete resultante (comprobando `manifestIssues: []`) e indica al usuario qué archivos `.zip` individuales debe subir en SAP CPI (*Script Collection* vs *Integration Flow*).

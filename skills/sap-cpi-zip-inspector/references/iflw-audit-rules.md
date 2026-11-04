@@ -20,7 +20,11 @@
 - **Regla**: Evitar asignar `${body}` o `${in.body}` en una Exchange Property dentro de un Content Modifier.
 - **Impacto**: Duplica el payload completo en la memoria Heap de la JVM durante toda la vida del Exchange, provocando `OutOfMemoryError: Java heap space` con mensajes medianos o grandes.
 
-## 6. Reglas Adicionales de Gobernanza SAP CPI y CPILint (Severidad: ADVISORY)
+## 6. Validez de Estructura OSGi y `META-INF/MANIFEST.MF` (Severidad: CRÍTICA, -40 pts c/u)
+- **Regla**: `META-INF/MANIFEST.MF` y `.project` deben estar ubicados directamente en la raíz del `.zip` (`META-INF/MANIFEST.MF`, nunca dentro de una subcarpeta como `NombreFlujo/META-INF/MANIFEST.MF`), y ninguna línea del `MANIFEST.MF` puede superar los 72 bytes UTF-8.
+- **Impacto**: Si `META-INF/MANIFEST.MF` está anidado en una carpeta intermedia o supera los 72 bytes por línea, SAP Cloud Integration rechaza la importación con el error `Upload the artifact failed. The project must contain a valid manifest file`.
+
+## 7. Reglas Adicionales de Gobernanza SAP CPI y CPILint (Severidad: ADVISORY)
 - **Streaming en Splitters (`splittersWithoutStreaming`)**: Los pasos `General Splitter` e `Iterating Splitter` deben activar `<key>streaming</key><value>true</value>` para procesar lotes XML/JSON por fragmentos sin cargar todo el árbol DOM en memoria.
 - **Ruta por Defecto en Routers (`routersWithoutDefaultRoute`)**: Todo `<bpmn2:exclusiveGateway>` debe definir una ruta `default` para evitar errores en tiempo de ejecución cuando un mensaje no cumple ninguna condición.
 - **Autenticación y Protección CSRF (`CleartextBasicAuth` / `CsrfProtectionRequired`)**: Se recomienda sustituir `BasicAuthentication` por OAuth2 o Client Certificate, y mantener activa la protección CSRF (`xsrfProtection=1`) en endpoints modificadores HTTP/HTTPS.
