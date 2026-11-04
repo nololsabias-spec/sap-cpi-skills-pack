@@ -12,6 +12,12 @@ Designs, validates, and tests regular expressions and Apache Camel Simple predic
 
 ## Workflow Steps
 
+### Step 0: Interactive Discovery & Clarification Gate (Ask Before Assuming)
+Before designing the regular expression, check if the user's request leaves any boundary condition ambiguous. **Ask concise clarifying questions when needed**:
+1. **Target SAP CPI Step & Source Variable**: Is the regex for a **Router / Filter** condition (`${property.x} regex '...'`) or for a **Content Modifier** value extraction/replacement (`replaceAll`)? What is the exact Header or Property name?
+2. **Exact String Format & Edge Cases**: Ask for 2–3 real examples of strings that **must match** and strings that **must be rejected** (e.g., optional prefixes, allowed country codes, fixed vs variable digit length, case sensitivity).
+3. **Replacement / Extraction Output**: If used in a Content Modifier, what exact substring or reformatted output (`$1`, `$2`) should be produced?
+
 ### Step 1: Identify Target Component & Field
 1. **Target Component**:
    - `Router` / `Filter`: Emits `${header.FieldName} regex '^pattern$'` (or `!regex`).

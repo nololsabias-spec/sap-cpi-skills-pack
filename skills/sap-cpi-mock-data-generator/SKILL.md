@@ -13,6 +13,12 @@ Generates syntactically valid, realistic SAP BTP / ERP mock test payloads (JSON 
 
 ## Workflow Steps
 
+### Step 0: Interactive Discovery & Clarification Gate (Ask Before Assuming)
+Before generating the mock test suite, check if the user's prompt defines the full test scenario. **If details are missing, ask brief clarifying questions first**:
+1. **Contracts & Formats**: How many payloads/contracts are involved in the End-to-End flow (e.g., Inbound Request JSON, Lookup Response XML, Target S/4HANA OData Payload) and what are their structures or XSD/JSON samples?
+2. **Cross-Contract Correlation Keys**: Which business identifiers must match across all contracts in each test case (e.g., `customerId`/`KUNNR`, `orderId`/`VBELN`, `companyCode`/`BUKRS`, `currency`)?
+3. **Volume & Test Scenarios**: How many examples per contract are needed, and which specific edge cases or error scenarios (e.g., invalid tax IDs, negative quantities, special UTF-8 characters, missing mandatory fields) should be included?
+
 ### Step 1: Define Integration Contracts & Correlation Rules
 1. **Contracts**: Identify each payload contract (`name`, `format` [`json` | `xml`], base schema/sample, `count` [1–10], and edge-case instructions such as Spanish NIF/CIF, zero/decimal boundary values, or varied order statuses `NEW`, `APPROVED`, `REJECTED`, `ON_HOLD`).
 2. **Cross-Contract Correlation (`correlateData`)**:

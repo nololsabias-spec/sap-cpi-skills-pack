@@ -18,6 +18,15 @@ Operates in two specialized modes matching `CpiArchitect.jsx`:
 
 ## Modo 1: Generar iFlow + Script Collection (Pipeline en 3 Etapas)
 
+### Etapa 0: Protocolo de Clarificación Interactiva (Preguntar antes de Asumir)
+Antes de generar el plan arquitectónico o el paquete `.zip`, analiza si el prompt del usuario define todos los parámetros críticos del flujo de integración. **Si falta información clave, realiza preguntas breves y estructuradas (proponiendo valores recomendados) para obtener el contexto necesario**:
+1. **Sistemas Origen y Destino (Sender / Receiver)**: ¿Qué adaptadores utilizan (HTTPS, OData v2/v4, SFTP, SOAP, IDoc, JMS, ProcessDirect) y si la comunicación es síncrona (`Request-Reply`) o asíncrona?
+2. **Contratos de Datos y Transformaciones**: ¿Qué formato entra y sale (JSON, XML, IDoc, CSV) y qué reglas de negocio o enriquecimientos (`Content Modifier`, `Router`, `Groovy Script`) deben aplicarse?
+3. **Seguridad y Parámetros Externalizados**: ¿Qué método de autenticación requiere cada endpoint (OAuth2 Client Credentials, Basic Auth / User Credential alias, Client Certificate) y qué timeouts se esperan?
+4. **Gestión de Errores y Alertas**: ¿Qué debe hacer el `Exception Subprocess` cuando ocurre un fallo (enviar alerta por correo, guardar en cola JMS, retornar estructura de error HTTP personalizada)?
+
+> **Regla de Vía Rápida**: Si el usuario ya proporcionó una especificación completa o pide explícitamente que asumas valores por defecto de mejores prácticas SAP, procede directamente a la Etapa 1 documentando los supuestos tomados.
+
 ### Etapa 1: Plan Arquitectónico (`plan.json`)
 Design the JSON plan containing:
 - `iflowName` (PascalCase with underscores, e.g., `Order_Sync_S4HANA`)
@@ -54,6 +63,11 @@ node ./scripts/build-cpi-package.mjs <spec.json | --demo> --out-dir ./dist-packa
 ---
 
 ## Modo 2: Documentar iFlow Existente (Ingeniería Inversa en 8 Secciones)
+
+### Paso 0: Clarificación de Alcance Documental
+Antes de redactar la documentación técnica, verifica:
+1. Si el usuario ha proporcionado la ruta al archivo `.zip` o `.iflw`. Si no lo ha indicado, pídele la ruta del paquete.
+2. Si necesita enfatizar algún aspecto específico para la audiencia del documento (ej. equipo de Operaciones/Soporte, auditoría de Seguridad BTP, o traspaso a Producción) o añadir contexto de negocio que no figure dentro del `.iflw`.
 
 ### Paso 1: Extraer Contexto y Heurísticas del `.zip`
 Run `extract-for-docs.mjs` on the existing `.zip` bundle:

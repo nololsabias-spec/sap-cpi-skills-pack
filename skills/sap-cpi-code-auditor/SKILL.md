@@ -15,6 +15,14 @@ Implements the 2-Stage Inverted Auditor pipeline for SAP Cloud Integration Groov
 
 ## Workflow Steps
 
+### Step 0: Interactive Discovery & Clarification Gate
+Before refactoring the Groovy script, check whether the user's prompt provides enough context for a lossless refactor. **If critical details are ambiguous, ask concise clarifying questions before altering business logic**:
+1. **Payload Volume & Structure**: If the script parses XML/JSON without clear structure (or mixes read-only extraction with in-place node mutation), ask whether the payload is read-only (`XmlSlurper`) or mutated in-place (`XmlParser`) and what average/peak payload size is expected.
+2. **Business Keys for Custom Header Properties**: Ask which business identifier field (e.g., `OrderID`, `InvoiceNumber`, `KUNNR`) should be indexed in the SAP CPI Message Processing Log (`messageLog.addCustomHeaderProperty`).
+3. **Target Timezone & Error Contract**: Confirm whether timestamps must strictly use `UTC` or a specific local business timezone (e.g., `Europe/Madrid`), and whether exceptions should rethrow to trigger the CPI `Exception Subprocess`.
+
+> **Fast-Track Rule**: If the script's intent is self-contained or the user asks for an immediate audit/refactor, run Step 1 immediately and state any assumptions clearly.
+
 ### Step 1: Run Static Pre-Audit on the Original Script
 Run `audit-groovy.mjs` against the original script (or `--demo` to test the canonical vulnerable script):
 

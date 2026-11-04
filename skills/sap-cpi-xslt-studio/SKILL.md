@@ -13,6 +13,13 @@ Generates and validates production-ready XSLT 1.0 and XSLT 2.0/3.0 stylesheets (
 
 ## Workflow Steps
 
+### Step 0: Interactive Discovery & Clarification Gate (Ask Before Assuming)
+Before authoring the XSLT stylesheet, inspect the user's prompt. **If any of the following mapping specifications are missing or ambiguous, ask targeted clarifying questions first**:
+1. **Source & Target XML Structures**: Ask for sample source XML and expected target XML (or XSD schemas), including namespaces and prefixes, if not provided.
+2. **SAP CPI XSLT Engine Version**: Confirm whether the iFlow step uses **XSLT 2.0 / 3.0 (Saxon-HE — recommended)** or legacy **XSLT 1.0 (Apache Xalan)**, as grouping and functions differ completely.
+3. **Exchange Headers / Properties & Lookups**: Ask if the transformation needs to read/write SAP CPI Headers or Exchange Properties (`cpi:getHeader`, `cpi:setProperty`) or merge a secondary XML document (`<xsl:param>` / `document()`).
+4. **Null / Missing Field Rules**: Ask how optional or empty nodes should be handled (omit the target tag, emit an empty tag, or output a default value).
+
 ### Step 1: Determine Engine & Mapping Contract
 1. **Select Engine**:
    - **XSLT 2.0 / 3.0 (Saxon-HE — Recommended)**: Supports `<xsl:for-each-group>`, `current-grouping-key()`, regex (`matches`, `tokenize`), and `exclude-result-prefixes="#all"`.

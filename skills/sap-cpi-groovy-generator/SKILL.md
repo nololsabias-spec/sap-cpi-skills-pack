@@ -12,6 +12,15 @@ Generates production-ready, memory-safe Apache Groovy scripts for the official S
 
 ## Workflow Steps
 
+### Step 0: Interactive Discovery & Clarification Gate (Ask Before Assuming)
+Before generating any Groovy code, inspect the user's prompt for missing functional or technical context. **If any of the following critical details are ambiguous or missing, ask concise, targeted clarifying questions (grouped in a single turn with recommended defaults) before writing the script**:
+1. **Input & Output Payload Contracts**: What is the exact input format (XML, JSON, CSV, plain text) and target output structure? Ask for a sample payload or field names if not provided.
+2. **Headers, Exchange Properties & Attachments**: Which SAP CPI Headers or Exchange Properties need to be read or written (e.g., `SAP_ApplicationID`, custom routing properties)?
+3. **External CPI Services**: Does the script require `SecureStoreService` (credential alias name?), `ValueMappingApi` (agency/identifier?), or custom MPL attachments?
+4. **Error & Edge-Case Behavior**: Should missing fields throw a hard `CPI-ERR:` exception to trigger the `Exception Subprocess`, or populate a default value / empty array?
+
+> **Fast-Track Rule**: Only skip asking questions if the user's prompt already specifies the input/output contract and transformation rules, or if the user explicitly asks to proceed with sensible defaults.
+
 ### Step 1: Gather Message Contracts & Select Modular Directives
 Identify from the user's request:
 1. **Input Sources**: Body (`message.getBody(java.io.Reader)`), Exchange Properties (`message.getProperty('...')`), or Attachments (`message.getAttachments()`), plus expected Input Headers/Properties.

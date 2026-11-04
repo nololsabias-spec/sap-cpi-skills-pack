@@ -13,6 +13,12 @@ This skill inspects OSGi `.zip` bundles exported from SAP Cloud Integration (SAP
 
 ## Workflow Steps
 
+### Step 0: Interactive Discovery & Clarification Gate
+Before running the audit or generating the remediation plan, check if any context is missing and **ask brief clarifying questions when needed**:
+1. **Target Artifact Path**: If the user has not specified which `.zip` bundle or `.iflw` file to inspect, ask for the path (or offer to run `--demo` on a sample bundle).
+2. **Operational & Landscape Context**: If architectural findings depend on the deployment environment (e.g., whether an internal endpoint is behind SAP Cloud Connector where `http://` virtual hosts are intentional, expected payload sizes in MB, or corporate timeout SLAs), ask the user so the remediation report is tailored and accurate.
+3. **Remediation Depth**: Ask whether they want only the diagnostic audit report (`0–100` score + findings matrix) or if they also want the refactored Groovy scripts and patched `.iflw` generated automatically.
+
 ### Step 1: Run Deterministic Bundle Extraction & Static Heuristics
 Execute the inspection script against the user's `.zip` package or `.iflw` XML file (or run with `--demo` to generate and inspect a sample vulnerable iFlow bundle):
 

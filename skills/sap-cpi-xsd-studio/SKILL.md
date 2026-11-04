@@ -12,6 +12,12 @@ Infers and validates canonical W3C XSD 1.0 schemas from single or multiple JSON/
 
 ## Workflow Steps
 
+### Step 0: Interactive Discovery & Clarification Gate (Ask Before Assuming)
+Before inferring or writing the W3C XSD 1.0 schema, check if key schema constraints are missing. **Ask brief clarifying questions if needed**:
+1. **Sample Payloads & Cardinality**: If the user only provided a single sample payload, ask which fields are optional (`minOccurs="0"`), which arrays can repeat (`maxOccurs="unbounded"`), or if they have a second partial sample to automatically infer optionality.
+2. **Target Namespace & Root Element**: Ask for the desired root element name (e.g., `SalesOrderRequest`), `targetNamespace` URI, and prefix (`ns0`), or confirm if it should be a no-namespace schema.
+3. **Strict Data Type Constraints**: Ask if specific string fields require `<xsd:restriction>` facets (`maxLength`, `pattern`, `enumeration` for SAP codes like `BUKRS`, `KUNNR`, `WAERS`, or decimal `totalDigits`/`fractionDigits`).
+
 ### Step 1: Gather Schema Metadata & Sample Payloads
 1. **Schema Parameters**:
    - `rootElement` (e.g., `SalesOrder`, `BusinessPartner`, `Invoice`)

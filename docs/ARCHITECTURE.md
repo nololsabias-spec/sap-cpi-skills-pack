@@ -9,8 +9,10 @@ El objetivo arquitectónico es eliminar las alucinaciones frecuentes de los mode
 ```mermaid
 flowchart LR
     U[" Desarrollador / Arquitecto SAP CPI "] --> A[" Agente IA (SKILL.md) "]
+    A -->|Step 0: Prompt incompleto| Q[" Preguntas de Clarificación al Usuario "]
+    Q --> U
     U --> C[" Terminal / CI-CD "]
-    A --> G[" Generación de Artefacto (.groovy, .xslt, .xsd, .iflw) "]
+    A -->|Contexto completo| G[" Generación de Artefacto (.groovy, .xslt, .xsd, .iflw) "]
     G --> V[" Validador Determinista (scripts/*.mjs) "]
     C --> V
     V -->|Código Salida 0| Z[" Empaquetado OSGi (.zip) / Entrega Validada "]
@@ -60,6 +62,7 @@ Cada una de las 8 skills en `skills/<nombre-skill>/` sigue una estructura estand
 
 1. **`SKILL.md` (Instrucciones Operativas del Agente):**
    - Frontmatter YAML con `name` y `description` optimizados para activación automática por contexto.
+   - **Step 0 (`Interactive Discovery & Clarification Gate`):** Protocolo obligatorio que instruye al agente a evaluar si faltan parámetros funcionales o técnicos en el prompt del usuario (contratos de entrada/salida, versión de motor XSLT, adaptadores, cabeceras/propiedades, claves de correlación o manejo de errores) y formular preguntas concisas antes de asumir o generar código.
    - Reglas de arquitectura obligatorias y flujo de trabajo paso a paso.
    - Instrucción explícita de validar siempre la salida ejecutando su script CLI correspondiente.
 2. **`scripts/*.mjs` (Herramientas CLI Deterministas):**
