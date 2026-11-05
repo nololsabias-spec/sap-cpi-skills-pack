@@ -192,16 +192,41 @@ export function readZipEntries(inputPathOrBuffer) {
 
 /**
  * Extracts the text content of a single specific file inside a ZIP bundle in memory.
- * Matches by exact path, exact filename, or substring.
+ * Matches by exact path, exact filename, wildcard/glob (*, ?), regex, basename, or substring.
+ * Handles missing or corrupt ZIP inputs safely without uncaught exceptions.
  * @param {string | Buffer} inputPathOrBuffer
  * @param {string} targetFileOrPattern
+ * @returns {{ success: boolean, found: boolean, file?: { name: string, path: string, size: number, content: string }, error?: string, totalFilesInBundle: number, availableFiles?: string[] }}
  */
 export function extractBundleFile(inputPathOrBuffer, targetFileOrPattern) {
-  const entries = readZipEntries(inputPathOrBuffer);
-  const pattern = (targetFileOrPattern || '').trim().toLowerCase();
-
-  if (!pattern) {
+  let entries;
+  try {
+    if (typeof inputPathOrBuffer === 'string') {
+      if (!fs.existsSync(inputPathOrBuffer)) {
+        return {
+          success: false,
+          found: false,
+          error: `El archivo ZIP especificado no existe: ${inputPathOrBuffer}`,
+          totalFilesInBundle: 0,
+          availableFiles: []
+        };
+      }
+    }
+    entries = readZipEntries(inputPathOrBuffer);
+  } catch (err) {
     return {
+      success: false,
+      found: false,
+      error: `Error al leer o descomprimir el paquete ZIP: ${err.message}`,
+      totalFilesInBundle: 0,
+      availableFiles: []
+    };
+  }
+
+  const raw = (targetFileOrPattern || '').trim();
+  if (!raw) {
+    return {
+      success: false,
       found: false,
       error: 'Se requiere especificar un nombre de archivo o patrón de ruta.',
       totalFilesInBundle: entries.length,
@@ -209,16 +234,47 @@ export function extractBundleFile(inputPathOrBuffer, targetFileOrPattern) {
     };
   }
 
-  let match = entries.find((e) => e.path.toLowerCase() === pattern);
+  const lower = raw.toLowerCase();
+  const baseName = raw.split(/[/\\]/).pop().toLowerCase();
+
+  // 1. Exact path match (case-insensitive)
+  let match = entries.find((e) => e.path.toLowerCase() === lower);
+
+  // 2. Exact filename match (case-insensitive)
   if (!match) {
-    match = entries.find((e) => e.name.toLowerCase() === pattern);
+    match = entries.find((e) => e.name.toLowerCase() === lower);
   }
+
+  // 3. Glob pattern matching (* or ?)
+  if (!match && (raw.includes('*') || raw.includes('?'))) {
+    try {
+      const globRxStr = '^' + raw.replace(/[-[\]{}()+.,\\^$|#\s]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$';
+      const globRx = new RegExp(globRxStr, 'i');
+      match = entries.find((e) => globRx.test(e.name) || globRx.test(e.path));
+    } catch {}
+  }
+
+  // 4. Regular expression matching (if user passed regex syntax like .*, \\., ^, $, [], etc.)
+  if (!match && /[\^$*+?()[\]{}|\\]/.test(raw)) {
+    try {
+      const rx = new RegExp(raw, 'i');
+      match = entries.find((e) => rx.test(e.name) || rx.test(e.path));
+    } catch {}
+  }
+
+  // 5. Basename fallback if directory didn't match (e.g. scenarioflows/zerocode/X.iflw -> X.iflw)
+  if (!match && baseName && baseName !== lower) {
+    match = entries.find((e) => e.name.toLowerCase() === baseName);
+  }
+
+  // 6. Substring match fallback
   if (!match) {
-    match = entries.find((e) => e.path.toLowerCase().includes(pattern) || e.name.toLowerCase().includes(pattern));
+    match = entries.find((e) => e.path.toLowerCase().includes(lower) || e.name.toLowerCase().includes(lower));
   }
 
   if (match) {
     return {
+      success: true,
       found: true,
       file: {
         name: match.name,
@@ -231,6 +287,7 @@ export function extractBundleFile(inputPathOrBuffer, targetFileOrPattern) {
   }
 
   return {
+    success: false,
     found: false,
     error: `Archivo '${targetFileOrPattern}' no encontrado en el paquete.`,
     totalFilesInBundle: entries.length,

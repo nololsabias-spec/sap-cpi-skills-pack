@@ -157,9 +157,11 @@ Genera colecciones Postman v2.1 y especificaciones OpenAPI 3.0.3 listas para pru
 
 ```bash
 node ./scripts/export-api-client.mjs <iflow.zip | --demo> [--out-dir <carpeta>] [--base-url <url-tenant>] [--format postman|openapi|both] [--json]
+node ./scripts/export-api-client.mjs <iflow.zip | --demo> --endpoints [--json]
 ```
 
 * Script CLI: [export-api-client.mjs](./scripts/export-api-client.mjs)
+* **Extracción de Matriz de Endpoints (`--endpoints` o MCP `cpi_get_iflow_endpoints`)**: Extrae en milisegundos los canales inbound y outbound, detecta protección CSRF (`isCsrfProtected`), resolución de direcciones y timeouts desde `parameters.prop`, y rechaza con gracia paquetes sin `.iflw` como Script Collections.
 * **Handshake CSRF Automático**: Genera una petición GET independiente y programa un script `prerequest` en el POST (`pm.sendRequest` con `X-CSRF-Token: Fetch` y `Basic {{CPI_BASIC_AUTH}}`) para autorizar llamadas de forma autónoma tanto en Postman UI como en Newman / CI/CD.
 * **Resolución de Parámetros Externalizados**: Si la URL del adaptador remitente usa `{{param}}` (ej. `{{StorefrontEndpoint}}`), se resuelve automáticamente leyendo `parameters.prop`.
 * **Esquemas y Payloads Duales**: Sintetiza ejemplos tanto en `application/xml` como en `application/json` a partir de los esquemas XSD del paquete.

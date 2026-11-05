@@ -19,6 +19,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readZipEntries } from '../../../shared/zip-utils.mjs';
 
+export function readTextFileSafely(filePath) {
+  const buf = fs.readFileSync(filePath);
+  if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) {
+    return buf.subarray(2).toString('utf16le');
+  }
+  if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) {
+    return buf.subarray(2).swap16().toString('utf16le');
+  }
+  if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+    return buf.subarray(3).toString('utf8');
+  }
+  return buf.toString('utf8');
+}
+
 export function stripComments(code) {
   return code
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
@@ -555,9 +569,22 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   };
 }
 
+export const CANONICAL_PATTERNS = [
+  'json-streaming',
+  'xml-slurper',
+  'mpl-custom-headers',
+  'oauth-token-inject',
+  'dynamic-routing-header',
+  'base64-attachment'
+];
+
 export function generateCanonicalGroovyTemplate(pattern = 'json-streaming', options = {}) {
+  if (!CANONICAL_PATTERNS.includes(pattern)) {
+    throw new Error(`Patrón no válido "${pattern}". Patrones disponibles: ${CANONICAL_PATTERNS.join(', ')}`);
+  }
   const apiVersion = options.apiVersion === 'v2' ? 'v2' : 'v1';
   const scriptName = options.scriptName || 'ProcessData.groovy';
+  const customComments = Boolean(options.customComments);
   const messageImport = apiVersion === 'v2'
     ? 'import com.sap.it.script.v2.api.Message'
     : 'import com.sap.gateway.ip.core.customdev.util.Message';
@@ -565,7 +592,55 @@ export function generateCanonicalGroovyTemplate(pattern = 'json-streaming', opti
   let code = '';
   switch (pattern) {
     case 'xml-slurper':
-      code = `${messageImport}
+      code = customComments
+        ? `// ============================================================================
+// PATRÓN: XML Slurper con Protección XXE Integral
+// Cumplimiento de Directrices SAP CPI:
+// 1. Prevención XXE: Deshabilitación obligatoria de DOCTYPE y entidades externas.
+// 2. Streaming anti-OOM: Reader directo del body sin materializar a String en Heap.
+// 3. GPath defensivo: Navegación segura con operador ?. y fallback.
+// 4. Observabilidad: addCustomHeaderProperty condicional en Message Processing Log.
+// ============================================================================
+${messageImport}
+import groovy.util.XmlSlurper
+import groovy.transform.Field
+import java.io.Reader
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+@Field final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneId.of("UTC"))
+
+Message processData(Message message) {
+    // 1. Obtener Reader para streaming de XML sin sobrecargar la memoria heap
+    Reader bodyReader = message.getBody(java.io.Reader)
+    try {
+        if (bodyReader == null) {
+            throw new IllegalArgumentException("Cuerpo XML vacio en el mensaje.")
+        }
+        // 2. Endurecimiento estricto contra vulnerabilidades XXE y XML Entity Expansion
+        def parser = new XmlSlurper(false, false)
+        parser.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        parser.setFeature("http://xml.org/sax/features/external-general-entities", false)
+        parser.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+
+        // 3. Parseo defensivo y extracción con operador de navegación segura
+        def rootNode = parser.parse(bodyReader)
+        def documentId = rootNode.'Header'?.'DocumentID'?.text() ?: "N/A"
+
+        message.setProperty("DocumentID", documentId)
+        message.setHeader("Content-Type", "application/xml; charset=utf-8")
+
+        // 4. Clave de búsqueda en MPL para auditoría y correlación en el Monitor CPI
+        def messageLog = messageLogFactory?.getMessageLog(message)
+        messageLog?.addCustomHeaderProperty("DocumentID", documentId)
+    } finally {
+        // 5. Cierre garantizado del Reader para liberar el descriptor de E/S
+        bodyReader?.close()
+    }
+    return message
+}
+`
+        : `${messageImport}
 import groovy.util.XmlSlurper
 import groovy.transform.Field
 import java.io.Reader
@@ -602,7 +677,45 @@ Message processData(Message message) {
       break;
 
     case 'mpl-custom-headers':
-      code = `${messageImport}
+      code = customComments
+        ? `// ============================================================================
+// PATRÓN: Gobernanza de Message Processing Log (MPL) y Observabilidad
+// Cumplimiento de Directrices SAP CPI:
+// 1. Acceso seguro a MessageLogFactory mediante operador safe-navigation.
+// 2. Identificación de negocio mediante addCustomHeaderProperty para búsqueda en Monitor.
+// 3. Estado personalizado del MPL para visibilidad operativa (COMPLETED_WITH_WARNINGS).
+// 4. Adjuntos condicionantes: addAttachmentAsString condicionado para evitar saturar base de datos.
+// ============================================================================
+${messageImport}
+import groovy.transform.Field
+
+@Field final String STATUS_WARNING = "COMPLETED_WITH_WARNINGS"
+
+Message processData(Message message) {
+    // 1. Obtención segura del MessageLog para el exchange actual
+    def messageLog = messageLogFactory?.getMessageLog(message)
+    if (messageLog != null) {
+        // 2. Extracción de clave de negocio con fallback
+        def businessId = message.getHeader("SAP_ApplicationID") ?: message.getProperty("BusinessKey") ?: "N/A"
+        messageLog.addCustomHeaderProperty("BusinessKey", businessId.toString())
+
+        // 3. Configuración de estado visual de advertencia si existen alertas funcionales
+        def hasWarnings = message.getProperty("HasValidationWarnings") == "true"
+        if (hasWarnings) {
+            message.setHeader("SAP_MessageProcessingLogCustomStatus", STATUS_WARNING)
+        }
+
+        // 4. Adjunto de traza condicionado para evitar crecimiento descontrolado de la BD
+        def logPayload = message.getProperty("EnablePayloadAttachment") == "true"
+        if (logPayload) {
+            def snapshot = message.getProperty("ErrorSnapshot") ?: "Snapshot de ejecucion"
+            messageLog.addAttachmentAsString("Snapshot_Trace", snapshot.toString(), "text/plain")
+        }
+    }
+    return message
+}
+`
+        : `${messageImport}
 import groovy.transform.Field
 
 @Field final String STATUS_WARNING = "COMPLETED_WITH_WARNINGS"
@@ -630,7 +743,41 @@ Message processData(Message message) {
       break;
 
     case 'oauth-token-inject':
-      code = `${messageImport}
+      code = customComments
+        ? `// ============================================================================
+// PATRÓN: Inyección y Verificación Proactiva de Token OAuth 2.0
+// Cumplimiento de Directrices SAP CPI:
+// 1. Verificación proactiva de caducidad con margen de seguridad (60 segundos).
+// 2. Control de flujo de integración mediante la propiedad RequiresTokenRefresh.
+// 3. Inyección segura de cabecera Authorization Bearer sin exponer secretos en trazas.
+// ============================================================================
+${messageImport}
+import groovy.transform.Field
+import java.time.Instant
+
+@Field final String BEARER_PREFIX = "Bearer "
+
+Message processData(Message message) {
+    // 1. Recuperar token en caché y marca temporal de caducidad
+    def accessToken = message.getProperty("OAuth_AccessToken")
+    def expiresAt = message.getProperty("OAuth_ExpiresAt")
+
+    // 2. Comparación en epoch seconds con 60s de margen para renovar antes del vencimiento
+    long now = Instant.now().getEpochSecond()
+    long expiryTime = expiresAt ? Long.parseLong(expiresAt.toString()) : 0L
+
+    if (!accessToken || now >= (expiryTime - 60)) {
+        // Token caducado o ausente: activar flag para invocar subproceso de refresco OAuth
+        message.setProperty("RequiresTokenRefresh", "true")
+    } else {
+        // Token válido: inyectar cabecera Authorization Bearer
+        message.setHeader("Authorization", BEARER_PREFIX + accessToken.toString().trim())
+        message.setProperty("RequiresTokenRefresh", "false")
+    }
+    return message
+}
+`
+        : `${messageImport}
 import groovy.transform.Field
 import java.time.Instant
 
@@ -655,7 +802,48 @@ Message processData(Message message) {
       break;
 
     case 'dynamic-routing-header':
-      code = `${messageImport}
+      code = customComments
+        ? `// ============================================================================
+// PATRÓN: Enrutamiento Dinámico por Cabeceras (ProcessDirect)
+// Cumplimiento de Directrices SAP CPI:
+// 1. Enrutamiento desacoplado mediante la cabecera CamelProcessDirectAddress.
+// 2. Fallback determinista para evitar fallos de enrutamiento no contemplados.
+// 3. Trazabilidad completa registrando TargetRouteAddress en properties.
+// ============================================================================
+${messageImport}
+import groovy.transform.Field
+
+@Field final String DEFAULT_ROUTE = "/cpi/route/fallback"
+@Field final String ROUTE_S4 = "/cpi/route/s4hana"
+@Field final String ROUTE_CRM = "/cpi/route/crm"
+
+Message processData(Message message) {
+    // 1. Obtener identificador del sistema destino desde Header o Property
+    def targetSystem = message.getHeader("TargetSystem") ?: message.getProperty("TargetSystem") ?: ""
+    String destinationAddress
+
+    // 2. Mapeo determinista con ruta fallback por defecto
+    switch (targetSystem.toString().toUpperCase()) {
+        case "S4":
+        case "S4HANA":
+            destinationAddress = ROUTE_S4
+            break
+        case "CRM":
+        case "SALESFORCE":
+            destinationAddress = ROUTE_CRM
+            break
+        default:
+            destinationAddress = DEFAULT_ROUTE
+            break
+    }
+
+    // 3. Asignar dirección ProcessDirect para el adaptador dinámico Camel
+    message.setHeader("CamelProcessDirectAddress", destinationAddress)
+    message.setProperty("TargetRouteAddress", destinationAddress)
+    return message
+}
+`
+        : `${messageImport}
 import groovy.transform.Field
 
 @Field final String DEFAULT_ROUTE = "/cpi/route/fallback"
@@ -688,7 +876,35 @@ Message processData(Message message) {
       break;
 
     case 'base64-attachment':
-      code = `${messageImport}
+      code = customComments
+        ? `// ============================================================================
+// PATRÓN: Decodificación y Gestión de Adjuntos Binarios Base64
+// Cumplimiento de Directrices SAP CPI:
+// 1. Decodificación nativa con java.util.Base64 de alto rendimiento y bajo consumo heap.
+// 2. Inyección de byte[] en el cuerpo sin corrupción de codificación de caracteres.
+// 3. Configuración explícita de cabeceras MIME y Content-Disposition para downstream.
+// ============================================================================
+${messageImport}
+import groovy.transform.Field
+import java.util.Base64
+
+@Field final String ATTACHMENT_NAME = "Attachment_Decoded.pdf"
+@Field final String ATTACHMENT_MIME = "application/pdf"
+
+Message processData(Message message) {
+    // 1. Obtener contenido codificado en Base64 desde el exchange
+    def base64Content = message.getProperty("Base64Document") ?: ""
+    if (base64Content) {
+        // 2. Decodificar directamente a byte[] nativo
+        byte[] decodedBytes = Base64.getDecoder().decode(base64Content.toString().trim())
+        message.setBody(decodedBytes)
+        message.setHeader("Content-Type", ATTACHMENT_MIME)
+        message.setHeader("Content-Disposition", "attachment; filename=\\"" + ATTACHMENT_NAME + "\\"")
+    }
+    return message
+}
+`
+        : `${messageImport}
 import groovy.transform.Field
 import java.util.Base64
 
@@ -710,7 +926,56 @@ Message processData(Message message) {
 
     case 'json-streaming':
     default:
-      code = `${messageImport}
+      code = customComments
+        ? `// ============================================================================
+// PATRÓN: JSON Streaming con JsonSlurperClassic y JsonOutput
+// Cumplimiento de Directrices SAP CPI:
+// 1. Streaming anti-OOM: Reader directo del body sin materializar a String en Heap.
+// 2. Parser seguro: JsonSlurperClassic evita fugas de memoria y proxies no serializables.
+// 3. Manejo de tiempo: ZoneId UTC explícito para neutralizar desvíos de reloj.
+// 4. Observabilidad: addCustomHeaderProperty condicional con comprobación de nulidad.
+// ============================================================================
+${messageImport}
+import groovy.json.JsonSlurperClassic
+import groovy.json.JsonOutput
+import groovy.transform.Field
+import java.io.Reader
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+@Field final String SOURCE_SYSTEM = "SAP_CPI"
+@Field final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneId.of("UTC"))
+
+Message processData(Message message) {
+    // 1. Obtener Reader para streaming sin cargar el payload completo en memoria heap
+    Reader bodyReader = message.getBody(java.io.Reader)
+    try {
+        if (bodyReader == null) {
+            throw new IllegalArgumentException("Payload vacio recibido en el mensaje.")
+        }
+        // 2. Parseo seguro con JsonSlurperClassic compatible con Java Collections
+        def parsedJson = new JsonSlurperClassic().parse(bodyReader)
+        parsedJson.processedAt = ISO_FORMATTER.format(Instant.now())
+        parsedJson.source = SOURCE_SYSTEM
+
+        // 3. Serialización de salida segura y asignación de Content-Type
+        message.setBody(JsonOutput.toJson(parsedJson))
+        message.setHeader("Content-Type", "application/json; charset=utf-8")
+
+        // 4. Observabilidad en MPL con comprobación de MessageLogFactory
+        def messageLog = messageLogFactory?.getMessageLog(message)
+        if (messageLog != null && parsedJson.orderId != null) {
+            messageLog.addCustomHeaderProperty("OrderId", parsedJson.orderId.toString())
+        }
+    } finally {
+        // 5. Cierre defensivo del Stream para liberar descriptores de E/S
+        bodyReader?.close()
+    }
+    return message
+}
+`
+        : `${messageImport}
 import groovy.json.JsonSlurperClassic
 import groovy.json.JsonOutput
 import groovy.transform.Field
@@ -753,6 +1018,7 @@ Message processData(Message message) {
     pattern,
     apiVersion,
     scriptName,
+    customComments,
     score: lint.score,
     passed: lint.passed,
     findingsCount: lint.findings.length,
@@ -772,16 +1038,36 @@ if (isMain) {
 
   if (args.includes('--template')) {
     const tIdx = args.indexOf('--template');
-    const pattern = args[tIdx + 1] || 'json-streaming';
+    const pattern = args[tIdx + 1];
+    if (!pattern || !CANONICAL_PATTERNS.includes(pattern)) {
+      console.error(`Error: Patrón no válido "${pattern || ''}". Patrones disponibles: ${CANONICAL_PATTERNS.join(', ')}`);
+      process.exit(1);
+    }
     const apiIdx = args.indexOf('--api');
     const apiVersion = apiIdx !== -1 ? args[apiIdx + 1] : 'v1';
     const jsonFlag = args.includes('--json');
-    const templateRes = generateCanonicalGroovyTemplate(pattern, { apiVersion });
+    const rawFlag = args.includes('--raw');
+    const commentsFlag = args.includes('--comments');
+    const outIdx = args.indexOf('--out');
+    const outPath = outIdx !== -1 && args[outIdx + 1] ? path.resolve(args[outIdx + 1]) : null;
+
+    const templateRes = generateCanonicalGroovyTemplate(pattern, {
+      apiVersion,
+      customComments: commentsFlag
+    });
+
+    if (outPath) {
+      fs.mkdirSync(path.dirname(outPath), { recursive: true });
+      fs.writeFileSync(outPath, templateRes.code, 'utf8');
+    }
+
     if (jsonFlag) {
       console.log(JSON.stringify(templateRes, null, 2));
+    } else if (rawFlag) {
+      console.log(templateRes.code);
     } else {
-      console.log(`=== PLANTILLA GROOVY CANÓNICA SAP CPI (Score: ${templateRes.score}/100) ===`);
-      console.log(`Patrón: ${templateRes.pattern} | API: ${templateRes.apiVersion}\n`);
+      console.log(`// === PLANTILLA GROOVY CANÓNICA SAP CPI (Score: ${templateRes.score}/100) ===`);
+      console.log(`// Patrón: ${templateRes.pattern} | API: ${templateRes.apiVersion}\n`);
       console.log(templateRes.code);
     }
     process.exit(templateRes.passed ? 0 : 1);
@@ -804,7 +1090,7 @@ if (isMain) {
     for (const entry of entries) {
       if (entry.isFile() && (entry.name.endsWith('.groovy') || entry.name.endsWith('.gsh'))) {
         const full = path.join(targetPath, entry.name);
-        scriptsToValidate.push({ name: entry.name, code: fs.readFileSync(full, 'utf8') });
+        scriptsToValidate.push({ name: entry.name, code: readTextFileSafely(full) });
       }
     }
   } else if (targetPath.toLowerCase().endsWith('.zip')) {
@@ -816,7 +1102,7 @@ if (isMain) {
       }
     }
   } else {
-    scriptsToValidate.push({ name: path.basename(targetPath), code: fs.readFileSync(targetPath, 'utf8') });
+    scriptsToValidate.push({ name: path.basename(targetPath), code: readTextFileSafely(targetPath) });
   }
 
   if (scriptsToValidate.length === 0) {

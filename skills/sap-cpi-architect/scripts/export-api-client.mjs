@@ -18,8 +18,9 @@ import { inspectBundle, buildDemoBundleZipBuffer } from '../../sap-cpi-zip-inspe
 export function extractParametersMap(report) {
   const map = {};
   const propEntry = (report.catalog?.parameterFiles || []).find((f) => f.path.endsWith('parameters.prop'));
-  if (propEntry && propEntry.text) {
-    const lines = propEntry.text.split(/\r?\n/);
+  const rawText = propEntry?.content || propEntry?.text || '';
+  if (rawText) {
+    const lines = rawText.split(/\r?\n/);
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
@@ -34,9 +35,32 @@ export function extractParametersMap(report) {
   return map;
 }
 
-export function extractInboundEndpointsFromIflw(iflwXml, propMap = {}) {
+export function parseParticipants(iflwXml) {
+  const senders = new Set();
+  const receivers = new Set();
+  if (!iflwXml) return { senders, receivers };
+  const pRegex = /<bpmn2:participant\b([^>]*)\/?>/gi;
+  let pm;
+  while ((pm = pRegex.exec(iflwXml)) !== null) {
+    const raw = pm[1];
+    const id = (raw.match(/\bid="([^"]+)"/) || [])[1];
+    const type = (raw.match(/\bifl:type="([^"]+)"/) || [])[1] || '';
+    const name = (raw.match(/\bname="([^"]+)"/) || [])[1] || '';
+    if (!id) continue;
+    if (/Sender/i.test(type) || /Sender/i.test(name) || /Sender/i.test(id)) {
+      senders.add(id);
+    } else if (/Receiv?er/i.test(type) || /Receiv?er/i.test(name) || /Receiv?er/i.test(id)) {
+      receivers.add(id);
+    }
+  }
+  return { senders, receivers };
+}
+
+export function extractInboundEndpointsFromIflw(iflwXml, propMap = {}, options = {}) {
+  const { allowFallback = true } = options;
   const endpoints = [];
   if (iflwXml) {
+    const { senders, receivers } = parseParticipants(iflwXml);
     // Find sender messageFlows (from Participant_Sender to StartEvent)
     const mfRegex = /<bpmn2:messageFlow\b([^>]*)>([\s\S]*?)<\/bpmn2:messageFlow>/gi;
     let m;
@@ -46,16 +70,21 @@ export function extractInboundEndpointsFromIflw(iflwXml, propMap = {}) {
       const body = m[2];
       const sourceRefMatch = attrs.match(/\bsourceRef="([^"]+)"/);
       const sourceRef = sourceRefMatch ? sourceRefMatch[1] : '';
+      const targetRefMatch = attrs.match(/\btargetRef="([^"]+)"/);
+      const targetRef = targetRefMatch ? targetRefMatch[1] : '';
 
       // Check if sourceRef is an EndpointSender participant or Sender
       const isSender =
+        senders.has(sourceRef) ||
         /Sender/i.test(sourceRef) ||
         body.includes('ifl:type="EndpointSender"') ||
         body.includes('<ifl:property key="direction" value="Sender"/>');
 
       const isReceiver =
-        /Receiver/i.test(attrs.match(/\btargetRef="([^"]+)"/)?.[1] || '') ||
+        receivers.has(targetRef) ||
+        /Receiver/i.test(targetRef) ||
         body.includes('ifl:type="EndpointReceiver"') ||
+        body.includes('ifl:type="EndpointRecevier"') ||
         body.includes('<ifl:property key="direction" value="Receiver"/>');
 
       if ((isSender || /HTTPS|SOAP|REST|OData/i.test(body)) && !isReceiver) {
@@ -66,14 +95,15 @@ export function extractInboundEndpointsFromIflw(iflwXml, propMap = {}) {
           return match ? match[1] : '';
         };
 
-        let address = getProp('address') || getProp('url') || '/cpi/inbound';
+        const rawAddress = getProp('address') || getProp('url') || '/cpi/inbound';
+        let address = rawAddress;
         // Resolve externalized parameter if defined like {{ParamName}}
-        const extMatch = address.match(/^\{\{([^}]+)\}\}$/);
+        const extMatch = rawAddress.match(/^\{\{([^}]+)\}\}$/);
         if (extMatch && propMap[extMatch[1]]) {
           address = propMap[extMatch[1]];
         }
 
-        const protocol = getProp('MessageProtocol') || getProp('system') || 'HTTPS';
+        const protocol = getProp('MessageProtocol') || getProp('system') || getProp('ComponentType') || 'HTTPS';
         const xsrfVal = getProp('xsrfProtection');
         const xsrfProtection = xsrfVal === '1' || xsrfVal === 'true';
 
@@ -82,20 +112,26 @@ export function extractInboundEndpointsFromIflw(iflwXml, propMap = {}) {
           name: (attrs.match(/\bname="([^"]+)"/) || [])[1] || 'Inbound_Endpoint',
           protocol,
           address,
-          xsrfProtection
+          rawAddress,
+          isExternalized: Boolean(extMatch),
+          xsrfProtection,
+          isCsrfProtected: xsrfProtection
         });
       }
     }
   }
 
-  if (endpoints.length === 0) {
+  if (endpoints.length === 0 && allowFallback) {
     // Default fallback if not explicit
     endpoints.push({
       id: 'MessageFlow_Inbound_Default',
       name: 'HTTPS_Inbound',
       protocol: 'HTTPS',
       address: '/b2b/v1/orders',
-      xsrfProtection: true
+      rawAddress: '/b2b/v1/orders',
+      isExternalized: false,
+      xsrfProtection: true,
+      isCsrfProtected: true
     });
   }
 
@@ -105,6 +141,7 @@ export function extractInboundEndpointsFromIflw(iflwXml, propMap = {}) {
 export function extractOutboundEndpointsFromIflw(iflwXml, propMap = {}) {
   const endpoints = [];
   if (iflwXml) {
+    const { receivers } = parseParticipants(iflwXml);
     const mfRegex = /<bpmn2:messageFlow\b([^>]*)>([\s\S]*?)<\/bpmn2:messageFlow>/gi;
     let m;
     while ((m = mfRegex.exec(iflwXml)) !== null) {
@@ -114,8 +151,10 @@ export function extractOutboundEndpointsFromIflw(iflwXml, propMap = {}) {
       const targetRef = targetRefMatch ? targetRefMatch[1] : '';
 
       const isReceiver =
+        receivers.has(targetRef) ||
         /Receiver/i.test(targetRef) ||
         body.includes('ifl:type="EndpointReceiver"') ||
+        body.includes('ifl:type="EndpointRecevier"') ||
         body.includes('<ifl:property key="direction" value="Receiver"/>');
 
       if (isReceiver) {
@@ -134,8 +173,14 @@ export function extractOutboundEndpointsFromIflw(iflwXml, propMap = {}) {
         }
 
         const componentType = getProp('ComponentType') || getProp('system') || 'HTTP';
-        const timeout = getProp('httpRequestTimeout') || getProp('timeout') || 'Default';
-        const isSecure = /^https:\/\//i.test(resolvedAddress) || !/^http:\/\//i.test(resolvedAddress);
+        const rawTimeout = getProp('httpRequestTimeout') || getProp('timeout') || 'Default';
+        let resolvedTimeout = rawTimeout;
+        const timeoutExtMatch = rawTimeout.match(/^\{\{([^}]+)\}\}$/);
+        if (timeoutExtMatch && propMap[timeoutExtMatch[1]]) {
+          resolvedTimeout = propMap[timeoutExtMatch[1]];
+        }
+
+        const isSecure = /^https:\/\//i.test(resolvedAddress) || (!/^http:\/\//i.test(resolvedAddress) && !/^http:\/\//i.test(rawAddress));
 
         endpoints.push({
           id: (attrs.match(/\bid="([^"]+)"/) || [])[1] || 'MessageFlow_Out',
@@ -145,7 +190,8 @@ export function extractOutboundEndpointsFromIflw(iflwXml, propMap = {}) {
           address: rawAddress,
           resolvedAddress,
           isExternalized: Boolean(extMatch),
-          timeout,
+          timeout: resolvedTimeout,
+          rawTimeout: Boolean(timeoutExtMatch) ? rawTimeout : undefined,
           isSecure
         });
       }
@@ -156,11 +202,29 @@ export function extractOutboundEndpointsFromIflw(iflwXml, propMap = {}) {
 
 export function extractIflowEndpointsSummary(bundlePathOrBuf, options = {}) {
   const target = bundlePathOrBuf === '--demo' ? buildDemoBundleZipBuffer() : bundlePathOrBuf;
-  const report = inspectBundle(target);
-  const iflwXml = report.catalog?.iflwFiles?.[0]?.text || '';
-  const propMap = extractParametersMap(report);
+  const report = inspectBundle(target, null, { showPropValues: true });
 
-  const inbounds = extractInboundEndpointsFromIflw(iflwXml, propMap);
+  const iflwEntry = report.catalog?.iflwFiles?.[0];
+  const iflwXml = iflwEntry?.text || '';
+
+  if (!iflwXml || !iflwEntry) {
+    return {
+      valid: false,
+      error: 'El archivo ZIP no contiene ninguna definición de Integration Flow (.iflw). Es probable que sea una Script Collection o Value Mapping.',
+      iflowName: report.manifestData?.name || (report.fileName ? path.basename(report.fileName, '.zip') : 'Unknown'),
+      symbolicName: report.manifestData?.symbolicName || 'N/A',
+      version: report.manifestData?.version || '1.0.0',
+      totalInbound: 0,
+      totalOutbound: 0,
+      inboundEndpoints: [],
+      outboundEndpoints: [],
+      processDirectEndpoints: [],
+      externalizedParameters: []
+    };
+  }
+
+  const propMap = extractParametersMap(report);
+  const inbounds = extractInboundEndpointsFromIflw(iflwXml, propMap, { allowFallback: false });
   const outbounds = extractOutboundEndpointsFromIflw(iflwXml, propMap);
 
   const processDirectRegex = /<ifl:property[^>]*key="address"[^>]*value="(\/[^"]+)"/gi;
@@ -173,7 +237,8 @@ export function extractIflowEndpointsSummary(bundlePathOrBuf, options = {}) {
   }
 
   return {
-    iflowName: report.manifestData?.name || path.basename(report.fileName || 'iFlow.zip', '.zip'),
+    valid: true,
+    iflowName: report.manifestData?.name || (report.fileName ? path.basename(report.fileName, '.zip') : 'iFlow'),
     symbolicName: report.manifestData?.symbolicName || 'N/A',
     version: report.manifestData?.version || '1.0.0',
     totalInbound: inbounds.length,
@@ -183,7 +248,9 @@ export function extractIflowEndpointsSummary(bundlePathOrBuf, options = {}) {
     processDirectEndpoints: [...new Set(directChannels)],
     externalizedParameters: Object.keys(propMap).map((k) => ({
       key: k,
-      configuredInAdapters: inbounds.some((i) => i.address === `{{${k}}}`) || outbounds.some((o) => o.address === `{{${k}}}`)
+      configuredInAdapters:
+        inbounds.some((i) => i.address === `{{${k}}}` || i.rawAddress === `{{${k}}}`) ||
+        outbounds.some((o) => o.address === `{{${k}}}` || o.rawAddress === `{{${k}}}` || o.timeout === `{{${k}}}` || o.rawTimeout === `{{${k}}}`)
     }))
   };
 }
@@ -501,7 +568,7 @@ export function generateOpenApiSpec(report, options = {}) {
 
 export function exportApiClientContracts(bundlePathOrBuf, options = {}) {
   const { format = 'both', outDir = null, baseUrl = null, authType = 'basic' } = options;
-  const report = inspectBundle(bundlePathOrBuf);
+  const report = inspectBundle(bundlePathOrBuf, null, { showPropValues: true });
   const propMap = extractParametersMap(report);
 
   const postman = format === 'postman' || format === 'both' ? generatePostmanCollection(report, { baseUrl, authType, propMap }) : null;
@@ -542,11 +609,35 @@ if (isMain) {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     console.log('Uso 1 (Demo): node export-api-client.mjs --demo [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--json]');
     console.log('Uso 2 (iFlow): node export-api-client.mjs <iflow.zip> [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--json]');
+    console.log('Uso 3 (Endpoints): node export-api-client.mjs <iflow.zip|--demo> --endpoints [--json]');
     process.exit(0);
   }
 
   const jsonFlag = args.includes('--json');
+  const endpointsFlag = args.includes('--endpoints');
   const target = args[0] === '--demo' ? buildDemoBundleZipBuffer() : args[0];
+
+  if (endpointsFlag) {
+    const res = extractIflowEndpointsSummary(target);
+    if (jsonFlag) {
+      console.log(JSON.stringify(res, null, 2));
+    } else {
+      console.log(`=== SAP CPI IFLOW ENDPOINTS SUMMARY ===`);
+      console.log(`iFlow: ${res.iflowName} (${res.symbolicName} v${res.version})`);
+      console.log(`Válido: ${res.valid}`);
+      if (!res.valid) {
+        console.log(`Error: ${res.error}`);
+      } else {
+        console.log(`Inbound (${res.totalInbound}):`);
+        res.inboundEndpoints.forEach((i) => console.log(`  - [${i.protocol}] ${i.address} (CSRF: ${i.isCsrfProtected})`));
+        console.log(`Outbound (${res.totalOutbound}):`);
+        res.outboundEndpoints.forEach((o) =>
+          console.log(`  - [${o.adapterType}] ${o.resolvedAddress || o.address} (Timeout: ${o.timeout}, Secure: ${o.isSecure})`)
+        );
+      }
+    }
+    process.exit(0);
+  }
 
   const getOpt = (flag, def) => {
     const idx = args.indexOf(flag);

@@ -331,7 +331,8 @@ export const MCP_TOOLS = [
         rawContent: { type: 'string', description: 'Contenido raw de la especificación (formato bloques === PAYLOAD o JSON).' },
         correlateData: { type: 'boolean', description: 'Indica si se valida la coherencia de claves entre contratos (default: true).' },
         correlationKeys: { type: 'array', items: { type: 'string' }, description: 'Claves de correlación (ej. ["orderId", "customerId"]).' },
-        outZipPath: { type: 'string', description: 'Ruta opcional donde guardar el archivo .zip de la suite.' }
+        outZipPath: { type: 'string', description: 'Ruta opcional donde guardar el archivo .zip de la suite.' },
+        outputZipPath: { type: 'string', description: 'Ruta opcional donde guardar el archivo .zip de la suite (alias de outZipPath).' }
       }
     }
   },
@@ -373,7 +374,8 @@ export const MCP_TOOLS = [
           description: 'Patrón arquitectónico de integración en SAP CPI.'
         },
         scriptName: { type: 'string', description: 'Nombre del archivo Groovy (ej. EnrichOrder.groovy).' },
-        apiVersion: { type: 'string', enum: ['v1', 'v2'], description: 'Versión del API de CPI: v1 (Groovy 2.4 / Camel 2) o v2 (Groovy 4 / Camel 3).' }
+        apiVersion: { type: 'string', enum: ['v1', 'v2'], description: 'Versión del API de CPI: v1 (Groovy 2.4 / Camel 2) o v2 (Groovy 4 / Camel 3).' },
+        customComments: { type: 'boolean', description: 'Incluye comentarios explicativos de arquitectura y cumplimiento de directrices SAP.' }
       },
       required: ['pattern']
     }
@@ -580,11 +582,18 @@ export function executeMcpTool(name, args = {}) {
       let payloads = [];
       let correlationKeys = args.correlationKeys || [];
       if (args.spec) {
-        payloads = Array.isArray(args.spec.contracts)
-          ? args.spec.contracts
-          : Array.isArray(args.spec)
-            ? args.spec
-            : parseMockSuiteInput(JSON.stringify(args.spec));
+        if (typeof args.spec !== 'object' || args.spec === null) {
+          throw new Error('Especificación de mock suite inválida: el argumento spec debe ser un objeto.');
+        }
+        if (Array.isArray(args.spec.contracts)) {
+          payloads = parseMockSuiteInput(JSON.stringify(args.spec));
+        } else if (Array.isArray(args.spec.payloads)) {
+          payloads = parseMockSuiteInput(JSON.stringify(args.spec));
+        } else if (Array.isArray(args.spec)) {
+          payloads = parseMockSuiteInput(JSON.stringify({ payloads: args.spec }));
+        } else {
+          throw new Error("Especificación de mock suite malformada o vacía: se requiere una lista 'payloads' o 'contracts'.");
+        }
         if (args.spec.correlationKeys && correlationKeys.length === 0) correlationKeys = args.spec.correlationKeys;
       } else if (args.rawContent) {
         payloads = parseMockSuiteInput(args.rawContent);
@@ -594,18 +603,23 @@ export function executeMcpTool(name, args = {}) {
         const raw = fs.readFileSync(path.resolve(args.specPath), 'utf8');
         payloads = parseMockSuiteInput(raw);
       }
+      if (!Array.isArray(payloads) || payloads.length === 0) {
+        throw new Error("Especificación de mock suite vacía: no contiene ningún payload o contrato.");
+      }
       const res = validateAndBuildMockSuiteZip(payloads, {
         correlateData: args.correlateData !== false,
         correlationKeys
       });
-      if (args.outZipPath && res.zipBuffer) {
-        fs.mkdirSync(path.dirname(path.resolve(args.outZipPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.outZipPath), res.zipBuffer);
+      const targetZip = args.outputZipPath || args.outZipPath;
+      if (targetZip && res.zipBuffer) {
+        fs.mkdirSync(path.dirname(path.resolve(targetZip)), { recursive: true });
+        fs.writeFileSync(path.resolve(targetZip), res.zipBuffer);
       }
       const { zipBuffer, ...summary } = res;
       return {
         ...summary,
-        outZipPath: args.outZipPath ? path.resolve(args.outZipPath) : null,
+        outZipPath: targetZip ? path.resolve(targetZip) : null,
+        outputZipPath: targetZip ? path.resolve(targetZip) : null,
         sizeBytes: zipBuffer?.length || 0
       };
     }
@@ -620,7 +634,8 @@ export function executeMcpTool(name, args = {}) {
     case 'cpi_generate_groovy_template': {
       return generateCanonicalGroovyTemplate(args.pattern, {
         scriptName: args.scriptName,
-        apiVersion: args.apiVersion
+        apiVersion: args.apiVersion,
+        customComments: args.customComments
       });
     }
     default:

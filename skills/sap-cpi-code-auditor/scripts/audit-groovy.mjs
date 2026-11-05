@@ -10,7 +10,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { lintGroovyScript } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
+import { lintGroovyScript, readTextFileSafely } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
 
 export const SAMPLE_VULNERABLE_GROOVY = `import com.sap.gateway.ip.core.customdev.util.Message
 import java.util.*
@@ -144,7 +144,7 @@ if (isMain) {
       console.error(`Archivo original no encontrado: ${origPath}`);
       process.exit(1);
     }
-    originalCode = fs.readFileSync(origPath, 'utf8');
+    originalCode = readTextFileSafely(origPath);
     originalName = path.basename(origPath);
 
     const refIdx = args.indexOf('--refactored');
@@ -154,7 +154,7 @@ if (isMain) {
         console.error(`Archivo refactorizado no encontrado: ${refPath}`);
         process.exit(1);
       }
-      refactoredCode = fs.readFileSync(refPath, 'utf8');
+      refactoredCode = readTextFileSafely(refPath);
       refactoredName = path.basename(refPath);
     }
   }

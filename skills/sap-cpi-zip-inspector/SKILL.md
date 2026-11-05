@@ -37,6 +37,10 @@ node ./scripts/inspect-iflow-zip.mjs <path-to-iflow.zip> --remediate <manifest,h
 * Native PDF generator: [pdf-utils.mjs](../../../shared/pdf-utils.mjs)
 * Audit rules reference: [iflw-audit-rules.md](./references/iflw-audit-rules.md)
 * **Privacy-First Default**: By default, `inspect-iflow-zip.mjs` redacts all parameter values in `.prop` files (`key=[REDACTED]`) so private endpoints, queue names, or credentials are never exposed in logs or AI context unless `--show-prop-values` is explicitly requested.
+* **In-Memory File Extraction & Granular MCP Tool (`cpi_extract_bundle_file` / `extractBundleFile`)**:
+  - Allows inspecting and retrieving any individual file (`.groovy`, `.iflw`, `.xsd`, `.mmap`, `.prop`, `MANIFEST.MF`) from a bundle completely in memory without extracting to disk.
+  - Supports exact paths, filenames, wildcards/globs (`*.iflw`, `*.groovy`), regular expressions (`.*\.iflw`), and basename fallback resolution.
+  - Resilient error handling returning structured objects `{ success: false, found: false, error: ... }` when files or ZIPs are corrupt or missing.
 * **Multi-Bundle & Script Collection Support**:
   - Automatically detects outer `.zip` deliveries containing nested `.zip` bundles (`nestedBundles`) and inspects each inner bundle.
   - Distinguishes `SAP-BundleType: ScriptCollection` bundles from `IntegrationFlow` bundles, verifying `Provide-Capability` and cataloged `.groovy` scripts instead of penalizing for the absence of an `.iflw` file.

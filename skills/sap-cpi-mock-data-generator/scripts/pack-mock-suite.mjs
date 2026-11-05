@@ -32,12 +32,17 @@ export function extractExamplesFromBlock(text) {
 }
 
 export function parseMockSuiteInput(rawText) {
-  const trimmed = rawText.trim();
+  const trimmed = (rawText || '').trim();
   if (trimmed.startsWith('{') && !trimmed.includes('=== EXAMPLE')) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed.payloads)) {
-        const payloads = parsed.payloads.map((p) => {
+      const rawPayloads = Array.isArray(parsed.payloads)
+        ? parsed.payloads
+        : Array.isArray(parsed.contracts)
+          ? parsed.contracts
+          : null;
+      if (rawPayloads) {
+        const payloads = rawPayloads.map((p) => {
           const format = (p.format || 'json').toLowerCase();
           const rawExamples = p.examples || [];
           const examples = rawExamples.map((ex, idx) => {
@@ -70,7 +75,11 @@ export function parseMockSuiteInput(rawText) {
         }
         return payloads;
       }
-    } catch {
+      if (parsed && typeof parsed === 'object' && !parsed.examples && (parsed.name || Object.keys(parsed).length === 0)) {
+        throw new Error("Especificación de mock suite malformada o vacía: se requiere una lista 'payloads' o 'contracts'.");
+      }
+    } catch (err) {
+      if (err.message.includes("se requiere una lista 'payloads' o 'contracts'")) throw err;
       // Fall through to delimiter parser
     }
   }
@@ -163,10 +172,26 @@ export function validateAndBuildMockSuiteZip(payloads, { correlateData = true, c
   const zipEntries = [];
   let totalExamples = 0;
 
-  const effectiveKeys = [
-    ...(correlationKeys || []),
-    ...(Array.isArray(payloads.correlationKeys) ? payloads.correlationKeys : [])
-  ];
+  if (!Array.isArray(payloads) || payloads.length === 0) {
+    errors.push('No se proporcionó ningún contrato o payload en la suite.');
+    return {
+      valid: false,
+      totalPayloads: 0,
+      totalExamples: 0,
+      errors,
+      warnings,
+      correlations: [],
+      zipEntries: [],
+      zipBuffer: null
+    };
+  }
+
+  const effectiveKeys = Array.from(
+    new Set([
+      ...(correlationKeys || []),
+      ...(Array.isArray(payloads.correlationKeys) ? payloads.correlationKeys : [])
+    ])
+  );
 
   payloads.forEach((p, pIdx) => {
     const folderName = `${String(pIdx + 1).padStart(2, '0')}_${p.name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
@@ -190,27 +215,53 @@ export function validateAndBuildMockSuiteZip(payloads, { correlateData = true, c
     });
   });
 
+  const verifiedCorrelations = [];
+
   // Check cross-contract E2E correlation if 2+ payloads exist
   if (correlateData && payloads.length > 1) {
     const minLen = Math.min(...payloads.map((p) => (p.examples || []).length));
     for (let i = 0; i < minLen; i++) {
-      const baseKeys = extractBusinessKeys(
-        payloads[0].examples[i].content,
-        payloads[0].examples[i].format || payloads[0].format,
-        effectiveKeys
-      );
-      for (let pIdx = 1; pIdx < payloads.length; pIdx++) {
-        const otherKeys = extractBusinessKeys(
-          payloads[pIdx].examples[i].content,
-          payloads[pIdx].examples[i].format || payloads[pIdx].format,
-          effectiveKeys
-        );
-        for (const sharedKey of Object.keys(baseKeys)) {
-          if (otherKeys[sharedKey] && otherKeys[sharedKey] !== baseKeys[sharedKey]) {
-            warnings.push(
-              `Desajuste de correlación E2E en Ejemplo #${i + 1} para clave '${sharedKey}': ${payloads[0].name}="${baseKeys[sharedKey]}" vs ${payloads[pIdx].name}="${otherKeys[sharedKey]}".`
-            );
+      const keysPerPayload = payloads.map((p) => {
+        const ex = p.examples ? p.examples[i] : null;
+        if (!ex) return {};
+        return extractBusinessKeys(ex.content, ex.format || p.format, effectiveKeys);
+      });
+
+      const allFoundKeys = new Set();
+      keysPerPayload.forEach((kObj) => Object.keys(kObj).forEach((k) => allFoundKeys.add(k)));
+
+      for (const k of allFoundKeys) {
+        const matchingContracts = [];
+        const mismatching = [];
+        let expectedVal = null;
+
+        for (let pIdx = 0; pIdx < payloads.length; pIdx++) {
+          const val = keysPerPayload[pIdx][k];
+          if (val !== undefined && val !== null) {
+            if (expectedVal === null) {
+              expectedVal = val;
+              matchingContracts.push(payloads[pIdx].name);
+            } else if (val === expectedVal) {
+              matchingContracts.push(payloads[pIdx].name);
+            } else {
+              mismatching.push({ contract: payloads[pIdx].name, value: val });
+            }
           }
+        }
+
+        if (mismatching.length > 0) {
+          mismatching.forEach((m) => {
+            warnings.push(
+              `Desajuste de correlación E2E en Ejemplo #${i + 1} para clave '${k}': ${matchingContracts[0]}="${expectedVal}" vs ${m.contract}="${m.value}".`
+            );
+          });
+        } else if (matchingContracts.length > 1) {
+          verifiedCorrelations.push({
+            exampleIndex: i + 1,
+            key: k,
+            value: expectedVal,
+            contracts: matchingContracts
+          });
         }
       }
     }
@@ -238,6 +289,32 @@ export function validateAndBuildMockSuiteZip(payloads, { correlateData = true, c
 
   zipEntries.push({ path: 'README_SUITE.txt', content: readmeContent });
 
+  const suiteIndex = {
+    suite: 'SAP CPI Mock Data Suite',
+    generatedAt: new Date().toISOString(),
+    totalContracts: payloads.length,
+    totalExamples,
+    correlationValidated: Boolean(correlateData),
+    correlationKeys: effectiveKeys,
+    contracts: payloads.map((p, pIdx) => {
+      const folderName = `${String(pIdx + 1).padStart(2, '0')}_${p.name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      return {
+        id: pIdx + 1,
+        name: p.name,
+        format: (p.format || 'json').toLowerCase(),
+        folder: folderName,
+        examplesCount: (p.examples || []).length,
+        files: (p.examples || []).map((ex, idx) => {
+          const fmt = (ex.format || p.format || 'json').toLowerCase();
+          const ext = fmt === 'xml' ? 'xml' : 'json';
+          return `sample_${String(idx + 1).padStart(2, '0')}.${ext}`;
+        })
+      };
+    }),
+    correlations: verifiedCorrelations
+  };
+  zipEntries.push({ path: 'mock-suite-index.json', content: JSON.stringify(suiteIndex, null, 2) });
+
   const zipBuffer = createZipBuffer(zipEntries);
 
   return {
@@ -246,6 +323,7 @@ export function validateAndBuildMockSuiteZip(payloads, { correlateData = true, c
     totalExamples,
     errors,
     warnings,
+    correlations: verifiedCorrelations,
     zipEntries: zipEntries.map((e) => ({ path: e.path, size: Buffer.byteLength(e.content) })),
     zipBuffer
   };
