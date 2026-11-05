@@ -596,11 +596,11 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
     nestedBundles,
     catalog: {
       manifestFiles: manifestFiles.map((f) => ({ name: f.name, path: f.path, size: f.size })),
-      iflwFiles: iflwFiles.map((f) => ({ name: f.name, path: f.path, size: f.size })),
+      iflwFiles: iflwFiles.map((f) => ({ name: f.name, path: f.path, size: f.size, text: f.text })),
       groovyScripts: groovyScripts.map((f) => ({ name: f.name, path: f.path, size: f.size, content: f.text })),
-      xsltMappings: xsltMappings.map((f) => ({ name: f.name, path: f.path, size: f.size })),
-      messageMappings: messageMappings.map((f) => ({ name: f.name, path: f.path, size: f.size })),
-      xsdSchemas: xsdSchemas.map((f) => ({ name: f.name, path: f.path, size: f.size })),
+      xsltMappings: xsltMappings.map((f) => ({ name: f.name, path: f.path, size: f.size, text: f.text })),
+      messageMappings: messageMappings.map((f) => ({ name: f.name, path: f.path, size: f.size, text: f.text })),
+      xsdSchemas: xsdSchemas.map((f) => ({ name: f.name, path: f.path, size: f.size, text: f.text })),
       parameterFiles: parameterFiles.map((f) => ({
         name: f.name,
         path: f.path,

@@ -158,3 +158,71 @@ node skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs \
   --property "/ErpOrder/Header/CorrelationId=SAP_MplCorrelationId" \
   --out ./MM_Order_To_Erp.mmap
 ```
+
+---
+
+## Escenario 7: Simular un Graphical Message Mapping `.mmap` Localmente
+
+Cuando deseas verificar que un mapeo `.mmap` transforma correctamente un payload de prueba antes de desplegarlo en el tenant de CPI:
+
+```bash
+# Simular ejecución con payload XML y cabeceras simuladas
+node skills/sap-cpi-xsd-studio/scripts/simulate-mmap.mjs \
+  --mmap ./MM_Order_To_Erp.mmap \
+  --payload ./test_order.xml \
+  --header CamelHttpMethod=POST \
+  --prop SAP_MplCorrelationId=CORR-99812 \
+  --out ./test_result.xml
+
+# O con payload JSON de entrada:
+node skills/sap-cpi-xsd-studio/scripts/simulate-mmap.mjs \
+  --mmap ./MM_Order_To_Erp.mmap \
+  --payload ./test_order.json \
+  --json
+```
+
+---
+
+## Escenario 8: Comparar Semánticamente dos Versiones de un iFlow y Generar PDF
+
+Para revisiones de código (pull requests / code reviews) o validaciones previas a paso a producción:
+
+```bash
+# Comparar bundle v1 y bundle v2 remediado
+node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs \
+  ./IF_Legacy_v1.zip \
+  ./IF_Remediado_v2.zip \
+  --pdf ./Informe_Comparativa_Diff.pdf
+```
+El reporte PDF incluirá la evolución del Score de cumplimiento, los cambios en parámetros de despliegue (`parameters.prop`), las adiciones/sustituciones de scripts y la resolución de vulnerabilidades de seguridad.
+
+---
+
+## Escenario 9: Exportar Clientes de Pruebas Postman v2.1 y Contratos OpenAPI 3.0
+
+Para facilitar las pruebas de integración por parte del equipo de front-end, QA o sistemas consumidores:
+
+```bash
+node skills/sap-cpi-architect/scripts/export-api-client.mjs \
+  ./IF_SyncPedidosB2B_S4HANA.zip \
+  --out-dir ./dist/api_clients \
+  --base-url https://tenant-iflmap.hcisbp.eu10.hana.ondemand.com
+```
+Generará:
+- `IF_SyncPedidosB2B_S4HANA.postman_collection.json` con pre-request scripts para obtención transparente de token CSRF (`x-csrf-token`).
+- `IF_SyncPedidosB2B_S4HANA.openapi.json` con endpoints y contratos tipados.
+
+---
+
+## Escenario 10: Crear un Paquete OSGi de Value Mapping desde CSV o JSON
+
+Para parametrizar correspondencias entre sistemas (por ejemplo, códigos de estado o códigos de país CRM a S/4HANA):
+
+```bash
+# Crear el bundle Value Mapping desde un CSV
+node skills/sap-cpi-architect/scripts/build-value-mapping.mjs \
+  ./mapeo_estados.csv \
+  --name VM_OrderStatuses_S4 \
+  --out ./dist/VM_OrderStatuses_S4.zip
+```
+El archivo `.zip` resultante estará listo para ser importado directamente en SAP Integration Suite con su naturaleza OSGi, metadatos y `value_mapping.xml`.

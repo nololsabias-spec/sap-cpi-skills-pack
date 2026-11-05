@@ -10,7 +10,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { inspectBundle } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
+import { inspectBundle, buildDemoBundleZipBuffer } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
+import { writeAuditPdfFile } from '../../../shared/pdf-utils.mjs';
 
 export const MANDATORY_DOC_SECTIONS = [
   { num: 1, title: 'Resumen Ejecutivo', pattern: /^##\s+1\.\s*Resumen\s+Ejecutivo/im },
@@ -38,13 +39,162 @@ export function validateGeneratedDocumentation(markdownText) {
   };
 }
 
+export function extractIflowDocumentation(zipPathOrBuf) {
+  const target = zipPathOrBuf === '--demo' ? buildDemoBundleZipBuffer() : zipPathOrBuf;
+  const report = inspectBundle(target);
+  const m = report.manifestData || {};
+  const h = report.heuristics || {};
+
+  const markdownDocument = `# Documento de Diseño Técnico: ${m.name || path.basename(report.fileName, '.zip')}
+
+## 1. Resumen Ejecutivo
+- **Nombre del iFlow**: ${m.name || report.fileName}
+- **SymbolicName**: ${m.symbolicName || 'N/A'} (v${m.version || '1.0.0'})
+- **Bundle Type**: ${m.bundleType || 'IntegrationFlow'}
+- **Nodo de Ejecución**: IFLMAP (Cloud Integration Worker)
+- **Puntaje de Gobierno**: ${h.score ?? 100}/100
+
+## 2. Arquitectura del Flujo
+- **Canales de Entrada/Salida**: ${h.stats?.channels || 0}
+- **Service Tasks**: ${h.stats?.serviceTasks || 0}
+- **Routers**: ${h.stats?.routers || 0}
+- **Subprocesos de Excepción**: ${h.stats?.subprocesses || 0}
+
+## 3. Parámetros y Configuración Externalizada
+\`\`\`properties
+${report.catalog?.parameterFiles?.map((p) => p.content).join('\n') || '# Sin parameters.prop externalizados'}
+\`\`\`
+
+## 4. Scripts Groovy / Script Collection
+${report.catalog?.groovyScripts?.map((s) => `### ${s.name}\n- **Tamaño**: ${s.size} bytes\n- **Ruta**: \`${s.path}\``).join('\n\n') || '- No se empaquetan scripts Groovy locales en el bundle.'}
+
+## 5. Manejo de Errores
+- Exception Subprocesses configurados: ${h.stats?.subprocesses || 0}
+- Estrategia de reintentos y capturas documentada en BPMN 2.0.
+
+## 6. Auditoría de Buenas Prácticas SAP (Hallazgos)
+${(report.findings || []).map((f) => `- [${f.severity || 'INFO'}] **${f.rule || f.title || 'Hallazgo'}**: ${f.message || f.description || ''}`).join('\n') || '- Sin hallazgos bloqueantes.'}
+
+## 7. Puntaje de Cumplimiento
+- **Puntaje Global**: ${h.score ?? 100}/100
+- **Nivel**: ${(h.score ?? 100) >= 85 ? 'APROBADO PARA PRODUCCIÓN' : (h.score ?? 100) >= 60 ? 'APROBADO CON OBSERVACIONES' : 'REQUIERE REMEDIACIÓN'}
+
+## 8. Recomendaciones de Modernización
+1. Externalizar todas las URLs y credenciales en \`parameters.prop\`.
+2. Emplear streams \`Reader\` en transformaciones de gran volumen.
+3. Centralizar funciones comunes en Script Collections compartidas.
+`;
+
+  return {
+    report,
+    markdownDocument,
+    validation: validateGeneratedDocumentation(markdownDocument)
+  };
+}
+
+export function buildTechnicalDocPdfSpec(report, markdownText = null) {
+  const blocks = [];
+  const m = report.manifestData || {};
+  const h = report.heuristics || {};
+
+  // 1. Resumen Ejecutivo
+  blocks.push({ type: 'section', text: '1. Resumen Ejecutivo' });
+  blocks.push({ type: 'kv', key: 'Nombre del iFlow', value: m.name || report.fileName });
+  blocks.push({ type: 'kv', key: 'Bundle-SymbolicName', value: `${m.symbolicName || 'Desconocido'} (v${m.version || '1.0.0'})` });
+  blocks.push({ type: 'kv', key: 'Tipo de Artefacto', value: m.bundleType || 'IntegrationFlow' });
+  blocks.push({ type: 'kv', key: 'Perfil de Ejecución', value: 'IFLMAP (Cloud Integration Worker Node)' });
+
+  // 2. Arquitectura del Flujo
+  blocks.push({ type: 'section', text: '2. Arquitectura del Flujo' });
+  blocks.push({
+    type: 'kv',
+    key: 'Topología BPMN 2.0',
+    value: `${h.stats?.channels || 0} canales | ${h.stats?.serviceTasks || 0} service tasks | ${h.stats?.routers || 0} routers | ${h.stats?.subprocesses || 0} subprocesos`
+  });
+  if (report.catalog.iflwFiles.length > 0) {
+    blocks.push({ type: 'kv', key: 'Definición BPMN2 (.iflw)', value: report.catalog.iflwFiles.map((f) => f.name).join(', ') });
+  }
+  if (report.catalog.messageMappings.length > 0 || report.catalog.xsdSchemas.length > 0) {
+    const maps = [...report.catalog.messageMappings.map((f) => f.name), ...report.catalog.xsdSchemas.map((f) => f.name)];
+    blocks.push({ type: 'kv', key: 'Esquemas y Mapeos', value: maps.join(', ') });
+  }
+
+  // 3. Parámetros y Configuración Externalizada
+  blocks.push({ type: 'section', text: '3. Parámetros y Configuración Externalizada' });
+  const propFiles = report.catalog.parameterFiles || [];
+  if (propFiles.length > 0) {
+    for (const pf of propFiles) {
+      blocks.push({ type: 'bullet', text: `${pf.name} (${pf.size} bytes)` });
+    }
+  } else {
+    blocks.push({ type: 'paragraph', text: 'El paquete no incluye parameters.prop (no contiene parámetros externalizados configurables).' });
+  }
+
+  // 4. Scripts Groovy / Script Collection
+  blocks.push({ type: 'section', text: '4. Scripts Groovy / Script Collection' });
+  if (report.catalog.groovyScripts.length > 0) {
+    for (const g of report.catalog.groovyScripts) {
+      blocks.push({ type: 'bullet', text: `Script local: ${g.name} (${g.size} bytes)` });
+    }
+  }
+  if (h.referencedScriptCollections?.length > 0) {
+    blocks.push({ type: 'kv', key: 'Script Collections Vinculadas', value: h.referencedScriptCollections.join(', ') });
+  }
+  if (report.catalog.groovyScripts.length === 0 && (!h.referencedScriptCollections || h.referencedScriptCollections.length === 0)) {
+    blocks.push({ type: 'paragraph', text: 'No se identificaron scripts Groovy locales ni dependencias de Script Collections.' });
+  }
+
+  // 5. Manejo de Errores
+  blocks.push({ type: 'section', text: '5. Manejo de Errores' });
+  blocks.push({
+    type: 'kv',
+    key: 'Exception Subprocess',
+    value: h.hasExceptionSubprocess ? 'Activo (SubProcess de Excepción Configurado)' : 'No Detectado (Riesgo de fallo no capturado)'
+  });
+
+  // 6. Auditoría de Buenas Prácticas SAP
+  blocks.push({ type: 'section', text: '6. Auditoría de Buenas Prácticas SAP' });
+  let findingsCount = 0;
+  for (const c of h.unencryptedChannels || []) {
+    findingsCount++;
+    blocks.push({ type: 'finding', severity: 'CRÍTICA', component: `Canal (${c.key})`, finding: `Endpoint HTTP sin TLS: ${c.val}`, recommendation: 'Migrar a HTTPS.' });
+  }
+  for (const st of h.syncTasksWithoutTimeout || []) {
+    findingsCount++;
+    blocks.push({ type: 'finding', severity: 'MEDIA', component: `ExternalCall (${st.name})`, finding: 'Llamada síncrona sin timeout explícito.', recommendation: 'Configurar timeout de 60000 ms.' });
+  }
+  if (findingsCount === 0) {
+    blocks.push({ type: 'paragraph', text: 'Cumple todas las verificaciones estáticas de seguridad y arquitectura SAP CPI.' });
+  }
+
+  // 7. Puntaje de Cumplimiento
+  blocks.push({ type: 'section', text: '7. Puntaje de Cumplimiento' });
+  blocks.push({ type: 'kv', key: 'Puntuación Determinista', value: `${h.score ?? 100}/100` });
+  const statusLabel = (h.score ?? 100) >= 85 ? 'APROBADO PARA PRODUCCIÓN' : (h.score ?? 100) >= 60 ? 'APROBADO CON OBSERVACIONES' : 'REQUIERE REMEDIACIÓN';
+  blocks.push({ type: 'kv', key: 'Estado de Gobierno', value: statusLabel });
+
+  // 8. Recomendaciones de Modernización
+  blocks.push({ type: 'section', text: '8. Recomendaciones de Modernización' });
+  blocks.push({ type: 'bullet', text: 'Externalizar todos los endpoints mediante parámetros configurables {{PARAM}}.' });
+  blocks.push({ type: 'bullet', text: 'Usar streaming (Reader) en scripts Groovy para proteger la memoria heap del nodo trabajador.' });
+  blocks.push({ type: 'bullet', text: 'Vincular scripts comunes en Script Collections reutilizables mediante Require-Capability.' });
+
+  return {
+    title: `Documento Técnico: ${m.name || path.basename(report.fileName, '.zip')}`,
+    subtitle: `SymbolicName: ${m.symbolicName || 'N/A'} | Versión: ${m.version || '1.0.0'}`,
+    score: h.score ?? 100,
+    footerText: 'SAP CPI Architecture & Technical Documentation (8 Secciones)',
+    blocks
+  };
+}
+
 // CLI Runner
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso Extracción: node extract-for-docs.mjs <iflow.zip | --demo> [--json]');
-    console.log('Uso Validación: node extract-for-docs.mjs --validate-doc <documento.md>');
+    console.log('Uso 1 (Extracción & Contexto): node extract-for-docs.mjs <iflow.zip | --demo> [--pdf <doc.pdf>] [--json]');
+    console.log('Uso 2 (Validar Markdown):     node extract-for-docs.mjs --validate-doc <documento.md>');
     process.exit(0);
   }
 
@@ -67,7 +217,18 @@ if (isMain) {
     process.exit(0);
   }
 
-  const report = inspectBundle(args[0]);
+  const target = args[0] === '--demo' ? buildDemoBundleZipBuffer() : args[0];
+  const report = inspectBundle(target);
+
+  const pdfIdx = args.indexOf('--pdf');
+  const pdfPath = pdfIdx !== -1 ? args[pdfIdx + 1] : null;
+
+  if (pdfPath) {
+    const pdfSpec = buildTechnicalDocPdfSpec(report);
+    const bytes = writeAuditPdfFile(path.resolve(pdfPath), pdfSpec);
+    report.pdfGenerated = { path: path.resolve(pdfPath), sizeBytes: bytes };
+  }
+
   if (args.includes('--json')) {
     console.log(JSON.stringify(report, null, 2));
   } else {
@@ -78,5 +239,8 @@ if (isMain) {
     console.log(`Estadísticas BPMN2: ${JSON.stringify(report.heuristics.stats)}`);
     console.log(`Scripts Groovy detectados: ${report.catalog.groovyScripts.map((s) => s.name).join(', ') || 'Ninguno'}`);
     console.log(`Parámetros detectados:\n${report.catalog.parameterFiles.map((p) => p.content).join('\n') || '(Sin parameters.prop)'}`);
+    if (report.pdfGenerated) {
+      console.log(`\n[OK] Documento de Diseño Técnico (8 Secciones) generado en PDF: ${report.pdfGenerated.path} (${report.pdfGenerated.sizeBytes} bytes)`);
+    }
   }
 }

@@ -56,7 +56,7 @@ node setup-skills.mjs --target /ruta/a/tu/proyecto --agent cline        # Cline 
 
 ### Servidor MCP Local (`mcp-server.mjs` — Cero Dependencias, 100% Local `stdio`)
 
-El proyecto incluye [`mcp-server.mjs`](./mcp-server.mjs), un servidor **Model Context Protocol (MCP)** sobre `stdin`/`stdout` (JSON-RPC 2.0) que el IDE arranca automáticamente en segundo plano al abrir la carpeta (gracias a `.vscode/mcp.json`, `.cursor/mcp.json` o `.mcp.json`), exponiendo **11 Tools nativas** (`cpi_inspect_zip`, `cpi_remediate_zip`, `cpi_validate_groovy`, `cpi_audit_groovy`, `cpi_infer_xsd`, `cpi_validate_xsd`, `cpi_build_mmap`, `cpi_validate_xslt`, `cpi_test_regex`, `cpi_build_package`, `cpi_clone_bundle`) y las **8 Skills como Resources/Prompts MCP** sin necesidad de pedir permisos de consola en cada validación:
+El proyecto incluye [`mcp-server.mjs`](./mcp-server.mjs), un servidor **Model Context Protocol (MCP)** sobre `stdin`/`stdout` (JSON-RPC 2.0) que el IDE arranca automáticamente en segundo plano al abrir la carpeta (gracias a `.vscode/mcp.json`, `.cursor/mcp.json` o `.mcp.json`), exponiendo **16 Tools nativas** (`cpi_inspect_zip`, `cpi_remediate_zip`, `cpi_diff_bundles`, `cpi_validate_groovy`, `cpi_audit_groovy`, `cpi_infer_xsd`, `cpi_validate_xsd`, `cpi_build_mmap`, `cpi_simulate_mmap`, `cpi_validate_xslt`, `cpi_test_regex`, `cpi_build_package`, `cpi_clone_bundle`, `cpi_export_technical_doc`, `cpi_export_api_client`, `cpi_build_value_mapping`) y las **8 Skills como Resources/Prompts MCP** sin necesidad de pedir permisos de consola en cada validación:
 
 ```bash
 # Verificar el servidor MCP local
@@ -71,10 +71,10 @@ node mcp-server.mjs --self-test
 sap-cpi-skills-pack/
 ├── README.md                           # Guía principal de instalación y uso
 ├── AGENTS.md / CLAUDE.md               # Harness de ingeniería y aprendizaje continuo (Codex / Antigravity / Claude)
-├── mcp-server.mjs                      # Servidor MCP local (stdio JSON-RPC 2.0, 11 tools + 9 resources)
+├── mcp-server.mjs                      # Servidor MCP local (stdio JSON-RPC 2.0, 16 tools + 9 resources)
 ├── package.json                        # Scripts de verificación (npm test), MCP y demostraciones
 ├── setup-skills.mjs                    # Instalador universal Multi-IDE (Antigravity, Claude, Codex, Cursor, Copilot, Windsurf, Cline)
-├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills + servidor MCP
+├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills (15 módulos) + servidor MCP
 ├── rules/
 │   └── sap-cpi-continuous-learning.md  # Regla de auto-evolución continua y privacidad estricta
 ├── shared/
@@ -87,14 +87,18 @@ sap-cpi-skills-pack/
 │   ├── WORKFLOWS_GUIDE.md              # Flujos de trabajo prácticos paso a paso
 │   └── LESSONS_LEARNED.md              # Base de conocimiento viva con lecciones reales de SAP CPI anonimizadas
 └── skills/
-    ├── sap-cpi-zip-inspector/          # 1. Inspector de paquetes .zip, auditor BPMN 2.0 (.iflw), PDF y autorremediador
-    ├── sap-cpi-groovy-generator/       # 2. Generador Groovy 2.4 / 4 y linter estático
-    ├── sap-cpi-code-auditor/           # 3. Auditor de calidad/seguridad Groovy (Score 0-100)
-    ├── sap-cpi-xslt-studio/            # 4. Validador y generador XSLT 1.0 (Xalan) y 2.0/3.0 (Saxon-HE)
-    ├── sap-cpi-regex-studio/           # 5. Sandbox Regex + Apache Camel Simple (Router/Modifier)
-    ├── sap-cpi-xsd-studio/             # 6. Inferencia XSD 1.0 y generador/validador de Mapeos Gráficos (.mmap)
-    ├── sap-cpi-mock-data-generator/    # 7. Validador de correlación E2E y empaquetador de pruebas
-    └── sap-cpi-architect/              # 8. Constructor/Clonador de bundles OSGi (.zip) y Documentador técnico
+    ├── sap-cpi-zip-inspector/          # 1. Inspector .zip, auditor BPMN2, differ semántico, PDF y remediador
+    │   └── scripts/                    #    (inspect-iflow-zip.mjs, diff-iflow-zip.mjs)
+    ├── sap-cpi-groovy-generator/       # 2. Generador Groovy 2.4 / 4 y linter estático (validate-groovy.mjs)
+    ├── sap-cpi-code-auditor/           # 3. Auditor de calidad/seguridad Groovy (Score 0-100, audit-groovy.mjs)
+    ├── sap-cpi-xslt-studio/            # 4. Validador y generador XSLT 1.0/2.0/3.0 (validate-xslt.mjs)
+    ├── sap-cpi-regex-studio/           # 5. Sandbox Regex + Apache Camel Simple (test-camel-regex.mjs)
+    ├── sap-cpi-xsd-studio/             # 6. Inferencia XSD 1.0, mapeos gráficos .mmap y simulador de ejecución
+    │   └── scripts/                    #    (validate-xsd.mjs, build-mmap.mjs, simulate-mmap.mjs)
+    ├── sap-cpi-mock-data-generator/    # 7. Validador de correlación E2E y empaquetador (pack-mock-suite.mjs)
+    └── sap-cpi-architect/              # 8. Constructor OSGi dual, doc técnica PDF, clientes Postman/OpenAPI y VM
+        └── scripts/                    #    (build-cpi-package.mjs, clone-iflow-bundle.mjs, extract-for-docs.mjs,
+                                        #     export-api-client.mjs, build-value-mapping.mjs)
 ```
 
 ---
@@ -103,14 +107,14 @@ sap-cpi-skills-pack/
 
 | # | Skill | Funcionalidad Principal | Script CLI |
 | :- | :--- | :--- | :--- |
-| **1** | `sap-cpi-zip-inspector` | Descomprime artefactos `.zip` (`IntegrationFlow`, `ScriptCollection` o paquetes anidados), redacta `.prop` por privacidad, inventaría recursos y audita riesgos BPMN 2.0 y reglas CPILint. | `inspect-iflow-zip.mjs` |
+| **1** | `sap-cpi-zip-inspector` | Descomprime artefactos `.zip` (`IntegrationFlow`, `ScriptCollection` o paquetes anidados), redacta `.prop` por privacidad, inventaría recursos, audita riesgos BPMN 2.0 y CPILint, genera informes PDF ejecutivos y **compara semánticamente dos versiones de paquetes iFlow** eliminando el ruido BPMNDI. | `inspect-iflow-zip.mjs`<br>`diff-iflow-zip.mjs` |
 | **2** | `sap-cpi-groovy-generator` | Genera y valida scripts Groovy (Script v1 y Groovy 4 v2 API) individualmente o en lote (carpetas/`.zip`), aplicando prevención de OOM, anti-XXE, `@Field final` y *Ensure Upgrade Readiness*. | `validate-groovy.mjs` |
 | **3** | `sap-cpi-code-auditor` | Audita scripts Groovy calculando una puntuación determinista (`0-100`), desglosa vulnerabilidades por severidad y verifica refactorizaciones. | `audit-groovy.mjs` |
 | **4** | `sap-cpi-xslt-studio` | Genera y valida transformaciones XSLT 1.0 (Xalan) y XSLT 2.0/3.0 (Saxon-HE), incluyendo `json-to-xml()`, `<xsl:param>` e interacción con cabeceras/propiedades del Exchange (`cpi:*` / `sapci:*`). | `validate-xslt.mjs` |
 | **5** | `sap-cpi-regex-studio` | Diseña y prueba expresiones regulares con anclaje `^...$`, detector estático de *Catastrophic Backtracking (ReDoS)* y expresiones Apache Camel Simple (`date-with-timezone`, listas `not in`). | `test-camel-regex.mjs` |
-| **6** | `sap-cpi-xsd-studio` | Infiere esquemas W3C XSD 1.0 combinando múltiples muestras JSON (`minOccurs="0"` y `nillable="true"` automático según SAP Note `2624922`) y valida reglas de Message Mapping. | `validate-xsd.mjs` |
+| **6** | `sap-cpi-xsd-studio` | Infiere esquemas W3C XSD 1.0 a partir de muestras JSON, genera mapeos gráficos **`.mmap` (`<xiObj>`)** sintetizando contenedores padre y **simula localmente la ejecución del mapeo** con payloads XML/JSON reales. | `validate-xsd.mjs`<br>`build-mmap.mjs`<br>`simulate-mmap.mjs` |
 | **7** | `sap-cpi-mock-data-generator` | Valida sintaxis XML/JSON (incluyendo estándares IDoc `EDI_DC40` y OData `$batch`), comprueba la correlación E2E entre múltiples contratos y empaqueta suites `.zip`. | `pack-mock-suite.mjs` |
-| **8** | `sap-cpi-architect` | **Modo 1:** Construye paquetes OSGi `.zip` duales (iFlow + Script Collection). **Modo 2:** Extrae metadatos y valida documentación técnica en 8 secciones. **Modo 3:** Clona y adapta bundles `.zip` de referencia según nuevas especificaciones API. | `build-cpi-package.mjs`<br>`extract-for-docs.mjs`<br>`clone-iflow-bundle.mjs` |
+| **8** | `sap-cpi-architect` | **Modo 1:** Construye paquetes OSGi `.zip` duales (iFlow + Script Collection). **Modo 2:** Extrae topología y genera **Documento Técnico formal de 8 secciones en PDF y Markdown**. **Modo 3:** Clona y adapta bundles `.zip` de referencia. **Modo 4:** Exporta **colecciones Postman v2.1 y OpenAPI 3.0** con CSRF handshake. **Modo 5:** Construye paquetes OSGi de **Value Mapping**. | `build-cpi-package.mjs`<br>`clone-iflow-bundle.mjs`<br>`extract-for-docs.mjs`<br>`export-api-client.mjs`<br>`build-value-mapping.mjs` |
 
 ---
 
@@ -126,6 +130,9 @@ node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.
 node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --remediate manifest,https,timeouts --out ./Paquete_Corregido.zip
 node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --json
 node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --extract-dir ./inspeccion
+
+# Comparar semánticamente dos versiones de un paquete (iFlow o Script Collection) con reporte PDF
+node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs ./iFlow_v1.zip ./iFlow_v2.zip --pdf ./Comparativa.pdf
 ```
 
 ### 5.2. Validador y Linter de Scripts Groovy (`sap-cpi-groovy-generator`)
@@ -193,6 +200,13 @@ node skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs \
   --header "/S4SalesOrder/Header/HttpMethod=CamelHttpMethod" \
   --property "/S4SalesOrder/Header/CorrelationId=SAP_MplCorrelationId" \
   --out ./MM_Order_To_S4.mmap
+
+# Simular localmente la ejecución de un .mmap con payload XML o JSON
+node skills/sap-cpi-xsd-studio/scripts/simulate-mmap.mjs \
+  --mmap ./MM_Order_To_S4.mmap \
+  --payload ./input.xml \
+  --header CamelHttpMethod=POST \
+  --out ./output.xml
 ```
 
 ### 5.7. Empaquetador de Baterías de Prueba E2E (`sap-cpi-mock-data-generator`)
@@ -203,14 +217,15 @@ Valida sintaxis XML/JSON, verifica que los identificadores de negocio (`orderId`
 node skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs --spec ./suite-spec.json --out ./MockSuite.zip
 ```
 
-### 5.8. Arquitecto SAP CPI: Empaquetado OSGi, Clonación y Documentación (`sap-cpi-architect`)
+### 5.8. Arquitecto SAP CPI: Empaquetado OSGi, Clonación, Documentación y Clientes API (`sap-cpi-architect`)
 
 - **Modo 1 (`build-cpi-package.mjs`):** Construye los paquetes `.zip` con estructura OSGi (`META-INF/MANIFEST.MF`, `.project`, `.iflw`, `parameters.prop` y `Script Collection` independiente vinculada por `Provide-Capability` / `Require-Capability`):
   ```bash
   node skills/sap-cpi-architect/scripts/build-cpi-package.mjs ./bundle-spec.json --out-dir ./dist
   ```
-- **Modo 2 (`extract-for-docs.mjs`):** Extrae la topología completa de un paquete `.zip` y valida que el documento técnico Markdown cumpla las 8 secciones corporativas:
+- **Modo 2 (`extract-for-docs.mjs`):** Extrae la topología completa de un paquete `.zip`, valida las 8 secciones corporativas y genera el **Documento de Diseño Técnico formal en PDF y Markdown**:
   ```bash
+  node skills/sap-cpi-architect/scripts/extract-for-docs.mjs ./Paquete_iFlow.zip --pdf ./Diseno_Tecnico.pdf
   node skills/sap-cpi-architect/scripts/extract-for-docs.mjs ./Paquete_iFlow.zip --validate-doc ./Documentacion_Tecnica.md
   ```
 - **Modo 3 (`clone-iflow-bundle.mjs`):** Clona un iFlow `.zip` de referencia adaptando su identificador OSGi, scripts `.groovy` invocados y rutas XPath del Splitter (manteniendo intactos sus diagramas BPMN2 y archivos `.prop`), inyecta archivos sueltos (`.xsd`, `.mmap`, `.xsl`, `.groovy`, `.wsdl`) con `--add-resource`, o actualiza una `ScriptCollection.zip`:
@@ -223,6 +238,14 @@ node skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs --spec ./sui
     --xpath //nodoOrigen=//nodoNuevo \
     --add-resource ./OrderRequest.xsd \
     --add-resource ./MM_Order_To_S4.mmap
+  ```
+- **Modo 4 (`export-api-client.mjs`):** Genera colecciones **Postman v2.1** (con pre-request handshake para CSRF) y especificaciones **OpenAPI 3.0.3** a partir de los canales inbound:
+  ```bash
+  node skills/sap-cpi-architect/scripts/export-api-client.mjs ./Paquete_iFlow.zip --out-dir ./clients
+  ```
+- **Modo 5 (`build-value-mapping.mjs`):** Construye paquetes OSGi de **Value Mapping** importables en SAP Integration Suite desde CSV o JSON:
+  ```bash
+  node skills/sap-cpi-architect/scripts/build-value-mapping.mjs ./valores.csv --name VM_Estados_S4 --out ./VM_Estados_S4.zip
   ```
 
 ---

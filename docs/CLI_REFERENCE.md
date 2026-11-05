@@ -20,15 +20,15 @@ node setup-skills.mjs [--target <directorio>] [--agent all|both|antigravity|clau
 | `--mcp` | Registra automáticamente el servidor MCP local (`node .agents/mcp-server.mjs`) en `.mcp.json`, `.cursor/mcp.json` y `.vscode/mcp.json`. |
 
 ### 1.1b. `mcp-server.mjs` (Servidor MCP Local `stdio` JSON-RPC 2.0)
-Expone los 11 motores deterministas como herramientas MCP (`tools/list`, `tools/call`) y las 8 `SKILL.md` como recursos y prompts MCP (`resources/list`, `prompts/list`).
+Expone los 16 motores deterministas como herramientas MCP (`tools/list`, `tools/call`) y las 8 `SKILL.md` como recursos y prompts MCP (`resources/list`, `prompts/list`).
 
 ```bash
 node mcp-server.mjs              # Modo servidor stdio (invocado automáticamente por el IDE)
-node mcp-server.mjs --self-test  # Autoverificación de las 11 tools y 9 resources MCP
+node mcp-server.mjs --self-test  # Autoverificación de las 16 tools y 9 resources MCP
 ```
 
 ### 1.2. `verify-all.mjs` (Suite de Auto-Verificación)
-Ejecuta pruebas integrales sobre los 8 motores CLI creando artefactos sintéticos en memoria/temporal y verificando su salida.
+Ejecuta pruebas integrales sobre los 15 motores deterministas y el servidor MCP creando artefactos sintéticos en memoria/temporal y verificando su salida.
 
 ```bash
 node verify-all.mjs
@@ -53,6 +53,21 @@ node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs <archivo.zip | a
 - `--extract-dir <carpeta>`: Extrae físicamente todos los recursos internos del `.zip` en la carpeta indicada.
 - `--show-prop-values`: Muestra los valores reales de los archivos `.prop` (por defecto se redactan como `[REDACTED]` por privacidad).
 - `--json`: Devuelve el inventario de archivos, hallazgos de auditoría y `availableRemediations` en formato JSON.
+
+---
+
+### 2.1b. `diff-iflow-zip.mjs` (`sap-cpi-zip-inspector`)
+Compara semánticamente dos paquetes `.zip` de SAP CPI (iFlows o Script Collections) eliminando el ruido BPMNDI y detectando cambios topológicos, parámetros externalizados modificados/añadidos, recursos del paquete OSGi y delta de puntuación de gobernanza (Score).
+
+```bash
+node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs <v1.zip> <v2.zip> [--pdf <informe-diff.pdf>] [--show-prop-values] [--json]
+node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs --demo [--pdf <diff.pdf>] [--json]
+```
+
+- `<v1.zip>` y `<v2.zip>`: Paquetes base y objetivo a comparar.
+- `--pdf <informe-diff.pdf>`: Genera un informe comparativo formal en PDF con tablas de recursos, checklist de parámetros y delta de cumplimiento.
+- `--show-prop-values`: Muestra los valores reales de los parámetros (por defecto `[REDACTED]`).
+- `--json`: Salida estructurada de cambios topológicos, archivos y parámetros.
 
 ---
 
@@ -150,6 +165,18 @@ node skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs \
 
 # Modo 4: Validar un archivo .mmap existente
 node skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs --validate <Mapeo.mmap> [--json]
+
+# Modo 5: Simular la ejecución de un Mapeo Gráfico (.mmap) con payload XML o JSON
+node skills/sap-cpi-xsd-studio/scripts/simulate-mmap.mjs \
+  --mmap <Mapeo.mmap> \
+  --payload <Entrada.xml|Entrada.json> \
+  [--header SapSender=CRM --header CamelHttpMethod=POST] \
+  [--prop SAP_MplCorrelationId=CORR-01] \
+  [--out <Salida.xml>] \
+  [--json]
+
+# Demo del simulador
+node skills/sap-cpi-xsd-studio/scripts/simulate-mmap.mjs --demo [--json]
 ```
 
 ---
@@ -211,8 +238,59 @@ node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \
 ```
 
 #### Extractor y Validador de Documentación Técnica (`extract-for-docs.mjs`)
-Extrae metadatos arquitectónicos de un `.zip` y valida que un documento Markdown contenga las 8 secciones técnicas obligatorias.
+Extrae metadatos arquitectónicos de un `.zip`, valida que un documento Markdown contenga las 8 secciones técnicas obligatorias y permite exportar el Documento de Diseño Técnico formal en PDF de 8 secciones.
 
 ```bash
-node skills/sap-cpi-architect/scripts/extract-for-docs.mjs <paquete.zip> [--validate-doc <documento.md>] [--json]
+# Modo 1: Extraer información y opcionalmente exportar el PDF técnico oficial de 8 secciones
+node skills/sap-cpi-architect/scripts/extract-for-docs.mjs <paquete.zip> [--pdf <DisenoTecnico.pdf>] [--json]
+
+# Modo 2: Validar un documento Markdown de diseño técnico (8/8 secciones)
+node skills/sap-cpi-architect/scripts/extract-for-docs.mjs --validate-doc <documento.md>
 ```
+
+#### Generador de Clientes API Postman & OpenAPI (`export-api-client.mjs`)
+Inspecciona los canales de entrada (`HTTPS`, `SOAP`, `OData`, `AS2`) de un iFlow `.zip`, extrae esquemas XSD y genera colecciones listas para pruebas en Postman v2.1 (con flujo de obtención CSRF) y contratos OpenAPI 3.0.3.
+
+```bash
+node skills/sap-cpi-architect/scripts/export-api-client.mjs <paquete.zip> [--format postman|openapi|both] [--out-dir <carpeta>] [--base-url <url>] [--json]
+node skills/sap-cpi-architect/scripts/export-api-client.mjs --demo [--out-dir <carpeta>]
+```
+
+#### Constructor de Paquetes OSGi de Value Mapping (`build-value-mapping.mjs`)
+Construye paquetes `.zip` de Value Mapping compatibles con SAP CPI a partir de especificaciones JSON o tablas CSV.
+
+```bash
+# Desde archivo CSV
+node skills/sap-cpi-architect/scripts/build-value-mapping.mjs <tabla.csv> --name <VM_Name> [--out <VM_Name.zip>] [--json]
+
+# Desde archivo JSON estructurado
+node skills/sap-cpi-architect/scripts/build-value-mapping.mjs <tabla.json> [--name <VM_Name>] [--out <VM_Name.zip>] [--json]
+
+# Demo
+node skills/sap-cpi-architect/scripts/build-value-mapping.mjs --demo [--out <VM_Demo.zip>]
+```
+
+---
+
+## 3. Catálogo de Herramientas MCP (16 Tools Nativas)
+
+Cuando el servidor `mcp-server.mjs` está activo (arrancado por el IDE o cliente MCP vía stdio), se exponen las siguientes herramientas:
+
+| Herramienta MCP | Módulo / Skill | Descripción |
+| :--- | :--- | :--- |
+| `cpi_inspect_zip` | `sap-cpi-zip-inspector` | Audita paquetes `.zip`/`.iflw`, calcula puntuación 0-100, genera inventario e informe PDF opcional. |
+| `cpi_remediate_zip` | `sap-cpi-zip-inspector` | Aplica correcciones automáticas (`manifest`, `https`, `timeouts`, `streaming`, `csrf`, `groovy`, `all`) y emite nuevo `.zip`. |
+| `cpi_diff_bundles` | `sap-cpi-zip-inspector` | Compara semánticamente dos paquetes iFlow/SC, reporta diferencias topológicas y de parámetros, y exporta PDF comparativo. |
+| `cpi_validate_groovy` | `sap-cpi-groovy-generator` | Valida código Groovy (o archivo en disco) frente a reglas de Upgrade Readiness, imports y anti-XXE. |
+| `cpi_audit_groovy` | `sap-cpi-code-auditor` | Audita código Groovy original y lo compara contra versión refactorizada exigiendo 100/100. |
+| `cpi_infer_xsd` | `sap-cpi-xsd-studio` | Infiere y valida un esquema W3C XSD 1.0 combinando múltiples muestras JSON. |
+| `cpi_validate_xsd` | `sap-cpi-xsd-studio` | Valida un esquema XSD 1.0 frente a reglas de compatibilidad de SAP CPI Message Mapping. |
+| `cpi_build_mmap` | `sap-cpi-xsd-studio` | Genera y valida un archivo de Mapeo Gráfico `.mmap` (`<xiObj>`) sintetizando contenedores padre. |
+| `cpi_simulate_mmap` | `sap-cpi-xsd-studio` | Simula la ejecución local de un mapeo `.mmap` con payload XML o JSON, cabeceras y propiedades Exchange. |
+| `cpi_validate_xslt` | `sap-cpi-xslt-studio` | Valida hojas de estilo XSLT 1.0 (Xalan) o 2.0/3.0 (Saxon-HE) y funciones del Exchange CPI. |
+| `cpi_test_regex` | `sap-cpi-regex-studio` | Evalúa expresiones regulares contra ReDoS y genera expresiones Apache Camel Simple. |
+| `cpi_build_package` | `sap-cpi-architect` | Construye paquetes OSGi `.zip` (iFlow + Script Collection) con MANIFEST.MF en raíz plegado a 72 bytes. |
+| `cpi_clone_bundle` | `sap-cpi-architect` | Clona y adapta iFlows existentes, inyecta recursos o actualiza Script Collections. |
+| `cpi_export_technical_doc` | `sap-cpi-architect` | Genera el Documento de Diseño Técnico oficial de 8 secciones en PDF y/o Markdown. |
+| `cpi_export_api_client` | `sap-cpi-architect` | Genera colecciones de pruebas Postman v2.1 (con flujo CSRF) y contratos OpenAPI 3.0. |
+| `cpi_build_value_mapping` | `sap-cpi-architect` | Construye paquetes OSGi `.zip` de Value Mapping a partir de JSON o tablas CSV. |

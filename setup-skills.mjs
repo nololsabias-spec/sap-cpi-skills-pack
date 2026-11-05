@@ -62,13 +62,13 @@ function buildUnifiedInstructionsMarkdown(baseSkillDir = '.agents') {
 
 ## 3. Catálogo de Skills y Herramientas MCP / CLI Instaladas (\`${baseSkillDir}/\`)
 
-Tienes disponibles tanto el **Servidor MCP local (\`node ${baseSkillDir}/mcp-server.mjs\`)** con 11 herramientas nativas (\`cpi_inspect_zip\`, \`cpi_remediate_zip\`, \`cpi_validate_groovy\`, \`cpi_audit_groovy\`, \`cpi_infer_xsd\`, \`cpi_validate_xsd\`, \`cpi_build_mmap\`, \`cpi_validate_xslt\`, \`cpi_test_regex\`, \`cpi_build_package\`, \`cpi_clone_bundle\`) como las guías detalladas en \`${baseSkillDir}/skills/\`:
+Tienes disponibles tanto el **Servidor MCP local (\`node ${baseSkillDir}/mcp-server.mjs\`)** con 16 herramientas nativas (\`cpi_inspect_zip\`, \`cpi_remediate_zip\`, \`cpi_validate_groovy\`, \`cpi_audit_groovy\`, \`cpi_infer_xsd\`, \`cpi_validate_xsd\`, \`cpi_build_mmap\`, \`cpi_simulate_mmap\`, \`cpi_diff_bundles\`, \`cpi_export_technical_doc\`, \`cpi_export_api_client\`, \`cpi_build_value_mapping\`, \`cpi_validate_xslt\`, \`cpi_test_regex\`, \`cpi_build_package\`, \`cpi_clone_bundle\`) como las guías detalladas en \`${baseSkillDir}/skills/\`:
 
-1. **Arquitecto SAP CPI**: \`${baseSkillDir}/skills/sap-cpi-architect/SKILL.md\` (\`build-cpi-package.mjs\`, \`clone-iflow-bundle.mjs\`, \`extract-for-docs.mjs\`)
-2. **Inspector y Auditor de Paquetes .zip / .iflw + PDF**: \`${baseSkillDir}/skills/sap-cpi-zip-inspector/SKILL.md\` (\`inspect-iflow-zip.mjs\`)
+1. **Arquitecto SAP CPI**: \`${baseSkillDir}/skills/sap-cpi-architect/SKILL.md\` (\`build-cpi-package.mjs\`, \`clone-iflow-bundle.mjs\`, \`extract-for-docs.mjs\`, \`export-api-client.mjs\`, \`build-value-mapping.mjs\`)
+2. **Inspector y Auditor de Paquetes .zip / .iflw + Differ + PDF**: \`${baseSkillDir}/skills/sap-cpi-zip-inspector/SKILL.md\` (\`inspect-iflow-zip.mjs\`, \`diff-iflow-zip.mjs\`)
 3. **Generador de Scripts Groovy 2.4 / 4**: \`${baseSkillDir}/skills/sap-cpi-groovy-generator/SKILL.md\` (\`validate-groovy.mjs\`)
 4. **Auditor y Refactorizador Groovy**: \`${baseSkillDir}/skills/sap-cpi-code-auditor/SKILL.md\` (\`audit-groovy.mjs\`)
-5. **Estudio de Esquemas XSD 1.0 y Mapeos Gráficos .mmap**: \`${baseSkillDir}/skills/sap-cpi-xsd-studio/SKILL.md\` (\`validate-xsd.mjs\`, \`build-mmap.mjs\`)
+5. **Estudio de Esquemas XSD 1.0, Mapeos .mmap y Simulador**: \`${baseSkillDir}/skills/sap-cpi-xsd-studio/SKILL.md\` (\`validate-xsd.mjs\`, \`build-mmap.mjs\`, \`simulate-mmap.mjs\`)
 6. **Estudio de Transformaciones XSLT 1.0 / 2.0 / 3.0**: \`${baseSkillDir}/skills/sap-cpi-xslt-studio/SKILL.md\` (\`validate-xslt.mjs\`)
 7. **Estudio de Expresiones Regulares y Camel Simple**: \`${baseSkillDir}/skills/sap-cpi-regex-studio/SKILL.md\` (\`test-camel-regex.mjs\`)
 8. **Generador de Suites de Datos Mock E2E**: \`${baseSkillDir}/skills/sap-cpi-mock-data-generator/SKILL.md\` (\`pack-mock-suite.mjs\`)

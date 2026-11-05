@@ -18,6 +18,11 @@ import { lintGroovyScript } from './skills/sap-cpi-groovy-generator/scripts/vali
 import { compareAuditResults } from './skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs';
 import { inferXsdFromJsonSamples, validateXsdForSapCpi } from './skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs';
 import { generateMmapXml, validateMmapForSapCpi } from './skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs';
+import { simulateMmapExecution } from './skills/sap-cpi-xsd-studio/scripts/simulate-mmap.mjs';
+import { diffBundles, buildDiffPdfSpec } from './skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs';
+import { extractIflowDocumentation, buildTechnicalDocPdfSpec } from './skills/sap-cpi-architect/scripts/extract-for-docs.mjs';
+import { exportApiClientArtifacts } from './skills/sap-cpi-architect/scripts/export-api-client.mjs';
+import { validateAndBuildValueMappingBundle } from './skills/sap-cpi-architect/scripts/build-value-mapping.mjs';
 import { validateXsltStylesheet } from './skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs';
 import { validateAndTestCamelRegex } from './skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs';
 import { validateAndBuildCpiBundles, DEMO_ARCHITECT_SPEC } from './skills/sap-cpi-architect/scripts/build-cpi-package.mjs';
@@ -221,6 +226,96 @@ export const MCP_TOOLS = [
       },
       required: ['sourceZipPath', 'outZipPath']
     }
+  },
+  {
+    name: 'cpi_simulate_mmap',
+    description:
+      'Simula localmente la ejecución de un Mapeo Gráfico (.mmap / <xiObj>) de SAP CPI frente a un payload XML o JSON de entrada, resolviendo XPaths, constantes, cabeceras y propiedades Exchange.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mmapContent: { type: 'string', description: 'Contenido XML del archivo .mmap (opcional si se pasa mmapPath).' },
+        mmapPath: { type: 'string', description: 'Ruta al archivo .mmap en disco.' },
+        sourcePayload: { type: 'string', description: 'Payload XML o JSON de prueba (opcional si se pasa sourcePayloadPath).' },
+        sourcePayloadPath: { type: 'string', description: 'Ruta al payload XML o JSON de prueba en disco.' },
+        headers: { type: 'object', description: 'Mapa clave-valor de cabeceras simuladas (ej. {"SapSender": "CRM"}).' },
+        properties: { type: 'object', description: 'Mapa clave-valor de propiedades Exchange simuladas.' },
+        isJson: { type: 'boolean', description: 'Indica explícitamente si el payload origen es JSON.' },
+        outPath: { type: 'string', description: 'Ruta opcional donde guardar el XML de destino simulado.' }
+      }
+    }
+  },
+  {
+    name: 'cpi_diff_bundles',
+    description:
+      'Compara semánticamente dos paquetes .zip de SAP CPI (iFlows o Script Collections), detectando diferencias en parámetros, topología BPMN2, scripts y recursos. Opcionalmente genera informe PDF de auditoría comparativa.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        baseZipPath: { type: 'string', description: 'Ruta al paquete .zip original (base / baseline).' },
+        targetZipPath: { type: 'string', description: 'Ruta al paquete .zip modificado o remediado.' },
+        pdfPath: { type: 'string', description: 'Ruta opcional para generar el informe comparativo en PDF.' },
+        outJsonPath: { type: 'string', description: 'Ruta opcional donde escribir el resultado JSON.' }
+      },
+      required: ['baseZipPath', 'targetZipPath']
+    }
+  },
+  {
+    name: 'cpi_export_technical_doc',
+    description:
+      'Genera el Documento de Diseño Técnico corporativo de 8 secciones (Resumen, Arquitectura BPMN2, Contratos XSD/WSDL, Mappings, Scripts Groovy, Parámetros Externalizados, Canales Adaptadores y Manejo de Errores) en PDF y/o Markdown para un paquete .zip de iFlow.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filePath: { type: 'string', description: 'Ruta al archivo .zip del iFlow (o "--demo").' },
+        pdfPath: { type: 'string', description: 'Ruta opcional donde guardar el documento técnico en PDF.' },
+        markdownPath: { type: 'string', description: 'Ruta opcional donde guardar el documento técnico en Markdown.' }
+      },
+      required: ['filePath']
+    }
+  },
+  {
+    name: 'cpi_export_api_client',
+    description:
+      'Inspecciona los canales de entrada (HTTPS/SOAP/OData/AS2) de un iFlow .zip y genera colecciones de pruebas Postman v2.1 (con handshake CSRF automático y payloads de muestra) y especificaciones OpenAPI 3.0.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filePath: { type: 'string', description: 'Ruta al archivo .zip del iFlow.' },
+        outDir: { type: 'string', description: 'Carpeta de salida donde escribir las colecciones Postman y OpenAPI.' },
+        baseUrl: { type: 'string', description: 'URL base del tenant CPI (ej. https://tenant-iflmap.hcisbp.eu10.hana.ondemand.com).' },
+        authType: { type: 'string', enum: ['oauth2', 'basic', 'client_certificate', 'none'], description: 'Esquema de autenticación por defecto.' }
+      },
+      required: ['filePath']
+    }
+  },
+  {
+    name: 'cpi_build_value_mapping',
+    description:
+      'Construye paquetes OSGi (.zip) de Value Mapping estándar para SAP CPI a partir de especificaciones JSON o tablas CSV (con metainfo.prop, .project com.sap.ide.ifl.nature.valuemapping y value_mapping.xml).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Nombre del Value Mapping (ej. VM_OrderStatuses_S4).' },
+        description: { type: 'string', description: 'Descripción opcional para metainfo.prop.' },
+        csvContent: { type: 'string', description: 'Contenido CSV de correspondencias (o usar csvPath).' },
+        csvPath: { type: 'string', description: 'Ruta al archivo CSV en disco.' },
+        groups: {
+          type: 'array',
+          description: 'Lista estructurada de grupos agency/schema y pares de valores sourceValue/targetValue.'
+        },
+        entries: {
+          type: 'array',
+          description: 'Lista simplificada de pares sourceValue/targetValue cuando hay un único grupo.'
+        },
+        sourceAgency: { type: 'string', description: 'Agencia origen por defecto para lista simplificada.' },
+        sourceSchema: { type: 'string', description: 'Esquema origen por defecto para lista simplificada.' },
+        targetAgency: { type: 'string', description: 'Agencia destino por defecto para lista simplificada.' },
+        targetSchema: { type: 'string', description: 'Esquema destino por defecto para lista simplificada.' },
+        outZipPath: { type: 'string', description: 'Ruta opcional donde guardar el archivo .zip generado.' }
+      },
+      required: ['name']
+    }
   }
 ];
 
@@ -347,6 +442,78 @@ export function executeMcpTool(name, args = {}) {
       fs.mkdirSync(path.dirname(outAbs), { recursive: true });
       fs.writeFileSync(outAbs, buf);
       return { outZipPath: outAbs, sizeBytes: buf.length, injectedResources: additionalResources.map((r) => r.fileName) };
+    }
+    case 'cpi_simulate_mmap': {
+      const mmapContent = args.mmapContent || (args.mmapPath ? fs.readFileSync(path.resolve(args.mmapPath), 'utf8') : '');
+      const inputPayload = args.sourcePayload || (args.sourcePayloadPath ? fs.readFileSync(path.resolve(args.sourcePayloadPath), 'utf8') : '');
+      const sim = simulateMmapExecution({
+        mmapContent,
+        inputPayload,
+        headers: args.headers,
+        properties: args.properties
+      });
+      if (args.outPath && sim.outputXml) {
+        fs.mkdirSync(path.dirname(path.resolve(args.outPath)), { recursive: true });
+        fs.writeFileSync(path.resolve(args.outPath), sim.outputXml, 'utf8');
+      }
+      return sim;
+    }
+    case 'cpi_diff_bundles': {
+      const diff = diffBundles(path.resolve(args.baseZipPath), path.resolve(args.targetZipPath));
+      if (args.pdfPath) {
+        const pdfSpec = buildDiffPdfSpec(diff);
+        const bytes = writeAuditPdfFile(path.resolve(args.pdfPath), pdfSpec);
+        diff.pdfGenerated = { path: path.resolve(args.pdfPath), sizeBytes: bytes };
+      }
+      if (args.outJsonPath) {
+        fs.mkdirSync(path.dirname(path.resolve(args.outJsonPath)), { recursive: true });
+        fs.writeFileSync(path.resolve(args.outJsonPath), JSON.stringify(diff, null, 2), 'utf8');
+      }
+      return diff;
+    }
+    case 'cpi_export_technical_doc': {
+      const doc = extractIflowDocumentation(args.filePath === '--demo' ? '--demo' : path.resolve(args.filePath));
+      if (args.pdfPath) {
+        const pdfSpec = buildTechnicalDocPdfSpec(doc.report, doc.markdownDocument);
+        const bytes = writeAuditPdfFile(path.resolve(args.pdfPath), pdfSpec);
+        doc.pdfGenerated = { path: path.resolve(args.pdfPath), sizeBytes: bytes };
+      }
+      if (args.markdownPath) {
+        fs.mkdirSync(path.dirname(path.resolve(args.markdownPath)), { recursive: true });
+        fs.writeFileSync(path.resolve(args.markdownPath), doc.markdownDocument, 'utf8');
+      }
+      return doc;
+    }
+    case 'cpi_export_api_client': {
+      const res = exportApiClientArtifacts(path.resolve(args.filePath), {
+        outDir: args.outDir ? path.resolve(args.outDir) : null,
+        baseUrl: args.baseUrl,
+        authType: args.authType
+      });
+      return res;
+    }
+    case 'cpi_build_value_mapping': {
+      const csvContent = args.csvContent || (args.csvPath ? fs.readFileSync(path.resolve(args.csvPath), 'utf8') : null);
+      const res = validateAndBuildValueMappingBundle({
+        name: args.name,
+        description: args.description,
+        csvContent,
+        groups: args.groups,
+        entries: args.entries,
+        sourceAgency: args.sourceAgency,
+        sourceSchema: args.sourceSchema,
+        targetAgency: args.targetAgency,
+        targetSchema: args.targetSchema
+      });
+      if (args.outZipPath && res.zipBuffer) {
+        fs.mkdirSync(path.dirname(path.resolve(args.outZipPath)), { recursive: true });
+        fs.writeFileSync(path.resolve(args.outZipPath), res.zipBuffer);
+      }
+      const { zipBuffer, ...summary } = res;
+      return {
+        ...summary,
+        outZipPath: args.outZipPath ? path.resolve(args.outZipPath) : null
+      };
     }
     default:
       throw new Error(`Herramienta MCP desconocida: ${name}`);
@@ -519,7 +686,7 @@ if (isMain) {
     const summary = {
       valid:
         initRes?.result?.serverInfo?.name === 'sap-cpi-skills-pack' &&
-        toolsRes?.result?.tools?.length === 11 &&
+        toolsRes?.result?.tools?.length === 16 &&
         resList?.result?.resources?.length >= 8 &&
         parsedCall.totalFiles === 4,
       toolsCount: toolsRes?.result?.tools?.length,

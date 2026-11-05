@@ -106,12 +106,48 @@ const CHECKS = [
     }
   },
   {
+    skill: 'sap-cpi-xsd-studio (Graphical Mapping .mmap Simulator)',
+    script: 'skills/sap-cpi-xsd-studio/scripts/simulate-mmap.mjs',
+    args: ['--demo', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.success === true && data.totalRules >= 5 && data.mappedFields.length >= 5;
+    }
+  },
+  {
+    skill: 'sap-cpi-zip-inspector (Semantic Bundle Differ)',
+    script: 'skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs',
+    args: ['--demo', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return Boolean(data.bundleA && data.bundleB && data.manifestDiff?.hasChanged === true && data.topologyChanges.length > 0);
+    }
+  },
+  {
+    skill: 'sap-cpi-architect (Inbound API Client Generator - Postman & OpenAPI)',
+    script: 'skills/sap-cpi-architect/scripts/export-api-client.mjs',
+    args: ['--demo', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return Boolean(data.postman && data.openapi && data.postman.item.length > 0);
+    }
+  },
+  {
+    skill: 'sap-cpi-architect (OSGi Value Mapping Bundle Builder)',
+    script: 'skills/sap-cpi-architect/scripts/build-value-mapping.mjs',
+    args: ['--demo', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.valid === true && data.totalGroups === 1 && data.totalEntries === 5 && data.sizeBytes > 0;
+    }
+  },
+  {
     skill: 'mcp-server.mjs (Local JSON-RPC 2.0 MCP Server)',
     script: 'mcp-server.mjs',
     args: ['--self-test', '--json'],
     verify: (out) => {
       const data = JSON.parse(out);
-      return data.valid === true && data.toolsCount === 11 && data.sampleToolCallOk === true;
+      return data.valid === true && data.toolsCount === 16 && data.sampleToolCallOk === true;
     }
   }
 ];
@@ -140,7 +176,7 @@ for (const check of CHECKS) {
 
 console.log('\n====================================================================');
 if (allPassed) {
-  console.log(' RESULTADO: 8/8 MÓDULOS VALIDADOS CORRECTAMENTE (0 DEPENDENCIAS)');
+  console.log(` RESULTADO: ${CHECKS.length}/${CHECKS.length} MÓDULOS VALIDADOS CORRECTAMENTE (0 DEPENDENCIAS)`);
   console.log('====================================================================');
 } else {
   console.log(' RESULTADO: SE DETECTARON FALLOS EN LA VERIFICACIÓN');

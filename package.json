@@ -18,7 +18,12 @@
     "demo:regex": "node ./skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs --demo",
     "demo:xsd": "node ./skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs --demo",
     "demo:mock": "node ./skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs --demo",
-    "demo:architect": "node ./skills/sap-cpi-architect/scripts/build-cpi-package.mjs --demo"
+    "demo:architect": "node ./skills/sap-cpi-architect/scripts/build-cpi-package.mjs --demo",
+    "demo:simulate-mmap": "node ./skills/sap-cpi-xsd-studio/scripts/simulate-mmap.mjs --demo",
+    "demo:diff": "node ./skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs --demo",
+    "demo:doc-extract": "node ./skills/sap-cpi-architect/scripts/extract-for-docs.mjs --demo",
+    "demo:api-client": "node ./skills/sap-cpi-architect/scripts/export-api-client.mjs --demo",
+    "demo:value-mapping": "node ./skills/sap-cpi-architect/scripts/build-value-mapping.mjs --demo"
   },
   "engines": {
     "node": ">=18.0.0"
