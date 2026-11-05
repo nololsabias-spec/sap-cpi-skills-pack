@@ -36,17 +36,31 @@ cd sap-cpi-skills-pack
 npm test
 ```
 
-### Instalar las Skills en un espacio de trabajo
+### Instalar las Skills y el Servidor MCP Local en tu IDE / Agente IA
 
-El script `setup-skills.mjs` instala automáticamente las 8 skills y la librería compartida `shared/zip-utils.mjs` en las carpetas estándar de descubrimiento de agentes (`.agents/skills/` y `.claude/skills/`):
+El script [`setup-skills.mjs`](./setup-skills.mjs) instala las 8 skills, las utilidades compartidas (`shared/`), el harness de aprendizaje continuo y el **servidor MCP local (`mcp-server.mjs`)** para todos los asistentes e IDEs de desarrollo con IA:
 
 ```bash
-# Instalar en el directorio de un proyecto específico
-node setup-skills.mjs --target /ruta/a/tu/proyecto
+# Instalar para TODOS los IDEs y Agentes IA a la vez (Antigravity, Claude, OpenAI Codex/GPT, Cursor, GitHub Copilot, Windsurf, Cline + Servidor MCP local)
+node setup-skills.mjs --target /ruta/a/tu/proyecto --agent all --mcp
 
-# Opciones adicionales de instalación:
-node setup-skills.mjs --target /ruta/a/tu/proyecto --agents-only   # Solo en .agents/skills
-node setup-skills.mjs --target /ruta/a/tu/proyecto --claude-only   # Solo en .claude/skills
+# O instalar para un asistente o IDE específico:
+node setup-skills.mjs --target /ruta/a/tu/proyecto --agent antigravity  # Google Antigravity (.agents/)
+node setup-skills.mjs --target /ruta/a/tu/proyecto --agent claude --mcp # Claude Code / Desktop (.claude/ + .mcp.json)
+node setup-skills.mjs --target /ruta/a/tu/proyecto --agent codex        # OpenAI Codex CLI / GPT Agents (AGENTS.md + .agents/)
+node setup-skills.mjs --target /ruta/a/tu/proyecto --agent cursor       # Cursor IDE (.cursor/rules/*.mdc + .cursor/mcp.json)
+node setup-skills.mjs --target /ruta/a/tu/proyecto --agent copilot      # GitHub Copilot VS Code (.github/copilot-instructions.md + .vscode/mcp.json)
+node setup-skills.mjs --target /ruta/a/tu/proyecto --agent windsurf     # Windsurf IDE (.windsurf/rules/sap-cpi.md)
+node setup-skills.mjs --target /ruta/a/tu/proyecto --agent cline        # Cline / Roo Code (.clinerules/sap-cpi.md)
+```
+
+### Servidor MCP Local (`mcp-server.mjs` — Cero Dependencias, 100% Local `stdio`)
+
+El proyecto incluye [`mcp-server.mjs`](./mcp-server.mjs), un servidor **Model Context Protocol (MCP)** sobre `stdin`/`stdout` (JSON-RPC 2.0) que el IDE arranca automáticamente en segundo plano al abrir la carpeta (gracias a `.vscode/mcp.json`, `.cursor/mcp.json` o `.mcp.json`), exponiendo **11 Tools nativas** (`cpi_inspect_zip`, `cpi_remediate_zip`, `cpi_validate_groovy`, `cpi_audit_groovy`, `cpi_infer_xsd`, `cpi_validate_xsd`, `cpi_build_mmap`, `cpi_validate_xslt`, `cpi_test_regex`, `cpi_build_package`, `cpi_clone_bundle`) y las **8 Skills como Resources/Prompts MCP** sin necesidad de pedir permisos de consola en cada validación:
+
+```bash
+# Verificar el servidor MCP local
+node mcp-server.mjs --self-test
 ```
 
 ---

@@ -104,6 +104,15 @@ const CHECKS = [
       const data = JSON.parse(out);
       return data.valid === true && data.iflwFile === 'ClonedOrderFlow_v2.iflw';
     }
+  },
+  {
+    skill: 'mcp-server.mjs (Local JSON-RPC 2.0 MCP Server)',
+    script: 'mcp-server.mjs',
+    args: ['--self-test', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.valid === true && data.toolsCount === 11 && data.sampleToolCallOk === true;
+    }
   }
 ];
 

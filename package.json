@@ -1,11 +1,16 @@
 {
   "name": "sap-cpi-skills-pack",
-  "version": "1.0.0",
-  "description": "Paquete portable de Skills y Scripts de validación determinista para SAP Cloud Integration (SAP Integration Suite / CPI). Cero dependencias externas.",
+  "version": "2.0.0",
+  "description": "Paquete portable de Skills Multi-IDE y Servidor MCP Local sin dependencias para SAP Cloud Integration (SAP Integration Suite / CPI).",
   "type": "module",
+  "bin": {
+    "sap-cpi-setup": "./setup-skills.mjs",
+    "sap-cpi-mcp": "./mcp-server.mjs"
+  },
   "scripts": {
     "test": "node ./verify-all.mjs",
     "verify": "node ./verify-all.mjs",
+    "mcp": "node ./mcp-server.mjs",
     "install-skills": "node ./setup-skills.mjs",
     "demo:zip": "node ./skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs --demo",
     "demo:auditor": "node ./skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs --demo",

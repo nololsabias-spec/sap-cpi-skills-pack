@@ -6,18 +6,26 @@ Todos los scripts requieren **Node.js `>= 18.0.0`** y devuelven código de salid
 
 ## 1. Utilidades Globales
 
-### 1.1. `setup-skills.mjs` (Instalador de Skills)
-Copia las 8 skills y la librería `shared/zip-utils.mjs` a las carpetas `.agents/skills` y `.claude/skills` del directorio destino.
+### 1.1. `setup-skills.mjs` (Instalador Universal Multi-IDE + Servidor MCP Local)
+Copia las 8 skills, `shared/`, `rules/` y `mcp-server.mjs`, y genera los archivos de reglas y configuración MCP para cada IDE o Agente IA.
 
 ```bash
-node setup-skills.mjs [--target <directorio>] [--agents-only] [--claude-only]
+node setup-skills.mjs [--target <directorio>] [--agent all|both|antigravity|claude|codex|cursor|copilot|windsurf|cline] [--mcp]
 ```
 
 | Opción | Descripción |
 | :--- | :--- |
-| `--target <dir>` | Ruta del proyecto donde se instalarán las skills (por defecto: directorio actual). |
-| `--agents-only` | Instala únicamente en `<target>/.agents/skills`. |
-| `--claude-only` | Instala únicamente en `<target>/.claude/skills`. |
+| `--target <dir>` | Ruta del proyecto donde se instalarán las skills y reglas (por defecto: directorio actual). |
+| `--agent <tipo>` | Ecosistema destino: `all` (todos los IDEs/IAs), `both` (`.agents` + `.claude`), `antigravity`, `claude`, `codex` (`AGENTS.md`), `cursor` (`.cursor/rules/*.mdc`), `copilot` (`.github/copilot-instructions.md`), `windsurf` (`.windsurf/rules/`) o `cline` (`.clinerules/`). |
+| `--mcp` | Registra automáticamente el servidor MCP local (`node .agents/mcp-server.mjs`) en `.mcp.json`, `.cursor/mcp.json` y `.vscode/mcp.json`. |
+
+### 1.1b. `mcp-server.mjs` (Servidor MCP Local `stdio` JSON-RPC 2.0)
+Expone los 11 motores deterministas como herramientas MCP (`tools/list`, `tools/call`) y las 8 `SKILL.md` como recursos y prompts MCP (`resources/list`, `prompts/list`).
+
+```bash
+node mcp-server.mjs              # Modo servidor stdio (invocado automáticamente por el IDE)
+node mcp-server.mjs --self-test  # Autoverificación de las 11 tools y 9 resources MCP
+```
 
 ### 1.2. `verify-all.mjs` (Suite de Auto-Verificación)
 Ejecuta pruebas integrales sobre los 8 motores CLI creando artefactos sintéticos en memoria/temporal y verificando su salida.
