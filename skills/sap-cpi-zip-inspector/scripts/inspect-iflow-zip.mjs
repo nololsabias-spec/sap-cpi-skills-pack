@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readZipEntries, createZipBuffer } from '../../../shared/zip-utils.mjs';
 import { writeAuditPdfFile } from '../../../shared/pdf-utils.mjs';
+import { lintGroovyScript } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
 
 export function parseManifestContent(manifestText) {
   if (!manifestText) return { symbolicName: 'Desconocido', version: '1.0.0', name: 'iFlow Bundle', vendor: 'SAP / Custom', importedPackages: [], raw: {} };
@@ -274,13 +275,17 @@ export function analyzeIflwLocally(iflwXml) {
       (p.key === 'mappinguri' && p.val.toLowerCase().endsWith('.mmap'))
   ).length;
 
-  // Calculate deterministic Compliance Score (Base 100: Critical -30, High -15, Medium -5)
+  // Calculate deterministic Compliance Score (Base 100: Critical -30, High -15, Medium -10/-5)
   let score = 100;
   if (!hasExceptionSubprocess) score -= 30;
   score -= unencryptedChannels.length * 30;
   score -= contentModifiersReadingBodyToProperty.length * 30;
   score -= hardcodedSensitivePatterns.length * 15;
+  score -= splittersWithoutStreaming.length * 10;
+  score -= csrfDisabledChannels.length * 10;
   score -= syncTasksWithoutTimeout.length * 5;
+  score -= basicAuthChannels.length * 5;
+  score -= routersWithoutDefaultRoute.length * 5;
   score = Math.max(0, score);
 
   return {
@@ -463,6 +468,7 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
     manifestIssues.push(`CRÍTICO: No se encontró 'META-INF/MANIFEST.MF' en el paquete.`);
   }
 
+  const groovyAuditResults = groovyScripts.map((g) => lintGroovyScript(g.text || '', g.name));
   const isScriptCollection = manifestData.bundleType === 'ScriptCollection' || (iflwFiles.length === 0 && groovyScripts.length > 0 && manifestFiles.length > 0);
   const heuristics = isScriptCollection
     ? {
@@ -471,21 +477,35 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
         unencryptedChannels: [],
         hardcodedSensitivePatterns: [],
         syncTasksWithoutTimeout: [],
+        splittersWithoutStreaming: [],
+        routersWithoutDefaultRoute: [],
+        basicAuthChannels: [],
+        csrfDisabledChannels: [],
         contentModifiersReadingBodyToProperty: [],
         referencedScripts: groovyScripts.map((g) => g.name),
         referencedScriptCollections: [],
+        groovyAuditResults,
         manifestIssues,
         score: Math.max(0, (manifestData.provideCapability && groovyScripts.length > 0 ? 100 : 85) - manifestIssues.length * 40),
         stats: {
           subprocesses: 0,
           groovyCalls: groovyScripts.length,
           xsltCalls: xsltMappings.length,
+          messageMappingCalls: messageMappings.length,
           routers: 0,
           serviceTasks: 0,
           channels: 0
         }
       }
     : analyzeIflwLocally(iflwFiles[0]?.text || '');
+
+  heuristics.groovyAuditResults = groovyAuditResults;
+  for (const ga of groovyAuditResults) {
+    if (ga.score < 100) {
+      heuristics.score = Math.max(0, heuristics.score - Math.round((100 - ga.score) * 0.5));
+    }
+  }
+
   if (!isScriptCollection) {
     heuristics.manifestIssues = manifestIssues;
     if (manifestIssues.length > 0) {
@@ -530,6 +550,14 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
       description: 'Habilita la protección contra Cross-Site Request Forgery en adaptadores HTTP/HTTPS entrantes.'
     });
   }
+  const failingGroovyCount = (heuristics.groovyAuditResults || []).filter((ga) => !ga.passed).length;
+  if (failingGroovyCount > 0) {
+    availableRemediations.push({
+      id: 'groovy',
+      title: `Corregir errores deterministas de Groovy 2.4 en ${failingGroovyCount} script(s) (.groovy)`,
+      description: 'Corrige imports incompatibles (groovy.xml.XmlSlurper -> groovy.util.XmlSlurper), llamadas Reader.getText("UTF-8") -> Reader.getText() y JsonSlurper -> JsonSlurperClassic.'
+    });
+  }
   heuristics.availableRemediations = availableRemediations;
 
   const nestedBundles = nestedZipFiles.map((nz) => {
@@ -541,12 +569,25 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
         symbolicName: subReport.manifestData.symbolicName,
         score: subReport.heuristics.score,
         iflwCount: subReport.catalog.iflwFiles.length,
-        groovyCount: subReport.catalog.groovyScripts.length
+        groovyCount: subReport.catalog.groovyScripts.length,
+        mmapCount: subReport.catalog.messageMappings.length,
+        xsdCount: subReport.catalog.xsdSchemas.length,
+        xsltCount: subReport.catalog.xsltMappings.length,
+        propCount: subReport.catalog.parameterFiles.length
       };
     } catch {
       return { fileName: nz.name, error: 'No se pudo inspeccionar el ZIP anidado' };
     }
   });
+
+  if (nestedBundles.length > 0 && iflwFiles.length === 0 && !isScriptCollection) {
+    manifestData.bundleType = 'Multi-Bundle Package';
+    manifestData.symbolicName = path.basename(sourceName, '.zip');
+    heuristics.isMultiBundle = true;
+    heuristics.hasExceptionSubprocess = true;
+    const validScores = nestedBundles.map((nb) => nb.score).filter((s) => typeof s === 'number');
+    heuristics.score = validScores.length > 0 ? Math.min(...validScores) : 100;
+  }
 
   return {
     fileName: sourceName,
@@ -610,16 +651,31 @@ export function buildAuditPdfSpec(report) {
     value: `${report.catalog.iflwFiles.length} .iflw | ${report.catalog.groovyScripts.length} .groovy | ${report.catalog.xsltMappings.length} .xslt | ${report.catalog.messageMappings.length} .mmap | ${report.catalog.xsdSchemas.length} .xsd | ${report.catalog.parameterFiles.length} .prop`
   });
 
+  if (report.catalog.iflwFiles.length > 0) {
+    blocks.push({ type: 'kv', key: 'Archivos .iflw', value: report.catalog.iflwFiles.map((f) => f.name).join(', ') });
+  }
+  if (report.catalog.groovyScripts.length > 0) {
+    blocks.push({ type: 'kv', key: 'Scripts Groovy', value: report.catalog.groovyScripts.map((f) => f.name).join(', ') });
+  }
+  if (report.catalog.messageMappings.length > 0 || report.catalog.xsdSchemas.length > 0 || report.catalog.xsltMappings.length > 0) {
+    const mapNames = [
+      ...report.catalog.messageMappings.map((f) => f.name),
+      ...report.catalog.xsdSchemas.map((f) => f.name),
+      ...report.catalog.xsltMappings.map((f) => f.name)
+    ];
+    blocks.push({ type: 'kv', key: 'Mapeos y Esquemas XSD', value: mapNames.join(', ') });
+  }
+
   if (report.nestedBundles && report.nestedBundles.length > 0) {
     blocks.push({ type: 'section', text: `2. Paquetes Anidados Detectados (${report.nestedBundles.length})` });
     for (const nb of report.nestedBundles) {
       blocks.push({
         type: 'bullet',
-        text: `${nb.fileName} [${nb.bundleType || 'ZIP'}] - SymbolicName: ${nb.symbolicName || '-'} | Score: ${nb.score ?? '-'}/100 | .iflw: ${nb.iflwCount ?? 0} | .groovy: ${nb.groovyCount ?? 0}`
+        text: `${nb.fileName} [${nb.bundleType || 'ZIP'}] - SymbolicName: ${nb.symbolicName || '-'} | Score: ${nb.score ?? '-'}/100 | .iflw: ${nb.iflwCount ?? 0} | .groovy: ${nb.groovyCount ?? 0} | .mmap: ${nb.mmapCount ?? 0} | .xsd: ${nb.xsdCount ?? 0}`
       });
     }
   } else {
-    blocks.push({ type: 'section', text: '2. Hallazgos Deterministas de Arquitectura y Seguridad' });
+    blocks.push({ type: 'section', text: '2. Hallazgos Deterministas de Arquitectura, Seguridad y Código' });
     let totalFindings = 0;
 
     if (h.manifestIssues && h.manifestIssues.length > 0) {
@@ -699,6 +755,52 @@ export function buildAuditPdfSpec(report) {
         finding: 'Paso Splitter con streaming deshabilitado (streaming=false).',
         recommendation: 'Activar streaming=true para procesar lotes XML/JSON sin saturar el árbol DOM en memoria.'
       });
+    }
+
+    for (const cs of h.csrfDisabledChannels || []) {
+      totalFindings++;
+      blocks.push({
+        type: 'finding',
+        severity: 'MEDIA',
+        component: 'Canal HTTP/HTTPS (xsrfProtection)',
+        finding: `Protección CSRF deshabilitada (${cs.key} = ${cs.val}).`,
+        recommendation: 'Activar xsrfProtection=1 en adaptadores entrantes modificadores.'
+      });
+    }
+
+    for (const ba of h.basicAuthChannels || []) {
+      totalFindings++;
+      blocks.push({
+        type: 'finding',
+        severity: 'MEDIA',
+        component: `Autenticación (${ba.key})`,
+        finding: `Uso de Basic Authentication (${ba.val}).`,
+        recommendation: 'Priorizar OAuth 2.0 Client Credentials o Client Certificate frente a Basic Authentication.'
+      });
+    }
+
+    for (const rt of h.routersWithoutDefaultRoute || []) {
+      totalFindings++;
+      blocks.push({
+        type: 'finding',
+        severity: 'MEDIA',
+        component: `Router (${rt.name} / ${rt.id})`,
+        finding: 'Exclusive Gateway sin ruta por defecto (Default Route) definida.',
+        recommendation: 'Definir una ruta por defecto para evitar fallos cuando ninguna condición se cumpla.'
+      });
+    }
+
+    for (const ga of h.groovyAuditResults || []) {
+      for (const gf of ga.findings || []) {
+        totalFindings++;
+        blocks.push({
+          type: 'finding',
+          severity: gf.severity,
+          component: `Groovy (${ga.fileName}:${gf.line || 1})`,
+          finding: `${gf.title} [${gf.code}]`,
+          recommendation: gf.remediation
+        });
+      }
     }
 
     if (totalFindings === 0) {
@@ -781,7 +883,10 @@ export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], out
           /(<(?:key|ifl:property)[^>]*>(?:address|httpAddress|httpAddressWithoutQuery|url)<\/key>\s*<value>)http:\/\//gi,
           '$1https://'
         );
-        xml = xml.replace(/(key\s*=\s*"(?:address|httpAddress|url)"\s+value\s*=\s*")http:\/\//gi, '$1https://');
+        xml = xml.replace(
+          /(key\s*=\s*"(?:address|httpAddress|httpAddressWithoutQuery|url)"\s+value\s*=\s*")http:\/\//gi,
+          '$1https://'
+        );
         if (xml !== before) appliedChanges.push('https: Actualizados canales http:// a https://');
       }
 
@@ -794,20 +899,45 @@ export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], out
 
       if (applyAll || fixSet.has('csrf')) {
         const before = xml;
-        xml = xml.replace(/(<key>xsrfProtection<\/key>\s*<value>)0(<\/value>)/gi, '$11$2');
+        xml = xml.replace(/(<key>xsrfProtection<\/key>\s*<value>)(?:0|false)(<\/value>)/gi, '$11$2');
+        xml = xml.replace(/(key\s*=\s*"xsrfProtection"\s+value\s*=\s*")(?:0|false)(")/gi, '$11$2');
         if (xml !== before) appliedChanges.push('csrf: Activada protección CSRF (xsrfProtection=1)');
       }
 
       if (applyAll || fixSet.has('timeouts')) {
         const before = xml;
         xml = xml.replace(
-          /(<bpmn2:(?:serviceTask|callActivity)\b[^>]*>[\s\S]*?(?:<key>activityType<\/key>\s*<value>ExternalCall<\/value>|key\s*=\s*"activityType"\s+value\s*=\s*"ExternalCall"))(?![\s\S]*?timeout)([\s\S]*?<\/bpmn2:extensionElements>)/gi,
-          '$1\n        <ifl:property><key>httpRequestTimeout</key><value>60000</value></ifl:property>$2'
+          /<bpmn2:(serviceTask|callActivity)\b[^>]*>[\s\S]*?<\/bpmn2:\1>/gi,
+          (taskBlock) => {
+            const isExternalCall =
+              /<key>activityType<\/key>\s*<value>ExternalCall<\/value>/i.test(taskBlock) ||
+              /key\s*=\s*"activityType"\s+value\s*=\s*"ExternalCall"/i.test(taskBlock);
+            if (!isExternalCall || /timeout/i.test(taskBlock)) {
+              return taskBlock;
+            }
+            return taskBlock.replace(
+              /<\/bpmn2:extensionElements>/i,
+              '        <ifl:property><key>httpRequestTimeout</key><value>60000</value></ifl:property>\n      </bpmn2:extensionElements>'
+            );
+          }
         );
         if (xml !== before) appliedChanges.push('timeouts: Añadido httpRequestTimeout=60000 ms en llamadas ExternalCall');
       }
 
       contentBuf = Buffer.from(xml, 'utf8');
+    } else if ((applyAll || fixSet.has('groovy')) && (relPath.toLowerCase().endsWith('.groovy') || relPath.toLowerCase().endsWith('.gsh'))) {
+      let gCode = entry.text || contentBuf.toString('utf8');
+      const before = gCode;
+      gCode = gCode.replace(/\bimport\s+groovy\.xml\.XmlSlurper\b/g, 'import groovy.util.XmlSlurper');
+      gCode = gCode.replace(/\bimport\s+groovy\.xml\.XmlParser\b/g, 'import groovy.util.XmlParser');
+      gCode = gCode.replace(/\bgroovy\.xml\.XmlSlurper\b/g, 'groovy.util.XmlSlurper');
+      gCode = gCode.replace(/(\b(?:[a-zA-Z0-9_]*[Rr]eader)\s*\.\s*getText\s*\()\s*['"][^'"]+['"]\s*(\))/g, '$1$2');
+      gCode = gCode.replace(/\bimport\s+groovy\.json\.JsonSlurper\b(?!Classic)/g, 'import groovy.json.JsonSlurperClassic');
+      gCode = gCode.replace(/\bnew\s+JsonSlurper\s*\(\s*\)/g, 'new JsonSlurperClassic()');
+      if (gCode !== before) {
+        contentBuf = Buffer.from(gCode, 'utf8');
+        appliedChanges.push(`groovy (${path.basename(relPath)}): Corregidos imports Groovy 2.4 y llamadas Reader.getText()`);
+      }
     }
 
     outEntries.push({ path: relPath, content: contentBuf });
@@ -851,14 +981,16 @@ if (isMain) {
   const outZipPath = outIdx !== -1 ? args[outIdx + 1] : null;
 
   try {
-    const report = inspectBundle(target, extractDir, { showPropValues });
+    let report = inspectBundle(target, extractDir, { showPropValues });
+    if (remSpec && outZipPath) {
+      const remediationResult = remediateBundleZip(target, remSpec, outZipPath);
+      report = inspectBundle(outZipPath, null, { showPropValues });
+      report.remediationResult = remediationResult;
+    }
     if (pdfPath) {
       const pdfSpec = buildAuditPdfSpec(report);
       const pdfBytes = writeAuditPdfFile(path.resolve(pdfPath), pdfSpec);
       report.pdfGenerated = { path: path.resolve(pdfPath), sizeBytes: pdfBytes };
-    }
-    if (remSpec && outZipPath) {
-      report.remediationResult = remediateBundleZip(target, remSpec, outZipPath);
     }
     if (jsonFlag) {
       console.log(JSON.stringify(report, null, 2));

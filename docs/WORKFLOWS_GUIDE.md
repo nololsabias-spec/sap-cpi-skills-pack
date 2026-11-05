@@ -8,11 +8,19 @@ Esta guía muestra cómo combinar las **Skills de IA** y los **scripts CLI** en 
 
 Cuando recibes un paquete `.zip` exportado de SAP CPI y necesitas evaluar su calidad arquitectónica y documentarlo:
 
-### Paso 1: Inspeccionar el paquete `.zip` y auditar el `.iflw`
+### Paso 1: Inspeccionar el paquete `.zip`, generar el PDF de auditoría y autorremediar hallazgos
 ```bash
-node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Order_Replication.zip --extract-to ./extracted_iflow
+# 1. Auditar y generar informe PDF con el resumen de hallazgos
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Order_Replication.zip \
+  --pdf ./Informe_Auditoria_Order_Replication.pdf \
+  --extract-to ./extracted_iflow
+
+# 2. Aplicar las correcciones elegidas por el usuario (ej. manifest, https, timeouts, streaming, csrf)
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Order_Replication.zip \
+  --remediate manifest,https,timeouts,streaming \
+  --out ./Order_Replication_Corregido.zip
 ```
-Este comando lista todos los recursos internos y señala si faltan `Exception Subprocess`, si hay canales HTTP sin TLS, timeouts ausentes o propiedades que almacenan `${body}`.
+Este flujo genera el resumen ejecutivo en PDF con el inventario, score de salud y hallazgos detectados, y permite generar un nuevo `.zip` corregido aplicando únicamente los cambios confirmados por el usuario.
 
 ### Paso 2: Auditar los scripts Groovy extraídos
 ```bash
@@ -118,4 +126,35 @@ node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \
   --scripts-dir ./scripts_nuevos \
   --out ./dist/SC_Actualizada.zip \
   --strict
+
+# Inyectar recursos sueltos (.xsd, .mmap, .xsl, .wsdl) en un iFlow existente
+node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \
+  --source ./dist/Flujo_Nueva_Entidad_v1.zip \
+  --add-resource ./EsquemaDestino.xsd \
+  --add-resource ./MM_Transformacion.mmap \
+  --out ./dist/Flujo_Nueva_Entidad_v1.zip
+```
+
+---
+
+## Escenario 6: Generar Archivos Sueltos (`.xsd` y Graphical Message Mapping `.mmap`)
+
+Cuando solo necesitas generar y validar un esquema `.xsd` o un mapeo gráfico `.mmap` (`<xiObj>`) sin reconstruir todo el proyecto:
+
+```bash
+# 1. Inferir un XSD tolerante (minOccurs="0" nillable="true") desde muestras JSON
+node skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs \
+  --infer ./muestra.json \
+  --root OrderEnvelope --tolerant \
+  --out ./OrderEnvelope.xsd
+
+# 2. Generar y validar un Graphical Message Mapping (.mmap) que conecta dos XSDs
+node skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs \
+  --source-xsd OrderEnvelope.xsd:OrderEnvelope \
+  --target-xsd ErpOrder.xsd:ErpOrder \
+  --map "/ErpOrder/Header/OrderId=/OrderEnvelope/id" \
+  --const "/ErpOrder/Header/SourceSystem=SAP-CPI" \
+  --header "/ErpOrder/Header/HttpMethod=CamelHttpMethod" \
+  --property "/ErpOrder/Header/CorrelationId=SAP_MplCorrelationId" \
+  --out ./MM_Order_To_Erp.mmap
 ```

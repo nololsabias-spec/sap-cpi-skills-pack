@@ -223,10 +223,10 @@ if (isMain) {
     }
     const getOpt = (flag, def) => {
       const idx = args.indexOf(flag);
-      return idx !== -1 && args[idx + 1] ? args[idx + 1] : def;
+      return idx !== -1 && args[idx + 1] !== undefined ? args[idx + 1] : def;
     };
     const rootElement = getOpt('--root', 'SalesOrder');
-    const targetNamespace = getOpt('--ns', 'http://sap.com/xi/SD/SalesOrder');
+    const targetNamespace = args.includes('--no-ns') ? '' : getOpt('--ns', getOpt('--namespace', 'http://sap.com/xi/SD/SalesOrder'));
     const namespacePrefix = getOpt('--prefix', 'ns0');
     const outPath = getOpt('--out', null);
     const tolerantEnvelope = args.includes('--tolerant');

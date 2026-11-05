@@ -142,16 +142,30 @@ export function buildParametersPropdef(parameters = {}) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="no"?><parameters>${paramBlocks}<param_references/></parameters>\n`;
 }
 
-export function validateAndBuildCpiBundles(spec) {
+export function validateAndBuildCpiBundles(spec, baseDir = process.cwd()) {
   const errors = [];
   const warnings = [];
+
+  const resolveContent = (item, fallbackKey = 'content') => {
+    if (item && typeof item[fallbackKey] === 'string' && item[fallbackKey].length > 0) return item[fallbackKey];
+    if (item && item.filePath) {
+      const p = path.resolve(baseDir, item.filePath);
+      if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
+    }
+    return '';
+  };
 
   const safeIflowName = sanitizeBundleName(spec.iflowName);
   const hasScripts = Array.isArray(spec.groovyScripts) && spec.groovyScripts.length > 0;
   const safeScName = hasScripts ? sanitizeBundleName(spec.scriptCollectionName || `SC_${safeIflowName}`) : null;
 
   // 1. Validate BPMN2 .iflw XML
-  const iflwXml = (spec.iflwXml || '').trim();
+  const rawIflw =
+    spec.iflwXml ||
+    (spec.iflwPath && fs.existsSync(path.resolve(baseDir, spec.iflwPath))
+      ? fs.readFileSync(path.resolve(baseDir, spec.iflwPath), 'utf8')
+      : '');
+  const iflwXml = (rawIflw || '').trim();
   if (!iflwXml.includes('<bpmn2:definitions') || !iflwXml.includes('</bpmn2:definitions>')) {
     errors.push('El archivo `iflwXml` no es un documento BPMN 2.0 válido (`<bpmn2:definitions>...</bpmn2:definitions>`).');
   }
@@ -172,11 +186,19 @@ export function validateAndBuildCpiBundles(spec) {
   if (iflwHeuristics.syncTasksWithoutTimeout.length > 0) {
     errors.push(`Se detectaron ${iflwHeuristics.syncTasksWithoutTimeout.length} tareas síncronas ExternalCall sin propiedad timeout.`);
   }
+  if (iflwHeuristics.splittersWithoutStreaming?.length > 0) {
+    warnings.push(`Se detectaron ${iflwHeuristics.splittersWithoutStreaming.length} pasos Splitter con streaming=false.`);
+  }
+  if (iflwHeuristics.csrfDisabledChannels?.length > 0) {
+    warnings.push(`Se detectaron ${iflwHeuristics.csrfDisabledChannels.length} canales con protección CSRF deshabilitada (xsrfProtection=0).`);
+  }
 
   // 2. Validate Groovy Scripts
   const scriptAuditResults = [];
   for (const s of spec.groovyScripts || []) {
-    const audit = lintGroovyScript(s.content || '', s.fileName || 'Script.groovy');
+    const code = resolveContent(s);
+    const fName = s.fileName || (s.filePath ? path.basename(s.filePath) : 'Script.groovy');
+    const audit = lintGroovyScript(code, fName);
     scriptAuditResults.push(audit);
     if (!audit.passed) {
       for (const f of audit.findings) {
@@ -201,32 +223,35 @@ export function validateAndBuildCpiBundles(spec) {
 
   // Optional embedded resources in the iFlow (.xsd, .mmap, .xsl/.xslt, .wsdl, embedded .groovy)
   for (const xsd of spec.xsdSchemas || []) {
-    const fName = path.basename(xsd.fileName || 'Schema.xsd');
-    const v = validateXsdForSapCpi(xsd.content || '');
+    const fName = path.basename(xsd.fileName || xsd.filePath || 'Schema.xsd');
+    const content = resolveContent(xsd);
+    const v = validateXsdForSapCpi(content);
     v.errors.forEach((e) => errors.push(`[XSD: ${fName}] ${e}`));
     v.warnings.forEach((w) => warnings.push(`[XSD: ${fName}] ${w}`));
-    iflowFiles.push({ path: `src/main/resources/xsd/${fName}`, content: xsd.content || '' });
+    iflowFiles.push({ path: `src/main/resources/xsd/${fName}`, content });
   }
   for (const mmap of spec.messageMappings || []) {
-    const fName = path.basename(mmap.fileName || 'Mapping.mmap');
-    const v = validateMmapForSapCpi(mmap.content || '');
+    const fName = path.basename(mmap.fileName || mmap.filePath || 'Mapping.mmap');
+    const content = resolveContent(mmap);
+    const v = validateMmapForSapCpi(content);
     v.errors.forEach((e) => errors.push(`[MMAP: ${fName}] ${e}`));
     v.warnings.forEach((w) => warnings.push(`[MMAP: ${fName}] ${w}`));
-    iflowFiles.push({ path: `src/main/resources/mapping/${fName}`, content: mmap.content || '' });
+    iflowFiles.push({ path: `src/main/resources/mapping/${fName}`, content });
   }
   for (const xslt of spec.xsltMappings || []) {
-    const fName = path.basename(xslt.fileName || 'Transform.xsl');
-    iflowFiles.push({ path: `src/main/resources/mapping/${fName}`, content: xslt.content || '' });
+    const fName = path.basename(xslt.fileName || xslt.filePath || 'Transform.xsl');
+    iflowFiles.push({ path: `src/main/resources/mapping/${fName}`, content: resolveContent(xslt) });
   }
   for (const wsdl of spec.wsdlFiles || []) {
-    const fName = path.basename(wsdl.fileName || 'Service.wsdl');
-    iflowFiles.push({ path: `src/main/resources/wsdl/${fName}`, content: wsdl.content || '' });
+    const fName = path.basename(wsdl.fileName || wsdl.filePath || 'Service.wsdl');
+    iflowFiles.push({ path: `src/main/resources/wsdl/${fName}`, content: resolveContent(wsdl) });
   }
   for (const embScript of spec.embeddedScripts || []) {
-    const fName = path.basename(embScript.fileName || 'EmbeddedScript.groovy');
-    const audit = lintGroovyScript(embScript.content || '', fName);
+    const fName = path.basename(embScript.fileName || embScript.filePath || 'EmbeddedScript.groovy');
+    const content = resolveContent(embScript);
+    const audit = lintGroovyScript(content, fName);
     scriptAuditResults.push(audit);
-    iflowFiles.push({ path: `src/main/resources/script/${fName}`, content: embScript.content || '' });
+    iflowFiles.push({ path: `src/main/resources/script/${fName}`, content });
   }
 
   const iflowZipBuffer = createZipBuffer(iflowFiles);
@@ -242,8 +267,8 @@ export function validateAndBuildCpiBundles(spec) {
       { path: 'metainfo.prop', content: `#Store metainfo properties\ndescription=Script Collection de ${safeIflowName}\n` }
     ];
     for (const script of spec.groovyScripts) {
-      const fName = (script.fileName || 'Script.groovy').replace(/[^a-zA-Z0-9_.]/g, '_');
-      scFiles.push({ path: `src/main/resources/script/${fName}`, content: script.content || '' });
+      const fName = (script.fileName || (script.filePath ? path.basename(script.filePath) : 'Script.groovy')).replace(/[^a-zA-Z0-9_.]/g, '_');
+      scFiles.push({ path: `src/main/resources/script/${fName}`, content: resolveContent(script) });
     }
     scriptCollectionZipBuffer = createZipBuffer(scFiles);
     scriptCollectionFileName = `${safeScName}.zip`;
@@ -395,18 +420,22 @@ if (isMain) {
   const outDir = outIdx !== -1 ? args[outIdx + 1] : null;
 
   let spec = null;
+  let specBaseDir = process.cwd();
   if (args[0] === '--demo') {
     spec = DEMO_ARCHITECT_SPEC;
   } else {
-    const filePath = path.resolve(args[0]);
+    const specIdx = args.indexOf('--spec');
+    const rawSpecArg = specIdx !== -1 && args[specIdx + 1] ? args[specIdx + 1] : args[0];
+    const filePath = path.resolve(rawSpecArg);
     if (!fs.existsSync(filePath)) {
       console.error(`Archivo no encontrado: ${filePath}`);
       process.exit(1);
     }
+    specBaseDir = path.dirname(filePath);
     spec = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   }
 
-  const result = validateAndBuildCpiBundles(spec);
+  const result = validateAndBuildCpiBundles(spec, specBaseDir);
 
   if (outDir) {
     const targetDir = path.resolve(outDir);

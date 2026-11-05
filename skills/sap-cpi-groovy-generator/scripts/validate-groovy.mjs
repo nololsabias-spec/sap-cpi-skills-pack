@@ -416,10 +416,10 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 11. Unconditional MPL Attachment creation (MEDIUM -5)
-  // Recognizes explicit debug flags, catch blocks, and dedicated Exception Subprocess / Error Handler scripts (CamelExceptionCaught / SAP_ErrorModelStepID / SAP_MessageProcessingLogCustomStatus)
+  // Recognizes explicit debug/enable flags, catch blocks, and dedicated Exception Subprocess / Error Handler scripts (CamelExceptionCaught / SAP_ErrorModelStepID / SAP_MessageProcessingLogCustomStatus)
   if (/\.addAttachmentAsString\s*\(/.test(cleanCode)) {
     const hasConditionOrCatch =
-      /\bif\s*\([^)]*(?:LogAttachments|debug|trace|log)/i.test(cleanCode) ||
+      /\bif\s*\([^)]*(?:LogAttachments|debug|trace|log|enable|attach|payload|audit)/i.test(cleanCode) ||
       /\b(?:CamelExceptionCaught|SAP_ErrorModelStepID|SAP_MessageProcessingLogCustomStatus|ExceptionMessage)\b/.test(cleanCode) ||
       /\bcatch\s*\([^)]+\)\s*\{[\s\S]*?\.addAttachmentAsString/.test(cleanCode);
     if (!hasConditionOrCatch) {
@@ -479,15 +479,26 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 13. Overwriting reserved headers Camel* or SAP_* (MEDIUM -5)
-  if (/\.setHeader\s*\(\s*["'](?:Camel|SAP_)[a-zA-Z0-9_]+["']/.test(cleanCode)) {
+  // Excludes official SAP CPI writable MPL monitoring headers: SAP_ApplicationID, SAP_Sender, SAP_Receiver, SAP_MessageType, SAP_MplCorrelationId, SAP_PregeneratedMplId
+  const writableSapHeaders = new Set([
+    'SAP_ApplicationID',
+    'SAP_Sender',
+    'SAP_Receiver',
+    'SAP_MessageType',
+    'SAP_MplCorrelationId',
+    'SAP_PregeneratedMplId'
+  ]);
+  const setHeaderMatches = [...cleanCode.matchAll(/\.setHeader\s*\(\s*["']((?:Camel|SAP_)[a-zA-Z0-9_]+)["']/g)];
+  const forbiddenHeaders = setHeaderMatches.map((m) => m[1]).filter((h) => !writableSapHeaders.has(h));
+  if (forbiddenHeaders.length > 0) {
     addFinding(
       'MEDIUM',
       'Upgrade Readiness & Imports',
       'RESERVED_HEADER_MUTATION',
-      'Sobrescritura de cabecera reservada (Camel* / SAP_*)',
-      'Modificar cabeceras internas del framework (`Camel*`, `SAP_*`) puede alterar el enrutamiento de adaptadores estándar.',
-      'Usa nombres de cabeceras personalizadas o propiedades de Exchange.',
-      findLineNumber(/\.setHeader\s*\(\s*["'](?:Camel|SAP_)/)
+      `Sobrescritura de cabecera reservada (${forbiddenHeaders[0]})`,
+      'Modificar cabeceras internas del framework (`Camel*`, `SAP_*` de sistema) puede alterar el enrutamiento de adaptadores estándar.',
+      'Usa nombres de cabeceras personalizadas, propiedades de Exchange o las cabeceras estándar de monitoreo (`SAP_ApplicationID`, `SAP_Sender`, `SAP_Receiver`, `SAP_MessageType`).',
+      findLineNumber(new RegExp(`\\.setHeader\\s*\\(\\s*["']${forbiddenHeaders[0]}["']`))
     );
   }
 

@@ -114,20 +114,34 @@ node skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs \
 
 ---
 
-### 2.6. `validate-xsd.mjs` (`sap-cpi-xsd-studio`)
-Permite inferir un esquema W3C XSD 1.0 a partir de múltiples muestras JSON y/o validar un archivo `.xsd` existente para Message Mapping en SAP CPI.
+### 2.6. `validate-xsd.mjs` y `build-mmap.mjs` (`sap-cpi-xsd-studio`)
+Permiten inferir y validar esquemas W3C XSD 1.0 y generar/validar mapeos gráficos `.mmap` (`<xiObj>`) para SAP CPI Message Mapping.
 
 ```bash
-# Modo 1: Inferir desde muestras JSON y validar el XSD resultante
+# Modo 1: Inferir desde muestras JSON y validar el XSD resultante (--tolerant añade minOccurs="0" nillable="true")
 node skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs \
   --infer <muestra1.json> [muestra2.json ...] \
   [--root <NombreElementoRaiz>] \
-  [--namespace <URI>] \
+  [--ns <URI>] \
+  [--tolerant] \
   [--out <salida.xsd>] \
   [--json]
 
 # Modo 2: Validar un archivo XSD existente
 node skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs <esquema.xsd> [--json]
+
+# Modo 3: Generar un Graphical Message Mapping (.mmap / <xiObj>)
+node skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs \
+  --source-xsd <Origen.xsd:RootOrigen> \
+  --target-xsd <Destino.xsd:RootDestino> \
+  [--map /RootDestino/a=/RootOrigen/b] \
+  [--const /RootDestino/c=VALOR] \
+  [--header /RootDestino/h=CamelHttpMethod] \
+  [--property /RootDestino/p=SAP_MplCorrelationId] \
+  --out <Mapeo.mmap>
+
+# Modo 4: Validar un archivo .mmap existente
+node skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs --validate <Mapeo.mmap> [--json]
 ```
 
 ---
@@ -171,13 +185,14 @@ node skills/sap-cpi-architect/scripts/build-cpi-package.mjs <bundle-spec.json> -
 Permite clonar un iFlow existente (`.zip`) renombrando sus descriptores OSGi (`.project`, `MANIFEST.MF`, `metainfo.prop`, `<NuevoNombre>.iflw`), reemplazando referencias a scripts `.groovy` y rutas XPath del Splitter sin alterar ni exponer los archivos privados `.prop`. También permite actualizar un paquete `ScriptCollection.zip` inyectando nuevos scripts validados.
 
 ```bash
-# Clonar y adaptar un iFlow de referencia
+# Clonar y adaptar un iFlow de referencia (o inyectar recursos sueltos con --add-resource)
 node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \
   --source <Referencia_iFlow.zip> \
-  --target-name <Nuevo_iFlow> \
+  [--target-name <Nuevo_iFlow>] \
   --out <Nuevo_iFlow.zip> \
   [--replace <ScriptOrigen.groovy=ScriptDestino.groovy>] \
-  [--xpath <//nodoOrigen=//nodoDestino>]
+  [--xpath <//nodoOrigen=//nodoDestino>] \
+  [--add-resource <Esquema.xsd|Mapeo.mmap|Transform.xsl|Script.groovy>]
 
 # Actualizar una Script Collection con nuevos scripts Groovy validados
 node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \

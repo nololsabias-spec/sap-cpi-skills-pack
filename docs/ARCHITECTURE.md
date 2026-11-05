@@ -32,17 +32,17 @@ Todos los scripts utilizan exclusivamente módulos nativos incluidos en **Node.j
 
 Esto garantiza que el proyecto funcione inmediatamente tras hacer `git clone` sin necesidad de ejecutar `npm install`, evitando problemas con proxies corporativos o registros privados de paquetes.
 
-### 2.2. Motor ZIP Nativo (`shared/zip-utils.mjs`)
+### 2.2. Motor ZIP Nativo (`shared/zip-utils.mjs`) y Motor PDF Nativo (`shared/pdf-utils.mjs`)
 SAP CPI distribuye sus artefactos (Integration Flows y Script Collections) como paquetes `.zip` que contienen estructuras OSGi (`META-INF/MANIFEST.MF`, `.project`, `src/main/resources/...`).
 
-El módulo [`shared/zip-utils.mjs`](../shared/zip-utils.mjs) implementa el estándar **PKWARE ZIP (Local File Headers, Central Directory y End of Central Directory Record)** directamente sobre `Buffer` en Node.js:
-- **Lectura (`readZipEntries`):** Soporta métodos `STORE (0)` y `DEFLATE (8)`, acepta tanto rutas de archivo como `Buffer` en memoria (permitiendo inspeccionar paquetes `.zip` anidados recursivamente) e incluye soporte para paquetes exportados desde Java (`java.util.zip`) con el bit 3 de propósito general activo (*Data Descriptor*).
-- **Escritura (`writeZipFile`, `createZipBuffer`):** Calcula sumas de verificación **CRC-32 IEEE 802.3**, comprime con `deflateRawSync` y genera archivos `.zip` 100% compatibles con el importador de SAP Integration Suite.
+- **Motor ZIP ([`shared/zip-utils.mjs`](../shared/zip-utils.mjs))**: Implementa el estándar **PKWARE ZIP (Local File Headers, Central Directory y End of Central Directory Record)** directamente sobre `Buffer` en Node.js:
+  - **Lectura (`readZipEntries`):** Soporta métodos `STORE (0)` y `DEFLATE (8)` y permite inspeccionar paquetes `.zip` anidados recursivamente en memoria.
+  - **Escritura (`writeZipFile`, `createZipBuffer`):** Calcula sumas de verificación **CRC-32 IEEE 802.3**, comprime con `deflateRawSync`, garantiza que `.project` y `META-INF/MANIFEST.MF` queden en la raíz del `.zip` y aplica plegado de líneas a 72 bytes UTF-8 según RFC 2822.
+- **Motor PDF ([`shared/pdf-utils.mjs`](../shared/pdf-utils.mjs))**: Generador nativo de documentos **PDF 1.4 (`WinAnsiEncoding`)** sin dependencias externas. Permite renderizar portadas corporativas, badges de puntuación, tablas estructuradas y bloques de código multipágina tanto para informes de auditoría (`inspect-iflow-zip.mjs --pdf`) como para especificaciones técnicas.
 
-### 2.3. Privacidad por Defecto (`Privacy-First Inspection`)
-Cuando se analizan o clonan paquetes `.zip` de proyectos reales mediante `inspect-iflow-zip.mjs`, `extract-for-docs.mjs` o `clone-iflow-bundle.mjs`:
-- Los valores de configuración dentro de archivos `.prop` (`parameters.prop`, `metainfo.prop`) se enmascaran automáticamente como `clave=[REDACTED]` en la salida por defecto (salvo que el usuario invoque explícitamente `--show-prop-values`).
-- Al clonar un iFlow con `clone-iflow-bundle.mjs`, los archivos binarios/texto `.prop` se transfieren íntegros a nivel de `Buffer` sin exponer credenciales, colas ni endpoints privados en la consola ni en el contexto del agente IA.
+### 2.3. Privacidad por Defecto (`Privacy-First Inspection`) y Harness de Aprendizaje Continuo
+- **Privacidad en archivos `.prop`**: Los valores de configuración dentro de archivos `.prop` (`parameters.prop`, `metainfo.prop`) se enmascaran automáticamente como `clave=[REDACTED]` y se transfieren íntegros a nivel de `Buffer` durante clonaciones o autorremediaciones.
+- **Harness de Auto-Mejora Continua ([`AGENTS.md`](../AGENTS.md) y [`rules/sap-cpi-continuous-learning.md`](../rules/sap-cpi-continuous-learning.md))**: Cada vez que se detecta un error real en SAP CPI o se inspecciona un paquete de referencia, el agente abstrae la regla técnica (sin ningún dato de proyecto privado ni cliente), la programa en el validador CLI correspondiente y la registra en [`docs/LESSONS_LEARNED.md`](./LESSONS_LEARNED.md).
 
 ### 2.4. Portabilidad de Rutas entre el Repositorio y `.agents/` / `.claude/`
 La carpeta `shared/` se ubica al mismo nivel jerárquico que `skills/`. Cuando se ejecuta [`setup-skills.mjs`](../setup-skills.mjs), el instalador copia tanto `skills/<nombre>` como `shared/zip-utils.mjs` dentro de `.agents/` y `.claude/`:

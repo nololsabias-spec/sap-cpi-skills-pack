@@ -82,12 +82,19 @@ export function createAuditPdfBuffer(docSpec) {
       // Header Banner (Dark Navy SAP style #1B2A4A)
       currentOps.push('0.106 0.165 0.290 rg');
       currentOps.push(`0 ${pageHeight - 95} ${pageWidth} 95 re f`);
-      // Title in White
-      currentOps.push('BT /F2 16 Tf 1 1 1 rg');
-      currentOps.push(`${marginX} ${pageHeight - 42} Td (${escapePdfText(docSpec.title || 'SAP CPI - Informe de Auditoría de iFlow')}) Tj ET`);
+      // Title in White (wrapped at 46 chars so it never overlaps the Score Badge on the right)
+      const titleLines = wrapTextLines(docSpec.title || 'SAP CPI - Informe de Auditoría de iFlow', 46).slice(0, 2);
+      currentOps.push('1 1 1 rg');
+      if (titleLines.length === 1) {
+        currentOps.push(`BT /F2 14 Tf ${marginX} ${pageHeight - 40} Td (${escapePdfText(titleLines[0])}) Tj ET`);
+      } else {
+        currentOps.push(`BT /F2 12.5 Tf ${marginX} ${pageHeight - 33} Td (${escapePdfText(titleLines[0])}) Tj ET`);
+        currentOps.push(`BT /F2 12.5 Tf ${marginX} ${pageHeight - 49} Td (${escapePdfText(titleLines[1])}) Tj ET`);
+      }
       // Subtitle in Light Blue
-      currentOps.push('BT /F1 10 Tf 0.78 0.86 0.98 rg');
-      currentOps.push(`${marginX} ${pageHeight - 62} Td (${escapePdfText(docSpec.subtitle || '')}) Tj ET`);
+      currentOps.push('BT /F1 9.5 Tf 0.78 0.86 0.98 rg');
+      const subLine = wrapTextLines(docSpec.subtitle || '', 62)[0] || '';
+      currentOps.push(`${marginX} ${pageHeight - 68} Td (${escapePdfText(subLine)}) Tj ET`);
 
       // Score Badge on the right
       if (typeof docSpec.score === 'number') {
@@ -131,14 +138,16 @@ export function createAuditPdfBuffer(docSpec) {
       currentOps.push(`BT /F2 11 Tf ${marginX + 6} ${cursorY} Td (${escapePdfText(block.text)}) Tj ET`);
       cursorY -= 20;
     } else if (block.type === 'kv') {
-      const wrapped = wrapTextLines(`${block.key}: ${block.value}`, 92);
+      const cleanKey = String(block.key || '').trim().replace(/\s+/g, ' ');
+      const cleanVal = String(block.value ?? '').trim();
+      const wrapped = wrapTextLines(`${cleanKey}: ${cleanVal}`, 92);
       ensureSpace(wrapped.length * 14 + 4);
       for (let i = 0; i < wrapped.length; i++) {
         if (i === 0) {
           currentOps.push('0.15 0.18 0.22 rg');
-          currentOps.push(`BT /F2 9.5 Tf ${marginX + 4} ${cursorY} Td (${escapePdfText(block.key + ': ')}) Tj ET`);
-          const keyWidthApprox = (block.key.length + 2) * 5.2;
-          const firstVal = wrapped[0].slice(block.key.length + 2);
+          currentOps.push(`BT /F2 9.5 Tf ${marginX + 4} ${cursorY} Td (${escapePdfText(cleanKey + ': ')}) Tj ET`);
+          const keyWidthApprox = (cleanKey.length + 2) * 5.2;
+          const firstVal = wrapped[0].slice(cleanKey.length + 2);
           currentOps.push('0.22 0.25 0.30 rg');
           currentOps.push(`BT /F1 9.5 Tf ${marginX + 4 + keyWidthApprox} ${cursorY} Td (${escapePdfText(firstVal)}) Tj ET`);
         } else {
@@ -193,10 +202,11 @@ export function createAuditPdfBuffer(docSpec) {
 
   // Add page numbers in footers
   const totalPages = pagesOps.length;
+  const footerPrefix = docSpec.footerText || 'SAP CPI Skills Pack - Auditoría & Documentación Técnica';
   for (let p = 0; p < totalPages; p++) {
     const footer = [
       '0.50 0.53 0.58 rg',
-      `BT /F1 8 Tf ${marginX} 28 Td (${escapePdfText(`SAP CPI ZIP Inspector & Auditor - Página ${p + 1} de ${totalPages}`)}) Tj ET`
+      `BT /F1 8 Tf ${marginX} 28 Td (${escapePdfText(`${footerPrefix} - Página ${p + 1} de ${totalPages}`)}) Tj ET`
     ].join('\n');
     pagesOps[p] += '\n' + footer;
   }
@@ -255,3 +265,6 @@ export function writeAuditPdfFile(outPath, docSpec) {
   fs.writeFileSync(outPath, buf);
   return buf.length;
 }
+
+export const generatePdfBuffer = createAuditPdfBuffer;
+export const writePdfFile = writeAuditPdfFile;
