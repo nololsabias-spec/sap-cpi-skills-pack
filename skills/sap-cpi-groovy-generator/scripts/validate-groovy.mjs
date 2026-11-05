@@ -479,14 +479,19 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 13. Overwriting reserved headers Camel* or SAP_* (MEDIUM -5)
-  // Excludes official SAP CPI writable MPL monitoring headers: SAP_ApplicationID, SAP_Sender, SAP_Receiver, SAP_MessageType, SAP_MplCorrelationId, SAP_PregeneratedMplId
+  // Excludes official SAP CPI writable MPL monitoring headers and standard dynamic routing headers:
   const writableSapHeaders = new Set([
     'SAP_ApplicationID',
     'SAP_Sender',
     'SAP_Receiver',
     'SAP_MessageType',
     'SAP_MplCorrelationId',
-    'SAP_PregeneratedMplId'
+    'SAP_PregeneratedMplId',
+    'SAP_MessageProcessingLogCustomStatus',
+    'CamelHttpUri',
+    'CamelHttpPath',
+    'CamelHttpQuery',
+    'CamelProcessDirectAddress'
   ]);
   const setHeaderMatches = [...cleanCode.matchAll(/\.setHeader\s*\(\s*["']((?:Camel|SAP_)[a-zA-Z0-9_]+)["']/g)];
   const forbiddenHeaders = setHeaderMatches.map((m) => m[1]).filter((h) => !writableSapHeaders.has(h));
@@ -550,13 +555,236 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   };
 }
 
+export function generateCanonicalGroovyTemplate(pattern = 'json-streaming', options = {}) {
+  const apiVersion = options.apiVersion === 'v2' ? 'v2' : 'v1';
+  const scriptName = options.scriptName || 'ProcessData.groovy';
+  const messageImport = apiVersion === 'v2'
+    ? 'import com.sap.it.script.v2.api.Message'
+    : 'import com.sap.gateway.ip.core.customdev.util.Message';
+
+  let code = '';
+  switch (pattern) {
+    case 'xml-slurper':
+      code = `${messageImport}
+import groovy.util.XmlSlurper
+import groovy.transform.Field
+import java.io.Reader
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+@Field final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneId.of("UTC"))
+
+Message processData(Message message) {
+    Reader bodyReader = message.getBody(java.io.Reader)
+    try {
+        if (bodyReader == null) {
+            throw new IllegalArgumentException("Cuerpo XML vacio en el mensaje.")
+        }
+        def parser = new XmlSlurper(false, false)
+        parser.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        parser.setFeature("http://xml.org/sax/features/external-general-entities", false)
+        parser.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+
+        def rootNode = parser.parse(bodyReader)
+        def documentId = rootNode.'Header'?.'DocumentID'?.text() ?: "N/A"
+
+        message.setProperty("DocumentID", documentId)
+        message.setHeader("Content-Type", "application/xml; charset=utf-8")
+
+        def messageLog = messageLogFactory?.getMessageLog(message)
+        messageLog?.addCustomHeaderProperty("DocumentID", documentId)
+    } finally {
+        bodyReader?.close()
+    }
+    return message
+}
+`;
+      break;
+
+    case 'mpl-custom-headers':
+      code = `${messageImport}
+import groovy.transform.Field
+
+@Field final String STATUS_WARNING = "COMPLETED_WITH_WARNINGS"
+
+Message processData(Message message) {
+    def messageLog = messageLogFactory?.getMessageLog(message)
+    if (messageLog != null) {
+        def businessId = message.getHeader("SAP_ApplicationID") ?: message.getProperty("BusinessKey") ?: "N/A"
+        messageLog.addCustomHeaderProperty("BusinessKey", businessId.toString())
+
+        def hasWarnings = message.getProperty("HasValidationWarnings") == "true"
+        if (hasWarnings) {
+            message.setHeader("SAP_MessageProcessingLogCustomStatus", STATUS_WARNING)
+        }
+
+        def logPayload = message.getProperty("EnablePayloadAttachment") == "true"
+        if (logPayload) {
+            def snapshot = message.getProperty("ErrorSnapshot") ?: "Snapshot de ejecucion"
+            messageLog.addAttachmentAsString("Snapshot_Trace", snapshot.toString(), "text/plain")
+        }
+    }
+    return message
+}
+`;
+      break;
+
+    case 'oauth-token-inject':
+      code = `${messageImport}
+import groovy.transform.Field
+import java.time.Instant
+
+@Field final String BEARER_PREFIX = "Bearer "
+
+Message processData(Message message) {
+    def accessToken = message.getProperty("OAuth_AccessToken")
+    def expiresAt = message.getProperty("OAuth_ExpiresAt")
+
+    long now = Instant.now().getEpochSecond()
+    long expiryTime = expiresAt ? Long.parseLong(expiresAt.toString()) : 0L
+
+    if (!accessToken || now >= (expiryTime - 60)) {
+        message.setProperty("RequiresTokenRefresh", "true")
+    } else {
+        message.setHeader("Authorization", BEARER_PREFIX + accessToken.toString().trim())
+        message.setProperty("RequiresTokenRefresh", "false")
+    }
+    return message
+}
+`;
+      break;
+
+    case 'dynamic-routing-header':
+      code = `${messageImport}
+import groovy.transform.Field
+
+@Field final String DEFAULT_ROUTE = "/cpi/route/fallback"
+@Field final String ROUTE_S4 = "/cpi/route/s4hana"
+@Field final String ROUTE_CRM = "/cpi/route/crm"
+
+Message processData(Message message) {
+    def targetSystem = message.getHeader("TargetSystem") ?: message.getProperty("TargetSystem") ?: ""
+    String destinationAddress
+
+    switch (targetSystem.toString().toUpperCase()) {
+        case "S4":
+        case "S4HANA":
+            destinationAddress = ROUTE_S4
+            break
+        case "CRM":
+        case "SALESFORCE":
+            destinationAddress = ROUTE_CRM
+            break
+        default:
+            destinationAddress = DEFAULT_ROUTE
+            break
+    }
+
+    message.setHeader("CamelProcessDirectAddress", destinationAddress)
+    message.setProperty("TargetRouteAddress", destinationAddress)
+    return message
+}
+`;
+      break;
+
+    case 'base64-attachment':
+      code = `${messageImport}
+import groovy.transform.Field
+import java.util.Base64
+
+@Field final String ATTACHMENT_NAME = "Attachment_Decoded.pdf"
+@Field final String ATTACHMENT_MIME = "application/pdf"
+
+Message processData(Message message) {
+    def base64Content = message.getProperty("Base64Document") ?: ""
+    if (base64Content) {
+        byte[] decodedBytes = Base64.getDecoder().decode(base64Content.toString().trim())
+        message.setBody(decodedBytes)
+        message.setHeader("Content-Type", ATTACHMENT_MIME)
+        message.setHeader("Content-Disposition", "attachment; filename=\\"" + ATTACHMENT_NAME + "\\"")
+    }
+    return message
+}
+`;
+      break;
+
+    case 'json-streaming':
+    default:
+      code = `${messageImport}
+import groovy.json.JsonSlurperClassic
+import groovy.json.JsonOutput
+import groovy.transform.Field
+import java.io.Reader
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+@Field final String SOURCE_SYSTEM = "SAP_CPI"
+@Field final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneId.of("UTC"))
+
+Message processData(Message message) {
+    Reader bodyReader = message.getBody(java.io.Reader)
+    try {
+        if (bodyReader == null) {
+            throw new IllegalArgumentException("Payload vacio recibido en el mensaje.")
+        }
+        def parsedJson = new JsonSlurperClassic().parse(bodyReader)
+        parsedJson.processedAt = ISO_FORMATTER.format(Instant.now())
+        parsedJson.source = SOURCE_SYSTEM
+
+        message.setBody(JsonOutput.toJson(parsedJson))
+        message.setHeader("Content-Type", "application/json; charset=utf-8")
+
+        def messageLog = messageLogFactory?.getMessageLog(message)
+        if (messageLog != null && parsedJson.orderId != null) {
+            messageLog.addCustomHeaderProperty("OrderId", parsedJson.orderId.toString())
+        }
+    } finally {
+        bodyReader?.close()
+    }
+    return message
+}
+`;
+      break;
+  }
+
+  const lint = lintGroovyScript(code, scriptName);
+  return {
+    pattern,
+    apiVersion,
+    scriptName,
+    score: lint.score,
+    passed: lint.passed,
+    findingsCount: lint.findings.length,
+    code
+  };
+}
+
 // CLI Runner
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso: node validate-groovy.mjs <archivo.groovy | carpeta | paquete.zip> [--strict] [--json]');
+    console.log('Uso 1 (Validar):  node validate-groovy.mjs <archivo.groovy | carpeta | paquete.zip> [--strict] [--json]');
+    console.log('Uso 2 (Template): node validate-groovy.mjs --template <json-streaming|xml-slurper|mpl-custom-headers|oauth-token-inject|dynamic-routing-header|base64-attachment> [--api v1|v2] [--json]');
     process.exit(0);
+  }
+
+  if (args.includes('--template')) {
+    const tIdx = args.indexOf('--template');
+    const pattern = args[tIdx + 1] || 'json-streaming';
+    const apiIdx = args.indexOf('--api');
+    const apiVersion = apiIdx !== -1 ? args[apiIdx + 1] : 'v1';
+    const jsonFlag = args.includes('--json');
+    const templateRes = generateCanonicalGroovyTemplate(pattern, { apiVersion });
+    if (jsonFlag) {
+      console.log(JSON.stringify(templateRes, null, 2));
+    } else {
+      console.log(`=== PLANTILLA GROOVY CANÓNICA SAP CPI (Score: ${templateRes.score}/100) ===`);
+      console.log(`Patrón: ${templateRes.pattern} | API: ${templateRes.apiVersion}\n`);
+      console.log(templateRes.code);
+    }
+    process.exit(templateRes.passed ? 0 : 1);
   }
 
   const targetPath = path.resolve(args[0]);

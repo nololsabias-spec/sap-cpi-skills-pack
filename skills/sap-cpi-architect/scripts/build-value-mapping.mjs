@@ -270,7 +270,7 @@ if (isMain) {
     }
   }
 
-  const outPath = getOpt('--out', `${spec.name || 'VM_Bundle'}.zip`);
+  const outPath = getOpt('--out', jsonFlag ? null : `${spec.name || 'VM_Bundle'}.zip`);
   const result = validateAndBuildValueMappingBundle(spec);
 
   if (result.valid && outPath) {

@@ -470,6 +470,7 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
 
   const groovyAuditResults = groovyScripts.map((g) => lintGroovyScript(g.text || '', g.name));
   const isScriptCollection = manifestData.bundleType === 'ScriptCollection' || (iflwFiles.length === 0 && groovyScripts.length > 0 && manifestFiles.length > 0);
+  const isValueMapping = manifestData.bundleType === 'ValueMapping' || otherFiles.some((f) => f.path.includes('value_mapping.xml'));
   const heuristics = isScriptCollection
     ? {
         isScriptCollection: true,
@@ -497,6 +498,33 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
           channels: 0
         }
       }
+    : isValueMapping
+    ? {
+        isValueMapping: true,
+        hasExceptionSubprocess: true,
+        unencryptedChannels: [],
+        hardcodedSensitivePatterns: [],
+        syncTasksWithoutTimeout: [],
+        splittersWithoutStreaming: [],
+        routersWithoutDefaultRoute: [],
+        basicAuthChannels: [],
+        csrfDisabledChannels: [],
+        contentModifiersReadingBodyToProperty: [],
+        referencedScripts: [],
+        referencedScriptCollections: [],
+        groovyAuditResults: [],
+        manifestIssues,
+        score: Math.max(0, 100 - manifestIssues.length * 40),
+        stats: {
+          subprocesses: 0,
+          groovyCalls: 0,
+          xsltCalls: 0,
+          messageMappingCalls: 0,
+          routers: 0,
+          serviceTasks: 0,
+          channels: 0
+        }
+      }
     : analyzeIflwLocally(iflwFiles[0]?.text || '');
 
   heuristics.groovyAuditResults = groovyAuditResults;
@@ -506,7 +534,7 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
     }
   }
 
-  if (!isScriptCollection) {
+  if (!isScriptCollection && !isValueMapping) {
     heuristics.manifestIssues = manifestIssues;
     if (manifestIssues.length > 0) {
       heuristics.score = Math.max(0, heuristics.score - manifestIssues.length * 40);
@@ -580,7 +608,7 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
     }
   });
 
-  if (nestedBundles.length > 0 && iflwFiles.length === 0 && !isScriptCollection) {
+  if (nestedBundles.length > 0 && iflwFiles.length === 0 && !isScriptCollection && !isValueMapping) {
     manifestData.bundleType = 'Multi-Bundle Package';
     manifestData.symbolicName = path.basename(sourceName, '.zip');
     heuristics.isMultiBundle = true;
@@ -691,7 +719,7 @@ export function buildAuditPdfSpec(report) {
       }
     }
 
-    if (!h.isScriptCollection && !h.hasExceptionSubprocess) {
+    if (!h.isScriptCollection && !h.isValueMapping && !h.hasExceptionSubprocess) {
       totalFindings++;
       blocks.push({
         type: 'finding',
@@ -1012,6 +1040,11 @@ if (isMain) {
         console.log(`Score de Empaquetado OSGi: ${report.heuristics.score}/100`);
         console.log(`Provide-Capability: ${report.manifestData.provideCapability || 'No declarado'}`);
         console.log(`Scripts incluidos (${report.catalog.groovyScripts.length}): ${report.catalog.groovyScripts.map((g) => g.name).join(', ')}`);
+      } else if (report.heuristics.isValueMapping) {
+        console.log(`\n--- AUDITORÍA DE VALUE MAPPING ---`);
+        console.log(`Score de Empaquetado OSGi: ${report.heuristics.score}/100`);
+        console.log(`Tipo de Bundle: ${report.manifestData.bundleType}`);
+        console.log(`Archivos de definición: ${report.catalog.otherFiles.filter((f) => f.name.includes('value_mapping')).map((f) => f.name).join(', ') || 'value_mapping.xml'}`);
       } else {
         console.log(`\n--- PRE-AUDITORÍA DETERMINISTA (.iflw) ---`);
         console.log(`Score de Arquitectura: ${report.heuristics.score}/100`);

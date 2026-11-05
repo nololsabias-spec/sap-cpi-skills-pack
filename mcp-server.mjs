@@ -13,20 +13,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { writeAuditPdfFile } from './shared/pdf-utils.mjs';
+import { extractBundleFile } from './shared/zip-utils.mjs';
 import { inspectBundle, buildAuditPdfSpec, remediateBundleZip } from './skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
-import { lintGroovyScript } from './skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
+import { lintGroovyScript, generateCanonicalGroovyTemplate } from './skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
 import { compareAuditResults } from './skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs';
 import { inferXsdFromJsonSamples, validateXsdForSapCpi } from './skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs';
 import { generateMmapXml, validateMmapForSapCpi } from './skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs';
 import { simulateMmapExecution } from './skills/sap-cpi-xsd-studio/scripts/simulate-mmap.mjs';
 import { diffBundles, buildDiffPdfSpec } from './skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs';
 import { extractIflowDocumentation, buildTechnicalDocPdfSpec } from './skills/sap-cpi-architect/scripts/extract-for-docs.mjs';
-import { exportApiClientArtifacts } from './skills/sap-cpi-architect/scripts/export-api-client.mjs';
+import { exportApiClientArtifacts, extractIflowEndpointsSummary } from './skills/sap-cpi-architect/scripts/export-api-client.mjs';
 import { validateAndBuildValueMappingBundle } from './skills/sap-cpi-architect/scripts/build-value-mapping.mjs';
 import { validateXsltStylesheet } from './skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs';
 import { validateAndTestCamelRegex } from './skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs';
 import { validateAndBuildCpiBundles, DEMO_ARCHITECT_SPEC } from './skills/sap-cpi-architect/scripts/build-cpi-package.mjs';
 import { cloneIflowBundleZip, updateScriptCollectionBundleZip } from './skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs';
+import { validateAndBuildMockSuiteZip, parseMockSuiteInput, DEMO_BATCH_TEXT } from './skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs';
 
 const SERVER_DIR = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
 
@@ -316,6 +318,65 @@ export const MCP_TOOLS = [
       },
       required: ['name']
     }
+  },
+  {
+    name: 'cpi_pack_mock_suite',
+    description:
+      'Valida contratos y correlaciones E2E (foreign keys) entre múltiples payloads de prueba XML/JSON y empaqueta la suite en un archivo .zip organizado por carpetas con README de auditoría.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        spec: { type: 'object', description: 'Especificación directa de contratos y ejemplos.' },
+        specPath: { type: 'string', description: 'Ruta al archivo JSON o texto de especificación en disco (o "--demo").' },
+        rawContent: { type: 'string', description: 'Contenido raw de la especificación (formato bloques === PAYLOAD o JSON).' },
+        correlateData: { type: 'boolean', description: 'Indica si se valida la coherencia de claves entre contratos (default: true).' },
+        correlationKeys: { type: 'array', items: { type: 'string' }, description: 'Claves de correlación (ej. ["orderId", "customerId"]).' },
+        outZipPath: { type: 'string', description: 'Ruta opcional donde guardar el archivo .zip de la suite.' }
+      }
+    }
+  },
+  {
+    name: 'cpi_get_iflow_endpoints',
+    description:
+      'Extrae rápidamente la matriz concisa de conectividad de un iFlow .zip o .iflw (endpoints inbound, adaptadores outbound, URLs, protocolos, protección CSRF, timeouts y resolución de parámetros externalizados) con mínimo consumo de tokens.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filePath: { type: 'string', description: 'Ruta al paquete .zip o .iflw (o "--demo").' }
+      },
+      required: ['filePath']
+    }
+  },
+  {
+    name: 'cpi_extract_bundle_file',
+    description:
+      'Extrae e inspecciona en memoria el contenido de texto de un archivo específico (.groovy, .iflw, .xsd, .prop, .mmap, .xslt, MANIFEST.MF) contenido dentro de un paquete .zip de SAP CPI sin necesidad de extraer nada físicamente a disco.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        zipPath: { type: 'string', description: 'Ruta al paquete .zip de SAP CPI.' },
+        fileName: { type: 'string', description: 'Nombre o patrón del archivo a extraer (ej. "ProcessOrder.groovy", "parameters.prop", "MANIFEST.MF").' }
+      },
+      required: ['zipPath', 'fileName']
+    }
+  },
+  {
+    name: 'cpi_generate_groovy_template',
+    description:
+      'Genera esqueletos de scripts Groovy 2.4 o Groovy 4 para SAP CPI con puntuación garantizada 100/100 para los 6 patrones canónicos (json-streaming, xml-slurper, mpl-custom-headers, oauth-token-inject, dynamic-routing-header, base64-attachment).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pattern: {
+          type: 'string',
+          enum: ['json-streaming', 'xml-slurper', 'mpl-custom-headers', 'oauth-token-inject', 'dynamic-routing-header', 'base64-attachment'],
+          description: 'Patrón arquitectónico de integración en SAP CPI.'
+        },
+        scriptName: { type: 'string', description: 'Nombre del archivo Groovy (ej. EnrichOrder.groovy).' },
+        apiVersion: { type: 'string', enum: ['v1', 'v2'], description: 'Versión del API de CPI: v1 (Groovy 2.4 / Camel 2) o v2 (Groovy 4 / Camel 3).' }
+      },
+      required: ['pattern']
+    }
   }
 ];
 
@@ -515,6 +576,53 @@ export function executeMcpTool(name, args = {}) {
         outZipPath: args.outZipPath ? path.resolve(args.outZipPath) : null
       };
     }
+    case 'cpi_pack_mock_suite': {
+      let payloads = [];
+      let correlationKeys = args.correlationKeys || [];
+      if (args.spec) {
+        payloads = Array.isArray(args.spec.contracts)
+          ? args.spec.contracts
+          : Array.isArray(args.spec)
+            ? args.spec
+            : parseMockSuiteInput(JSON.stringify(args.spec));
+        if (args.spec.correlationKeys && correlationKeys.length === 0) correlationKeys = args.spec.correlationKeys;
+      } else if (args.rawContent) {
+        payloads = parseMockSuiteInput(args.rawContent);
+      } else if (!args.specPath || args.specPath === '--demo') {
+        payloads = parseMockSuiteInput(DEMO_BATCH_TEXT);
+      } else {
+        const raw = fs.readFileSync(path.resolve(args.specPath), 'utf8');
+        payloads = parseMockSuiteInput(raw);
+      }
+      const res = validateAndBuildMockSuiteZip(payloads, {
+        correlateData: args.correlateData !== false,
+        correlationKeys
+      });
+      if (args.outZipPath && res.zipBuffer) {
+        fs.mkdirSync(path.dirname(path.resolve(args.outZipPath)), { recursive: true });
+        fs.writeFileSync(path.resolve(args.outZipPath), res.zipBuffer);
+      }
+      const { zipBuffer, ...summary } = res;
+      return {
+        ...summary,
+        outZipPath: args.outZipPath ? path.resolve(args.outZipPath) : null,
+        sizeBytes: zipBuffer?.length || 0
+      };
+    }
+    case 'cpi_get_iflow_endpoints': {
+      const p = args.filePath === '--demo' ? '--demo' : path.resolve(args.filePath);
+      return extractIflowEndpointsSummary(p);
+    }
+    case 'cpi_extract_bundle_file': {
+      const zipPath = path.resolve(args.zipPath);
+      return extractBundleFile(zipPath, args.fileName);
+    }
+    case 'cpi_generate_groovy_template': {
+      return generateCanonicalGroovyTemplate(args.pattern, {
+        scriptName: args.scriptName,
+        apiVersion: args.apiVersion
+      });
+    }
     default:
       throw new Error(`Herramienta MCP desconocida: ${name}`);
   }
@@ -686,7 +794,7 @@ if (isMain) {
     const summary = {
       valid:
         initRes?.result?.serverInfo?.name === 'sap-cpi-skills-pack' &&
-        toolsRes?.result?.tools?.length === 16 &&
+        toolsRes?.result?.tools?.length === 20 &&
         resList?.result?.resources?.length >= 8 &&
         parsedCall.totalFiles === 4,
       toolsCount: toolsRes?.result?.tools?.length,

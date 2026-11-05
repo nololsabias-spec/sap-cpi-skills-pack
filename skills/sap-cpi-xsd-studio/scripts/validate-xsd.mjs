@@ -241,6 +241,12 @@ if (isMain) {
     } else {
       console.log(xsd);
     }
+    if (validation.warnings.length > 0) {
+      validation.warnings.forEach((w) => console.warn(`  [WARN] ${w}`));
+    }
+    if (validation.errors.length > 0) {
+      validation.errors.forEach((e) => console.error(`  [ERROR] ${e}`));
+    }
     if (!validation.valid) process.exit(1);
     process.exit(0);
   }

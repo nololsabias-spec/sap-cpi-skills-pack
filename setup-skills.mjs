@@ -62,7 +62,7 @@ function buildUnifiedInstructionsMarkdown(baseSkillDir = '.agents') {
 
 ## 3. Catálogo de Skills y Herramientas MCP / CLI Instaladas (\`${baseSkillDir}/\`)
 
-Tienes disponibles tanto el **Servidor MCP local (\`node ${baseSkillDir}/mcp-server.mjs\`)** con 16 herramientas nativas (\`cpi_inspect_zip\`, \`cpi_remediate_zip\`, \`cpi_validate_groovy\`, \`cpi_audit_groovy\`, \`cpi_infer_xsd\`, \`cpi_validate_xsd\`, \`cpi_build_mmap\`, \`cpi_simulate_mmap\`, \`cpi_diff_bundles\`, \`cpi_export_technical_doc\`, \`cpi_export_api_client\`, \`cpi_build_value_mapping\`, \`cpi_validate_xslt\`, \`cpi_test_regex\`, \`cpi_build_package\`, \`cpi_clone_bundle\`) como las guías detalladas en \`${baseSkillDir}/skills/\`:
+Tienes disponibles tanto el **Servidor MCP local (\`node ${baseSkillDir}/mcp-server.mjs\`)** con 20 herramientas nativas (\`cpi_inspect_zip\`, \`cpi_remediate_zip\`, \`cpi_diff_bundles\`, \`cpi_validate_groovy\`, \`cpi_audit_groovy\`, \`cpi_generate_groovy_template\`, \`cpi_infer_xsd\`, \`cpi_validate_xsd\`, \`cpi_build_mmap\`, \`cpi_simulate_mmap\`, \`cpi_validate_xslt\`, \`cpi_test_regex\`, \`cpi_pack_mock_suite\`, \`cpi_build_package\`, \`cpi_clone_bundle\`, \`cpi_get_iflow_endpoints\`, \`cpi_extract_bundle_file\`, \`cpi_export_technical_doc\`, \`cpi_export_api_client\`, \`cpi_build_value_mapping\`) como las guías detalladas en \`${baseSkillDir}/skills/\`:
 
 1. **Arquitecto SAP CPI**: \`${baseSkillDir}/skills/sap-cpi-architect/SKILL.md\` (\`build-cpi-package.mjs\`, \`clone-iflow-bundle.mjs\`, \`extract-for-docs.mjs\`, \`export-api-client.mjs\`, \`build-value-mapping.mjs\`)
 2. **Inspector y Auditor de Paquetes .zip / .iflw + Differ + PDF**: \`${baseSkillDir}/skills/sap-cpi-zip-inspector/SKILL.md\` (\`inspect-iflow-zip.mjs\`, \`diff-iflow-zip.mjs\`)

@@ -102,3 +102,14 @@ Para que un paquete iFlow + Script Collection sea importable sin errores en SAP 
 - El `MANIFEST.MF` del **Integration Flow** debe declarar `Require-Capability: scriptcollection.<SC_ID>;filter:="(&(version>=1.0.0))"` (o `resolution:=optional;bundleType:String="ScriptCollection";source:String="reference"`) y `SAP-BundleType: IntegrationFlow`.
 - En el archivo `.iflw`, todo paso de script que invoque una Script Collection debe incluir `<ifl:property><key>scriptBundleId</key><value><SC_ID></value></ifl:property>`.
 - **Subida Individual**: Cada `.zip` (`<ScriptCollection>.zip` y `<Iflow>.zip`) debe importarse individualmente en SAP CPI, nunca subiendo un `.zip` contenedor que agrupe varios archivos `.zip`.
+
+---
+
+## 7. Reglas de Exportación de Clientes de Prueba API (Postman & OpenAPI)
+
+Aplicadas por `export-api-client.mjs`:
+1. **Handshake CSRF Automático (`pm.sendRequest` en `prerequest`)**: Toda petición POST protegida por CSRF debe incluir un script `prerequest` que solicite automáticamente `x-csrf-token: fetch` mediante GET a la URL del tenant y guarde el token en `cpi_csrf_token`, garantizando la ejecución autónoma tanto en Postman UI como en suites automatizadas Newman / CI/CD.
+2. **Soporte de URL Base Configurable (`--base-url`)**: Configura la variable `CPI_TENANT_BASE_URL` en la colección Postman y los servidores en OpenAPI 3.0.3 a partir del host del tenant especificado por el usuario.
+3. **Resolución de Parámetros Externalizados en Endpoints**: Si el canal remitente declara una dirección externalizada `{{param}}`, debe resolverse leyendo `src/main/resources/parameters.prop` para obtener la ruta real (ej. `/cpi/b2b/orders`).
+4. **Esquemas Duales XML y JSON en OpenAPI**: Infiere y publica ejemplos sintéticos tanto en `application/xml` como en `application/json` a partir de los contratos XSD empaquetados en el iFlow.
+

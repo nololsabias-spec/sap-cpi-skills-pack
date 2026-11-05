@@ -35,5 +35,5 @@ Cada vez que el usuario utilice una skill y durante las pruebas en SAP CPI apare
    - Actualizar la `SKILL.md` implicada y sus `references/`.
    - Actualizar `docs/VALIDATION_RULES.md` (si hay nueva regla de validación) y registrar la lección aprendida en `docs/LESSONS_LEARNED.md`.
 5. **Ejecutar Verificación y Sincronización**:
-   - Ejecutar `node verify-all.mjs` (debe dar `15/15 PASS`).
+   - Ejecutar `node verify-all.mjs` (debe dar `16/16 PASS`).
    - Ejecutar `node setup-skills.mjs --target <ruta-workspace>` para sincronizar `.agents/` y `.claude/`.

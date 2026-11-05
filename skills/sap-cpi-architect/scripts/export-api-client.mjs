@@ -7,15 +7,34 @@
  * and exports ready-to-test Postman Collections and OpenAPI 3.0 contracts.
  *
  * Usage:
- *   node export-api-client.mjs --demo [--format postman|openapi|both] [--out-dir <dir>] [--json]
- *   node export-api-client.mjs <iflow.zip> [--format postman|openapi|both] [--out-dir <dir>] [--json]
+ *   node export-api-client.mjs --demo [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--json]
+ *   node export-api-client.mjs <iflow.zip> [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--json]
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { inspectBundle, buildDemoBundleZipBuffer } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
 
-function extractInboundEndpointsFromIflw(iflwXml) {
+export function extractParametersMap(report) {
+  const map = {};
+  const propEntry = (report.catalog?.parameterFiles || []).find((f) => f.path.endsWith('parameters.prop'));
+  if (propEntry && propEntry.text) {
+    const lines = propEntry.text.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx !== -1) {
+        const k = trimmed.slice(0, eqIdx).trim();
+        const v = trimmed.slice(eqIdx + 1).trim();
+        map[k] = v;
+      }
+    }
+  }
+  return map;
+}
+
+export function extractInboundEndpointsFromIflw(iflwXml, propMap = {}) {
   const endpoints = [];
   if (iflwXml) {
     // Find sender messageFlows (from Participant_Sender to StartEvent)
@@ -34,7 +53,12 @@ function extractInboundEndpointsFromIflw(iflwXml) {
         body.includes('ifl:type="EndpointSender"') ||
         body.includes('<ifl:property key="direction" value="Sender"/>');
 
-      if (isSender || /HTTPS|SOAP|REST|OData/i.test(body)) {
+      const isReceiver =
+        /Receiver/i.test(attrs.match(/\btargetRef="([^"]+)"/)?.[1] || '') ||
+        body.includes('ifl:type="EndpointReceiver"') ||
+        body.includes('<ifl:property key="direction" value="Receiver"/>');
+
+      if ((isSender || /HTTPS|SOAP|REST|OData/i.test(body)) && !isReceiver) {
         const getProp = (key) => {
           const match =
             body.match(new RegExp(`<ifl:property[^>]*key="${key}"[^>]*value="([^"]*)"`, 'i')) ||
@@ -42,7 +66,13 @@ function extractInboundEndpointsFromIflw(iflwXml) {
           return match ? match[1] : '';
         };
 
-        const address = getProp('address') || getProp('url') || '/cpi/inbound';
+        let address = getProp('address') || getProp('url') || '/cpi/inbound';
+        // Resolve externalized parameter if defined like {{ParamName}}
+        const extMatch = address.match(/^\{\{([^}]+)\}\}$/);
+        if (extMatch && propMap[extMatch[1]]) {
+          address = propMap[extMatch[1]];
+        }
+
         const protocol = getProp('MessageProtocol') || getProp('system') || 'HTTPS';
         const xsrfVal = getProp('xsrfProtection');
         const xsrfProtection = xsrfVal === '1' || xsrfVal === 'true';
@@ -72,7 +102,93 @@ function extractInboundEndpointsFromIflw(iflwXml) {
   return endpoints;
 }
 
-function synthesizeSampleFromXsd(xsdText) {
+export function extractOutboundEndpointsFromIflw(iflwXml, propMap = {}) {
+  const endpoints = [];
+  if (iflwXml) {
+    const mfRegex = /<bpmn2:messageFlow\b([^>]*)>([\s\S]*?)<\/bpmn2:messageFlow>/gi;
+    let m;
+    while ((m = mfRegex.exec(iflwXml)) !== null) {
+      const attrs = m[1];
+      const body = m[2];
+      const targetRefMatch = attrs.match(/\btargetRef="([^"]+)"/);
+      const targetRef = targetRefMatch ? targetRefMatch[1] : '';
+
+      const isReceiver =
+        /Receiver/i.test(targetRef) ||
+        body.includes('ifl:type="EndpointReceiver"') ||
+        body.includes('<ifl:property key="direction" value="Receiver"/>');
+
+      if (isReceiver) {
+        const getProp = (key) => {
+          const match =
+            body.match(new RegExp(`<ifl:property[^>]*key="${key}"[^>]*value="([^"]*)"`, 'i')) ||
+            body.match(new RegExp(`<key>${key}</key>\\s*<value>([^<]*)</value>`, 'i'));
+          return match ? match[1] : '';
+        };
+
+        let rawAddress = getProp('address') || getProp('url') || getProp('location') || '';
+        let resolvedAddress = rawAddress;
+        const extMatch = rawAddress.match(/^\{\{([^}]+)\}\}$/);
+        if (extMatch && propMap[extMatch[1]]) {
+          resolvedAddress = propMap[extMatch[1]];
+        }
+
+        const componentType = getProp('ComponentType') || getProp('system') || 'HTTP';
+        const timeout = getProp('httpRequestTimeout') || getProp('timeout') || 'Default';
+        const isSecure = /^https:\/\//i.test(resolvedAddress) || !/^http:\/\//i.test(resolvedAddress);
+
+        endpoints.push({
+          id: (attrs.match(/\bid="([^"]+)"/) || [])[1] || 'MessageFlow_Out',
+          name: (attrs.match(/\bname="([^"]+)"/) || [])[1] || 'Outbound_Endpoint',
+          targetRef,
+          adapterType: componentType,
+          address: rawAddress,
+          resolvedAddress,
+          isExternalized: Boolean(extMatch),
+          timeout,
+          isSecure
+        });
+      }
+    }
+  }
+  return endpoints;
+}
+
+export function extractIflowEndpointsSummary(bundlePathOrBuf, options = {}) {
+  const target = bundlePathOrBuf === '--demo' ? buildDemoBundleZipBuffer() : bundlePathOrBuf;
+  const report = inspectBundle(target);
+  const iflwXml = report.catalog?.iflwFiles?.[0]?.text || '';
+  const propMap = extractParametersMap(report);
+
+  const inbounds = extractInboundEndpointsFromIflw(iflwXml, propMap);
+  const outbounds = extractOutboundEndpointsFromIflw(iflwXml, propMap);
+
+  const processDirectRegex = /<ifl:property[^>]*key="address"[^>]*value="(\/[^"]+)"/gi;
+  const directChannels = [];
+  let pdMatch;
+  while ((pdMatch = processDirectRegex.exec(iflwXml)) !== null) {
+    if (iflwXml.includes('ProcessDirect') && !inbounds.some((i) => i.address === pdMatch[1])) {
+      directChannels.push(pdMatch[1]);
+    }
+  }
+
+  return {
+    iflowName: report.manifestData?.name || path.basename(report.fileName || 'iFlow.zip', '.zip'),
+    symbolicName: report.manifestData?.symbolicName || 'N/A',
+    version: report.manifestData?.version || '1.0.0',
+    totalInbound: inbounds.length,
+    totalOutbound: outbounds.length,
+    inboundEndpoints: inbounds,
+    outboundEndpoints: outbounds,
+    processDirectEndpoints: [...new Set(directChannels)],
+    externalizedParameters: Object.keys(propMap).map((k) => ({
+      key: k,
+      configuredInAdapters: inbounds.some((i) => i.address === `{{${k}}}`) || outbounds.some((o) => o.address === `{{${k}}}`)
+    }))
+  };
+}
+
+export function synthesizeSampleFromXsd(xsdText) {
   if (!xsdText) return '<Request><sample>test</sample></Request>';
   const rootMatch = xsdText.match(/<xsd:element\b[^>]*\bname="([^"]+)"/i);
   const rootTag = rootMatch ? rootMatch[1] : 'Root';
@@ -99,10 +215,36 @@ function synthesizeSampleFromXsd(xsdText) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<${rootTag}>\n${children.join('\n')}\n</${rootTag}>`;
 }
 
-export function generatePostmanCollection(report) {
+export function synthesizeSampleJsonFromXsd(xsdText) {
+  if (!xsdText) return { sample: 'test' };
+  const rootMatch = xsdText.match(/<xsd:element\b[^>]*\bname="([^"]+)"/i);
+  const rootTag = rootMatch ? rootMatch[1] : 'Root';
+
+  const childMatches = [...xsdText.matchAll(/<xsd:element\b[^>]*\bname="([^"]+)"[^>]*\btype="([^"]+)"/gi)];
+  const obj = {};
+  for (const cm of childMatches) {
+    const cName = cm[1];
+    const cType = cm[2];
+    if (cName === rootTag) continue;
+    let sampleVal = 'SAMPLE-100';
+    if (cType.includes('integer') || cType.includes('int')) sampleVal = 100;
+    else if (cType.includes('decimal')) sampleVal = 99.5;
+    else if (cType.includes('boolean')) sampleVal = true;
+    else if (cType.includes('date')) sampleVal = '2026-11-05';
+    obj[cName] = sampleVal;
+  }
+  if (Object.keys(obj).length === 0) {
+    obj.id = 'SAMPLE-001';
+    obj.status = 'NEW';
+  }
+  return obj;
+}
+
+export function generatePostmanCollection(report, options = {}) {
+  const { baseUrl = null, propMap = {} } = options;
   const iflowName = report.manifestData?.name || path.basename(report.fileName, '.zip');
   const iflwXml = report.catalog.iflwFiles[0]?.text || '';
-  const endpoints = extractInboundEndpointsFromIflw(iflwXml);
+  const endpoints = extractInboundEndpointsFromIflw(iflwXml, propMap);
   const primaryEndpoint = endpoints[0];
 
   const firstXsd = report.catalog.xsdSchemas[0]?.text || '';
@@ -111,8 +253,10 @@ export function generatePostmanCollection(report) {
   const cleanPath = primaryEndpoint.address.replace(/^\/+/, '');
   const items = [];
 
+  const defaultBaseUrl = baseUrl || 'https://your-tenant.it-cpi001.cfapps.eu10.hana.ondemand.com';
+
   if (primaryEndpoint.xsrfProtection) {
-    // Step 1: CSRF Token Fetch Request
+    // Step 1: CSRF Token Fetch Request (Manual handshake inspection)
     items.push({
       name: '1. Fetch X-CSRF-Token (Handshake)',
       request: {
@@ -137,9 +281,10 @@ export function generatePostmanCollection(report) {
               'pm.test("Status code is 200 or 204", function () {',
               '    pm.expect(pm.response.code).to.be.oneOf([200, 204]);',
               '});',
-              'var csrfToken = pm.response.headers.get("X-CSRF-Token");',
+              'var csrfToken = pm.response.headers.get("X-CSRF-Token") || pm.response.headers.get("x-csrf-token");',
               'if (csrfToken) {',
               '    pm.environment.set("cpi_csrf_token", csrfToken);',
+              '    pm.variables.set("cpi_csrf_token", csrfToken);',
               '    console.log("X-CSRF-Token guardado:", csrfToken);',
               '}'
             ]
@@ -157,6 +302,50 @@ export function generatePostmanCollection(report) {
   if (primaryEndpoint.xsrfProtection) {
     postHeaders.splice(1, 0, { key: 'X-CSRF-Token', value: '{{cpi_csrf_token}}', type: 'text' });
   }
+
+  const postEvents = [];
+  if (primaryEndpoint.xsrfProtection) {
+    postEvents.push({
+      listen: 'prerequest',
+      script: {
+        type: 'text/javascript',
+        exec: [
+          '// Pre-request script: Automated CSRF Token Handshake for SAP CPI',
+          'var baseUrl = pm.variables.get("CPI_TENANT_BASE_URL") || "' + defaultBaseUrl + '";',
+          'var auth = pm.variables.get("CPI_BASIC_AUTH") || "dXNlcm5hbWU6cGFzc3dvcmQ=";',
+          'var tokenUrl = baseUrl.replace(/\\/+$/, "") + "/http/' + cleanPath + '";',
+          'pm.sendRequest({',
+          '    url: tokenUrl,',
+          '    method: "GET",',
+          '    header: {',
+          '        "X-CSRF-Token": "Fetch",',
+          '        "Authorization": "Basic " + auth',
+          '    }',
+          '}, function (err, res) {',
+          '    if (!err && res) {',
+          '        var token = res.headers.get("X-CSRF-Token") || res.headers.get("x-csrf-token");',
+          '        if (token) {',
+          '            pm.environment.set("cpi_csrf_token", token);',
+          '            pm.variables.set("cpi_csrf_token", token);',
+          '            console.log("Automated X-CSRF-Token handshake succeeded:", token);',
+          '        }',
+          '    }',
+          '});'
+        ]
+      }
+    });
+  }
+  postEvents.push({
+    listen: 'test',
+    script: {
+      type: 'text/javascript',
+      exec: [
+        'pm.test("Successful invocation (200, 201 or 202)", function () {',
+        '    pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]);',
+        '});'
+      ]
+    }
+  });
 
   items.push({
     name: `${primaryEndpoint.xsrfProtection ? '2. ' : '1. '}Send Message (${iflowName})`,
@@ -177,19 +366,7 @@ export function generatePostmanCollection(report) {
       },
       description: `Dispara la ejecución del Integration Flow ${iflowName} en SAP CPI.`
     },
-    event: [
-      {
-        listen: 'test',
-        script: {
-          type: 'text/javascript',
-          exec: [
-            'pm.test("Successful invocation (200, 201 or 202)", function () {',
-            '    pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]);',
-            '});'
-          ]
-        }
-      }
-    ]
+    event: postEvents
   });
 
   return {
@@ -200,21 +377,23 @@ export function generatePostmanCollection(report) {
       schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'
     },
     variable: [
-      { key: 'CPI_TENANT_BASE_URL', value: 'https://your-tenant.it-cpi001.cfapps.eu10.hana.ondemand.com', type: 'string' },
+      { key: 'CPI_TENANT_BASE_URL', value: defaultBaseUrl, type: 'string' },
       { key: 'CPI_BASIC_AUTH', value: 'dXNlcm5hbWU6cGFzc3dvcmQ=', type: 'string' }
     ],
     item: items
   };
 }
 
-export function generateOpenApiSpec(report) {
+export function generateOpenApiSpec(report, options = {}) {
+  const { baseUrl = null, propMap = {} } = options;
   const iflowName = report.manifestData?.name || path.basename(report.fileName, '.zip');
   const iflwXml = report.catalog.iflwFiles[0]?.text || '';
-  const endpoints = extractInboundEndpointsFromIflw(iflwXml);
+  const endpoints = extractInboundEndpointsFromIflw(iflwXml, propMap);
   const primaryEndpoint = endpoints[0];
 
   const firstXsd = report.catalog.xsdSchemas[0]?.text || '';
-  const sampleBody = synthesizeSampleFromXsd(firstXsd);
+  const sampleBodyXml = synthesizeSampleFromXsd(firstXsd);
+  const sampleBodyJson = synthesizeSampleJsonFromXsd(firstXsd);
 
   const cleanPath = '/' + primaryEndpoint.address.replace(/^\/+/, '');
 
@@ -241,7 +420,11 @@ export function generateOpenApiSpec(report) {
           content: {
             'application/xml': {
               schema: { type: 'string' },
-              example: sampleBody
+              example: sampleBodyXml
+            },
+            'application/json': {
+              schema: { type: 'object' },
+              example: sampleBodyJson
             }
           }
         },
@@ -272,6 +455,23 @@ export function generateOpenApiSpec(report) {
     }
   };
 
+  const servers = baseUrl
+    ? [
+        {
+          url: `${baseUrl.replace(/\/+$/, '')}/http`,
+          description: 'Tenant Runtime SAP Cloud Integration'
+        }
+      ]
+    : [
+        {
+          url: 'https://{tenant-host}.it-cpi001.cfapps.eu10.hana.ondemand.com/http',
+          description: 'Tenant Runtime SAP Cloud Integration',
+          variables: {
+            'tenant-host': { default: 'your-tenant' }
+          }
+        }
+      ];
+
   return {
     openapi: '3.0.3',
     info: {
@@ -279,15 +479,7 @@ export function generateOpenApiSpec(report) {
       description: `Contrato OpenAPI 3.0 para el Integration Flow ${iflowName} en SAP Integration Suite.`,
       version: report.manifestData?.version || '1.0.0'
     },
-    servers: [
-      {
-        url: 'https://{tenant-host}.it-cpi001.cfapps.eu10.hana.ondemand.com/http',
-        description: 'Tenant Runtime SAP Cloud Integration',
-        variables: {
-          'tenant-host': { default: 'your-tenant' }
-        }
-      }
-    ],
+    servers,
     paths,
     components: {
       securitySchemes: {
@@ -308,11 +500,12 @@ export function generateOpenApiSpec(report) {
 }
 
 export function exportApiClientContracts(bundlePathOrBuf, options = {}) {
-  const { format = 'both', outDir = null } = options;
+  const { format = 'both', outDir = null, baseUrl = null, authType = 'basic' } = options;
   const report = inspectBundle(bundlePathOrBuf);
+  const propMap = extractParametersMap(report);
 
-  const postman = format === 'postman' || format === 'both' ? generatePostmanCollection(report) : null;
-  const openapi = format === 'openapi' || format === 'both' ? generateOpenApiSpec(report) : null;
+  const postman = format === 'postman' || format === 'both' ? generatePostmanCollection(report, { baseUrl, authType, propMap }) : null;
+  const openapi = format === 'openapi' || format === 'both' ? generateOpenApiSpec(report, { baseUrl, propMap }) : null;
 
   const baseName = report.manifestData?.name || path.basename(report.fileName, '.zip');
   const filesWritten = [];
@@ -347,8 +540,8 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso 1 (Demo): node export-api-client.mjs --demo [--format postman|openapi|both] [--out-dir <dir>] [--json]');
-    console.log('Uso 2 (iFlow): node export-api-client.mjs <iflow.zip> [--format postman|openapi|both] [--out-dir <dir>] [--json]');
+    console.log('Uso 1 (Demo): node export-api-client.mjs --demo [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--json]');
+    console.log('Uso 2 (iFlow): node export-api-client.mjs <iflow.zip> [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--json]');
     process.exit(0);
   }
 
@@ -362,16 +555,20 @@ if (isMain) {
 
   const format = getOpt('--format', 'both');
   const outDir = getOpt('--out-dir', null);
+  const baseUrl = getOpt('--base-url', null);
 
-  const res = exportApiClientContracts(target, { format, outDir });
+  const res = exportApiClientContracts(target, { format, outDir, baseUrl });
 
   if (jsonFlag) {
     console.log(JSON.stringify(res, null, 2));
   } else {
     console.log(`=== SAP CPI INBOUND API CLIENT GENERATOR ===`);
     console.log(`iFlow: ${res.iflowName} | Formato: ${res.format}`);
+    if (baseUrl) {
+      console.log(`Base URL: ${baseUrl}`);
+    }
     if (res.postman) {
-      console.log(`  [OK] Postman Collection v2.1 (${res.postman.item.length} peticiones preparadas con CSRF Flow)`);
+      console.log(`  [OK] Postman Collection v2.1 (${res.postman.item.length} peticiones preparadas con CSRF Flow y Pre-request Handshake)`);
     }
     if (res.openapi) {
       console.log(`  [OK] OpenAPI 3.0.3 Contract (${Object.keys(res.openapi.paths).join(', ')})`);

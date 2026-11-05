@@ -189,3 +189,51 @@ export function readZipEntries(inputPathOrBuffer) {
 
   return entries;
 }
+
+/**
+ * Extracts the text content of a single specific file inside a ZIP bundle in memory.
+ * Matches by exact path, exact filename, or substring.
+ * @param {string | Buffer} inputPathOrBuffer
+ * @param {string} targetFileOrPattern
+ */
+export function extractBundleFile(inputPathOrBuffer, targetFileOrPattern) {
+  const entries = readZipEntries(inputPathOrBuffer);
+  const pattern = (targetFileOrPattern || '').trim().toLowerCase();
+
+  if (!pattern) {
+    return {
+      found: false,
+      error: 'Se requiere especificar un nombre de archivo o patrón de ruta.',
+      totalFilesInBundle: entries.length,
+      availableFiles: entries.map((e) => e.path)
+    };
+  }
+
+  let match = entries.find((e) => e.path.toLowerCase() === pattern);
+  if (!match) {
+    match = entries.find((e) => e.name.toLowerCase() === pattern);
+  }
+  if (!match) {
+    match = entries.find((e) => e.path.toLowerCase().includes(pattern) || e.name.toLowerCase().includes(pattern));
+  }
+
+  if (match) {
+    return {
+      found: true,
+      file: {
+        name: match.name,
+        path: match.path,
+        size: match.size,
+        content: match.text
+      },
+      totalFilesInBundle: entries.length
+    };
+  }
+
+  return {
+    found: false,
+    error: `Archivo '${targetFileOrPattern}' no encontrado en el paquete.`,
+    totalFilesInBundle: entries.length,
+    availableFiles: entries.map((e) => e.path)
+  };
+}

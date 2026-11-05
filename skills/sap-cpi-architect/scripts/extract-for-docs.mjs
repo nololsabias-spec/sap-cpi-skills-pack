@@ -45,6 +45,12 @@ export function extractIflowDocumentation(zipPathOrBuf) {
   const m = report.manifestData || {};
   const h = report.heuristics || {};
 
+  const mapSummary = [
+    ...(report.catalog?.messageMappings || []).map((m) => `${m.name} (.mmap)`),
+    ...(report.catalog?.xsltMappings || []).map((x) => `${x.name} (.xsl/.xslt)`)
+  ].join(', ');
+  const schemaSummary = (report.catalog?.xsdSchemas || []).map((s) => s.name).join(', ');
+
   const markdownDocument = `# Documento de Diseño Técnico: ${m.name || path.basename(report.fileName, '.zip')}
 
 ## 1. Resumen Ejecutivo
@@ -59,6 +65,8 @@ export function extractIflowDocumentation(zipPathOrBuf) {
 - **Service Tasks**: ${h.stats?.serviceTasks || 0}
 - **Routers**: ${h.stats?.routers || 0}
 - **Subprocesos de Excepción**: ${h.stats?.subprocesses || 0}
+- **Contratos y Esquemas XSD/WSDL**: ${schemaSummary || 'Ninguno detectado'}
+- **Mapeos Gráficos y Transformaciones**: ${mapSummary || 'Ninguno detectado'}
 
 ## 3. Parámetros y Configuración Externalizada
 \`\`\`properties
@@ -66,7 +74,7 @@ ${report.catalog?.parameterFiles?.map((p) => p.content).join('\n') || '# Sin par
 \`\`\`
 
 ## 4. Scripts Groovy / Script Collection
-${report.catalog?.groovyScripts?.map((s) => `### ${s.name}\n- **Tamaño**: ${s.size} bytes\n- **Ruta**: \`${s.path}\``).join('\n\n') || '- No se empaquetan scripts Groovy locales en el bundle.'}
+${report.catalog?.groovyScripts?.map((s) => `### ${s.name}\n- **Tamaño**: ${s.size} bytes\n- **Ruta**: \`${s.path}\``).join('\n\n') || (h.referencedScripts?.length > 0 ? h.referencedScripts.map((s) => `- Script referenciado (Script Collection): \`${s}\``).join('\n') : '- No se empaquetan scripts Groovy locales en el bundle.')}
 
 ## 5. Manejo de Errores
 - Exception Subprocesses configurados: ${h.stats?.subprocesses || 0}
@@ -193,7 +201,7 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso 1 (Extracción & Contexto): node extract-for-docs.mjs <iflow.zip | --demo> [--pdf <doc.pdf>] [--json]');
+    console.log('Uso 1 (Extracción & Contexto): node extract-for-docs.mjs <iflow.zip | --demo> [--pdf <doc.pdf>] [--markdown <doc.md>] [--json]');
     console.log('Uso 2 (Validar Markdown):     node extract-for-docs.mjs --validate-doc <documento.md>');
     process.exit(0);
   }
@@ -218,15 +226,25 @@ if (isMain) {
   }
 
   const target = args[0] === '--demo' ? buildDemoBundleZipBuffer() : args[0];
-  const report = inspectBundle(target);
+  const docResult = extractIflowDocumentation(target);
+  const report = docResult.report;
 
   const pdfIdx = args.indexOf('--pdf');
   const pdfPath = pdfIdx !== -1 ? args[pdfIdx + 1] : null;
 
   if (pdfPath) {
-    const pdfSpec = buildTechnicalDocPdfSpec(report);
+    const pdfSpec = buildTechnicalDocPdfSpec(report, docResult.markdownDocument);
     const bytes = writeAuditPdfFile(path.resolve(pdfPath), pdfSpec);
     report.pdfGenerated = { path: path.resolve(pdfPath), sizeBytes: bytes };
+  }
+
+  const mdIdx = args.indexOf('--markdown') !== -1 ? args.indexOf('--markdown') : args.indexOf('--md');
+  const mdPath = mdIdx !== -1 ? args[mdIdx + 1] : null;
+
+  if (mdPath) {
+    fs.mkdirSync(path.dirname(path.resolve(mdPath)), { recursive: true });
+    fs.writeFileSync(path.resolve(mdPath), docResult.markdownDocument, 'utf8');
+    report.markdownGenerated = { path: path.resolve(mdPath), sizeBytes: Buffer.byteLength(docResult.markdownDocument, 'utf8') };
   }
 
   if (args.includes('--json')) {
@@ -241,6 +259,9 @@ if (isMain) {
     console.log(`Parámetros detectados:\n${report.catalog.parameterFiles.map((p) => p.content).join('\n') || '(Sin parameters.prop)'}`);
     if (report.pdfGenerated) {
       console.log(`\n[OK] Documento de Diseño Técnico (8 Secciones) generado en PDF: ${report.pdfGenerated.path} (${report.pdfGenerated.sizeBytes} bytes)`);
+    }
+    if (report.markdownGenerated) {
+      console.log(`\n[OK] Documento Markdown (8 Secciones) generado en: ${report.markdownGenerated.path} (${report.markdownGenerated.sizeBytes} bytes)`);
     }
   }
 }

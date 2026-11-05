@@ -142,12 +142,21 @@ const CHECKS = [
     }
   },
   {
-    skill: 'mcp-server.mjs (Local JSON-RPC 2.0 MCP Server)',
+    skill: 'sap-cpi-groovy-generator (Canonical 100/100 Groovy Template Generator)',
+    script: 'skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs',
+    args: ['--template', 'json-streaming', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.score === 100 && data.passed === true && data.findingsCount === 0;
+    }
+  },
+  {
+    skill: 'mcp-server.mjs (Local JSON-RPC 2.0 MCP Server - 20 Tools)',
     script: 'mcp-server.mjs',
     args: ['--self-test', '--json'],
     verify: (out) => {
       const data = JSON.parse(out);
-      return data.valid === true && data.toolsCount === 16 && data.sampleToolCallOk === true;
+      return data.valid === true && data.toolsCount === 20 && data.sampleToolCallOk === true;
     }
   }
 ];

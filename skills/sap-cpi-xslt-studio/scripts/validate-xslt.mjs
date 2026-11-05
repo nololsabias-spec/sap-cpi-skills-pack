@@ -152,14 +152,41 @@ if (isMain) {
   }
 
   const jsonFlag = args.includes('--json');
-  const engIdx = args.indexOf('--engine');
-  const requestedEngine = engIdx !== -1 ? args[engIdx + 1] : null;
+
+  const getArg = (flag, def = null) => {
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === flag && args[i + 1] && !args[i + 1].startsWith('--')) return args[i + 1];
+      if (args[i].startsWith(`${flag}=`)) return args[i].slice(flag.length + 1);
+    }
+    return def;
+  };
+
+  const requestedEngine = getArg('--engine') || getArg('--version');
+  const scenario = getArg('--scenario');
 
   let xmlContent = '';
-  if (args[0] === '--demo') {
+  if (args.includes('--demo')) {
     xmlContent = DEMO_VALID_XSLT;
   } else {
-    const filePath = path.resolve(args[0]);
+    let targetFile = null;
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a.startsWith('--')) {
+        if (!a.includes('=') && ['--engine', '--version', '--scenario'].includes(a)) {
+          i++;
+        }
+        continue;
+      }
+      targetFile = a;
+      break;
+    }
+
+    if (!targetFile) {
+      console.error('Debe especificar la ruta del archivo XSLT o usar --demo.');
+      process.exit(1);
+    }
+
+    const filePath = path.resolve(targetFile);
     if (!fs.existsSync(filePath)) {
       console.error(`Archivo no encontrado: ${filePath}`);
       process.exit(1);
@@ -172,6 +199,7 @@ if (isMain) {
     console.log(JSON.stringify(result, null, 2));
   } else {
     console.log(`=== SAP CPI XSLT VALIDATOR (Motor: XSLT ${result.engine}) ===`);
+    if (scenario) console.log(`Escenario: ${scenario}`);
     console.log(`Estado: ${result.valid ? 'VÁLIDO (100% Compatible con SAP CPI)' : 'ERROR DE VALIDACIÓN'}`);
     if (result.errors.length > 0) {
       console.log('\nErrores Críticos:');

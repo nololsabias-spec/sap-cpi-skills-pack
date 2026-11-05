@@ -20,15 +20,15 @@ node setup-skills.mjs [--target <directorio>] [--agent all|both|antigravity|clau
 | `--mcp` | Registra automáticamente el servidor MCP local (`node .agents/mcp-server.mjs`) en `.mcp.json`, `.cursor/mcp.json` y `.vscode/mcp.json`. |
 
 ### 1.1b. `mcp-server.mjs` (Servidor MCP Local `stdio` JSON-RPC 2.0)
-Expone los 16 motores deterministas como herramientas MCP (`tools/list`, `tools/call`) y las 8 `SKILL.md` como recursos y prompts MCP (`resources/list`, `prompts/list`).
+Expone los 20 motores deterministas como herramientas MCP (`tools/list`, `tools/call`) y las 8 `SKILL.md` como recursos y prompts MCP (`resources/list`, `prompts/list`).
 
 ```bash
 node mcp-server.mjs              # Modo servidor stdio (invocado automáticamente por el IDE)
-node mcp-server.mjs --self-test  # Autoverificación de las 16 tools y 9 resources MCP
+node mcp-server.mjs --self-test  # Autoverificación de las 20 tools y 9 resources MCP
 ```
 
 ### 1.2. `verify-all.mjs` (Suite de Auto-Verificación)
-Ejecuta pruebas integrales sobre los 15 motores deterministas y el servidor MCP creando artefactos sintéticos en memoria/temporal y verificando su salida.
+Ejecuta pruebas integrales sobre los 16 módulos deterministas y el servidor MCP creando artefactos sintéticos en memoria/temporal y verificando su salida.
 
 ```bash
 node verify-all.mjs
@@ -75,10 +75,18 @@ node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs --demo [--pdf <diff
 Valida estáticamente uno o varios scripts Groovy de SAP CPI (archivo individual, carpeta de scripts o paquete `.zip` de una Script Collection) frente a las reglas de *Upgrade Readiness*, firma `processData`, protección anti-XXE, inmutabilidad `@Field final` y streaming.
 
 ```bash
+# Modo 1: Validar script, carpeta o .zip
 node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs <script.groovy | carpeta | paquete.zip> [--strict] [--json]
+
+# Modo 2: Generar plantilla canónica 100/100 para patrones de CPI
+node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs \
+  --template <json-streaming|xml-slurper|mpl-custom-headers|oauth-token-inject|dynamic-routing-header|base64-attachment> \
+  [--api v1|v2] [--json]
 ```
 
 - `<script.groovy | carpeta | paquete.zip>`: Ruta a un archivo `.groovy`, a un directorio completo de scripts o a un `.zip` que contenga scripts Groovy.
+- `--template <patrón>`: Emite código fuente Groovy production-ready (100/100) para el patrón arquitectónico indicado.
+- `--api v1|v2`: Versión del API de CPI (`v1` para `com.sap.gateway.ip.core.customdev.util.Message` en Groovy 2.4 o `v2` para `com.sap.it.script.v2.api.Message` en Groovy 4).
 - `--strict`: Exige puntuación perfecta de `100/100` en todos los scripts analizados.
 - `--json`: Devuelve el resultado individual o en lote en formato JSON.
 
@@ -272,7 +280,7 @@ node skills/sap-cpi-architect/scripts/build-value-mapping.mjs --demo [--out <VM_
 
 ---
 
-## 3. Catálogo de Herramientas MCP (16 Tools Nativas)
+## 3. Catálogo de Herramientas MCP (20 Tools Nativas)
 
 Cuando el servidor `mcp-server.mjs` está activo (arrancado por el IDE o cliente MCP vía stdio), se exponen las siguientes herramientas:
 
@@ -283,14 +291,18 @@ Cuando el servidor `mcp-server.mjs` está activo (arrancado por el IDE o cliente
 | `cpi_diff_bundles` | `sap-cpi-zip-inspector` | Compara semánticamente dos paquetes iFlow/SC, reporta diferencias topológicas y de parámetros, y exporta PDF comparativo. |
 | `cpi_validate_groovy` | `sap-cpi-groovy-generator` | Valida código Groovy (o archivo en disco) frente a reglas de Upgrade Readiness, imports y anti-XXE. |
 | `cpi_audit_groovy` | `sap-cpi-code-auditor` | Audita código Groovy original y lo compara contra versión refactorizada exigiendo 100/100. |
+| `cpi_generate_groovy_template` | `sap-cpi-groovy-generator` | Emite código Groovy 2.4 / 4 con puntuación garantizada 100/100 para los 6 patrones canónicos de CPI. |
 | `cpi_infer_xsd` | `sap-cpi-xsd-studio` | Infiere y valida un esquema W3C XSD 1.0 combinando múltiples muestras JSON. |
 | `cpi_validate_xsd` | `sap-cpi-xsd-studio` | Valida un esquema XSD 1.0 frente a reglas de compatibilidad de SAP CPI Message Mapping. |
 | `cpi_build_mmap` | `sap-cpi-xsd-studio` | Genera y valida un archivo de Mapeo Gráfico `.mmap` (`<xiObj>`) sintetizando contenedores padre. |
 | `cpi_simulate_mmap` | `sap-cpi-xsd-studio` | Simula la ejecución local de un mapeo `.mmap` con payload XML o JSON, cabeceras y propiedades Exchange. |
 | `cpi_validate_xslt` | `sap-cpi-xslt-studio` | Valida hojas de estilo XSLT 1.0 (Xalan) o 2.0/3.0 (Saxon-HE) y funciones del Exchange CPI. |
 | `cpi_test_regex` | `sap-cpi-regex-studio` | Evalúa expresiones regulares contra ReDoS y genera expresiones Apache Camel Simple. |
+| `cpi_pack_mock_suite` | `sap-cpi-mock-data-generator` | Valida contratos y correlaciones de foreign keys entre múltiples payloads y empaqueta suite de prueba en `.zip`. |
 | `cpi_build_package` | `sap-cpi-architect` | Construye paquetes OSGi `.zip` (iFlow + Script Collection) con MANIFEST.MF en raíz plegado a 72 bytes. |
 | `cpi_clone_bundle` | `sap-cpi-architect` | Clona y adapta iFlows existentes, inyecta recursos o actualiza Script Collections. |
+| `cpi_get_iflow_endpoints` | `sap-cpi-architect` | Extrae matriz concisa de conectividad de un iFlow (inbound, outbound, URLs, protocolos, CSRF y timeouts). |
+| `cpi_extract_bundle_file` | `shared/zip-utils` | Extrae e inspecciona en memoria el texto de un archivo específico dentro de un paquete `.zip` sin tocar disco. |
 | `cpi_export_technical_doc` | `sap-cpi-architect` | Genera el Documento de Diseño Técnico oficial de 8 secciones en PDF y/o Markdown. |
 | `cpi_export_api_client` | `sap-cpi-architect` | Genera colecciones de pruebas Postman v2.1 (con flujo CSRF) y contratos OpenAPI 3.0. |
 | `cpi_build_value_mapping` | `sap-cpi-architect` | Construye paquetes OSGi `.zip` de Value Mapping a partir de JSON o tablas CSV. |

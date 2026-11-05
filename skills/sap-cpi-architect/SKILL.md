@@ -149,6 +149,22 @@ node ./scripts/clone-iflow-bundle.mjs --update-sc <SC_Origen.zip> --scripts-dir 
 * **Normalización Automática de Estructura OSGi ZIP**: `clone-iflow-bundle.mjs` detecta y elimina automáticamente cualquier carpeta raíz intermedia heredada del `.zip` de origen (`stripRootFolderPrefix`), garantizando que `.project` y `META-INF/MANIFEST.MF` queden siempre en la raíz del `.zip` y con plegado de 72 bytes UTF-8 (`wrapManifestLine72`).
 * Verifica finalmente todos los `.zip` generados ejecutando `inspect-iflow-zip.mjs` sobre cada paquete resultante (comprobando `manifestIssues: []`) e indica al usuario qué archivos `.zip` individuales debe subir en SAP CPI (*Script Collection* vs *Integration Flow*).
 
+---
+
+## Modo 4: Exportar Clientes de Prueba API (Postman v2.1 & OpenAPI 3.0)
+
+Genera colecciones Postman v2.1 y especificaciones OpenAPI 3.0.3 listas para pruebas E2E a partir de los canales remitentes de un iFlow `.zip`:
+
+```bash
+node ./scripts/export-api-client.mjs <iflow.zip | --demo> [--out-dir <carpeta>] [--base-url <url-tenant>] [--format postman|openapi|both] [--json]
+```
+
+* Script CLI: [export-api-client.mjs](./scripts/export-api-client.mjs)
+* **Handshake CSRF Automático**: Genera una petición GET independiente y programa un script `prerequest` en el POST (`pm.sendRequest` con `X-CSRF-Token: Fetch` y `Basic {{CPI_BASIC_AUTH}}`) para autorizar llamadas de forma autónoma tanto en Postman UI como en Newman / CI/CD.
+* **Resolución de Parámetros Externalizados**: Si la URL del adaptador remitente usa `{{param}}` (ej. `{{StorefrontEndpoint}}`), se resuelve automáticamente leyendo `parameters.prop`.
+* **Esquemas y Payloads Duales**: Sintetiza ejemplos tanto en `application/xml` como en `application/json` a partir de los esquemas XSD del paquete.
+
+
 
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 

@@ -56,7 +56,7 @@ node setup-skills.mjs --target /ruta/a/tu/proyecto --agent cline        # Cline 
 
 ### Servidor MCP Local (`mcp-server.mjs` — Cero Dependencias, 100% Local `stdio`)
 
-El proyecto incluye [`mcp-server.mjs`](./mcp-server.mjs), un servidor **Model Context Protocol (MCP)** sobre `stdin`/`stdout` (JSON-RPC 2.0) que el IDE arranca automáticamente en segundo plano al abrir la carpeta (gracias a `.vscode/mcp.json`, `.cursor/mcp.json` o `.mcp.json`), exponiendo **16 Tools nativas** (`cpi_inspect_zip`, `cpi_remediate_zip`, `cpi_diff_bundles`, `cpi_validate_groovy`, `cpi_audit_groovy`, `cpi_infer_xsd`, `cpi_validate_xsd`, `cpi_build_mmap`, `cpi_simulate_mmap`, `cpi_validate_xslt`, `cpi_test_regex`, `cpi_build_package`, `cpi_clone_bundle`, `cpi_export_technical_doc`, `cpi_export_api_client`, `cpi_build_value_mapping`) y las **8 Skills como Resources/Prompts MCP** sin necesidad de pedir permisos de consola en cada validación:
+El proyecto incluye [`mcp-server.mjs`](./mcp-server.mjs), un servidor **Model Context Protocol (MCP)** sobre `stdin`/`stdout` (JSON-RPC 2.0) que el IDE arranca automáticamente en segundo plano al abrir la carpeta (gracias a `.vscode/mcp.json`, `.cursor/mcp.json` o `.mcp.json`), exponiendo **20 Tools nativas** (`cpi_inspect_zip`, `cpi_remediate_zip`, `cpi_diff_bundles`, `cpi_validate_groovy`, `cpi_audit_groovy`, `cpi_generate_groovy_template`, `cpi_infer_xsd`, `cpi_validate_xsd`, `cpi_build_mmap`, `cpi_simulate_mmap`, `cpi_validate_xslt`, `cpi_test_regex`, `cpi_pack_mock_suite`, `cpi_build_package`, `cpi_clone_bundle`, `cpi_get_iflow_endpoints`, `cpi_extract_bundle_file`, `cpi_export_technical_doc`, `cpi_export_api_client`, `cpi_build_value_mapping`) y las **8 Skills como Resources/Prompts MCP** sin necesidad de pedir permisos de consola en cada validación:
 
 ```bash
 # Verificar el servidor MCP local
@@ -71,10 +71,10 @@ node mcp-server.mjs --self-test
 sap-cpi-skills-pack/
 ├── README.md                           # Guía principal de instalación y uso
 ├── AGENTS.md / CLAUDE.md               # Harness de ingeniería y aprendizaje continuo (Codex / Antigravity / Claude)
-├── mcp-server.mjs                      # Servidor MCP local (stdio JSON-RPC 2.0, 16 tools + 9 resources)
+├── mcp-server.mjs                      # Servidor MCP local (stdio JSON-RPC 2.0, 20 tools + 9 resources)
 ├── package.json                        # Scripts de verificación (npm test), MCP y demostraciones
 ├── setup-skills.mjs                    # Instalador universal Multi-IDE (Antigravity, Claude, Codex, Cursor, Copilot, Windsurf, Cline)
-├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills (15 módulos) + servidor MCP
+├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills (16 módulos) + servidor MCP
 ├── rules/
 │   └── sap-cpi-continuous-learning.md  # Regla de auto-evolución continua y privacidad estricta
 ├── shared/

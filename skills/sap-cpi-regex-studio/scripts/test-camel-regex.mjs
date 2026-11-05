@@ -109,8 +109,11 @@ if (isMain) {
   }
 
   const getArg = (flag, def = '') => {
-    const idx = args.indexOf(flag);
-    return idx !== -1 && args[idx + 1] ? args[idx + 1] : def;
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === flag && args[i + 1] && !args[i + 1].startsWith('--')) return args[i + 1];
+      if (args[i].startsWith(`${flag}=`)) return args[i].slice(flag.length + 1);
+    }
+    return def;
   };
 
   const isDemo = args.includes('--demo');
@@ -118,7 +121,20 @@ if (isMain) {
 
   const pattern = isDemo ? '^[A-Z]+-\\d{4}-(\\d+)-[A-Z]{2}$' : getArg('--pattern');
   const componentType = isDemo ? 'Content Modifier' : getArg('--component', 'Router');
-  const sourceField = isDemo ? '${header.InvoiceNumber}' : getArg('--field', '${header.CamelHttpPath}');
+  
+  let sourceField = isDemo ? '${header.InvoiceNumber}' : getArg('--field');
+  if (!sourceField) {
+    const prop = getArg('--prop') || getArg('--property');
+    const hdr = getArg('--header');
+    if (prop) {
+      sourceField = prop.startsWith('${') ? prop : `\${property.${prop}}`;
+    } else if (hdr) {
+      sourceField = hdr.startsWith('${') ? hdr : `\${header.${hdr}}`;
+    } else {
+      sourceField = '${header.CamelHttpPath}';
+    }
+  }
+
   const matchRaw = isDemo ? 'INV-2026-99382-ES|ORD-2025-1044-DE' : getArg('--match');
   const noMatchRaw = isDemo ? 'INV-99382-ES|2026-99382-ES|INV-2026-ABC-ES' : getArg('--no-match');
 

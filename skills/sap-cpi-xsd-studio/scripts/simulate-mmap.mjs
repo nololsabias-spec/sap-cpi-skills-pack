@@ -390,8 +390,36 @@ if (isMain) {
   const mmapContent = fs.readFileSync(mmapPath, 'utf8');
 
   const getOpt = (flag) => {
-    const idx = args.indexOf(flag);
-    return idx !== -1 && args[idx + 1] ? args[idx + 1] : null;
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === flag && args[i + 1] && !args[i + 1].startsWith('--')) return args[i + 1];
+      if (args[i].startsWith(`${flag}=`)) return args[i].slice(flag.length + 1);
+    }
+    return null;
+  };
+
+  const parseParamMap = (val) => {
+    if (!val) return {};
+    const trimmed = val.trim();
+    if (trimmed.startsWith('{')) {
+      try { return JSON.parse(trimmed); } catch { }
+    }
+    const resolved = path.resolve(trimmed);
+    if (fs.existsSync(resolved)) {
+      try { return JSON.parse(fs.readFileSync(resolved, 'utf8')); } catch { }
+    }
+    if (trimmed.includes('=')) {
+      const res = {};
+      trimmed.split(/[,|]/).forEach((kv) => {
+        const eq = kv.indexOf('=');
+        if (eq !== -1) {
+          const k = kv.slice(0, eq).trim();
+          const v = kv.slice(eq + 1).trim();
+          if (k) res[k] = v;
+        }
+      });
+      return res;
+    }
+    return {};
   };
 
   const inputPath = getOpt('--input');
@@ -401,15 +429,8 @@ if (isMain) {
   }
   const inputPayload = fs.readFileSync(path.resolve(inputPath), 'utf8');
 
-  const headersPath = getOpt('--headers');
-  const headers = headersPath && fs.existsSync(path.resolve(headersPath))
-    ? JSON.parse(fs.readFileSync(path.resolve(headersPath), 'utf8'))
-    : {};
-
-  const propsPath = getOpt('--properties');
-  const properties = propsPath && fs.existsSync(path.resolve(propsPath))
-    ? JSON.parse(fs.readFileSync(path.resolve(propsPath), 'utf8'))
-    : {};
+  const headers = parseParamMap(getOpt('--headers'));
+  const properties = parseParamMap(getOpt('--properties'));
 
   const targetXsdPath = getOpt('--target-xsd');
   const targetXsdContent = targetXsdPath && fs.existsSync(path.resolve(targetXsdPath))

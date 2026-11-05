@@ -36,7 +36,40 @@ export function parseMockSuiteInput(rawText) {
   if (trimmed.startsWith('{') && !trimmed.includes('=== EXAMPLE')) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed.payloads)) return parsed.payloads;
+      if (Array.isArray(parsed.payloads)) {
+        const payloads = parsed.payloads.map((p) => {
+          const format = (p.format || 'json').toLowerCase();
+          const rawExamples = p.examples || [];
+          const examples = rawExamples.map((ex, idx) => {
+            if (typeof ex === 'string') {
+              const exFmt = ex.trim().startsWith('<') ? 'xml' : format;
+              return { id: idx + 1, format: exFmt, content: ex };
+            }
+            if (ex && typeof ex === 'object') {
+              let content = ex.content;
+              if (content === undefined) {
+                content = JSON.stringify(ex, null, 2);
+              } else if (typeof content === 'object' && content !== null) {
+                content = JSON.stringify(content, null, 2);
+              }
+              const strContent = String(content);
+              const exFmt = (ex.format || (strContent.trim().startsWith('<') ? 'xml' : format)).toLowerCase();
+              return {
+                id: ex.id || idx + 1,
+                name: ex.name || `sample_${idx + 1}`,
+                format: exFmt,
+                content: strContent
+              };
+            }
+            return { id: idx + 1, format, content: String(ex) };
+          });
+          return { ...p, format, examples };
+        });
+        if (Array.isArray(parsed.correlationKeys)) {
+          payloads.correlationKeys = parsed.correlationKeys;
+        }
+        return payloads;
+      }
     } catch {
       // Fall through to delimiter parser
     }
@@ -60,7 +93,9 @@ export function parseMockSuiteInput(rawText) {
 }
 
 export function validateSingleSample(content, format) {
-  const trimmed = (content || '').trim();
+  if (content === null || content === undefined) return { valid: false, error: 'Contenido vacío' };
+  const rawStr = typeof content === 'object' ? JSON.stringify(content, null, 2) : String(content);
+  const trimmed = rawStr.trim();
   if (!trimmed) return { valid: false, error: 'Contenido vacío' };
 
   if (format === 'json') {
@@ -88,12 +123,15 @@ export function validateSingleSample(content, format) {
 /**
  * Extracts common business keys (customerId, orderId, invoiceNumber, etc.) from JSON or XML string
  */
-function extractBusinessKeys(content, format) {
+function extractBusinessKeys(content, format, customKeys = []) {
   const keys = {};
-  const candidateNames = ['customerid', 'orderid', 'invoicenumber', 'partnerid', 'docnum', 'kunnr'];
+  const baseCandidates = ['customerid', 'orderid', 'invoicenumber', 'partnerid', 'docnum', 'kunnr'];
+  const extraCandidates = (customKeys || []).map((k) => k.toLowerCase().replace(/[_-]/g, ''));
+  const candidateNames = Array.from(new Set([...baseCandidates, ...extraCandidates]));
+
   if (format === 'json') {
     try {
-      const obj = JSON.parse(content);
+      const obj = typeof content === 'string' ? JSON.parse(content) : content;
       const visit = (node) => {
         if (!node || typeof node !== 'object') return;
         for (const [k, v] of Object.entries(node)) {
@@ -119,11 +157,16 @@ function extractBusinessKeys(content, format) {
   return keys;
 }
 
-export function validateAndBuildMockSuiteZip(payloads, { correlateData = true } = {}) {
+export function validateAndBuildMockSuiteZip(payloads, { correlateData = true, correlationKeys = [] } = {}) {
   const errors = [];
   const warnings = [];
   const zipEntries = [];
   let totalExamples = 0;
+
+  const effectiveKeys = [
+    ...(correlationKeys || []),
+    ...(Array.isArray(payloads.correlationKeys) ? payloads.correlationKeys : [])
+  ];
 
   payloads.forEach((p, pIdx) => {
     const folderName = `${String(pIdx + 1).padStart(2, '0')}_${p.name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
@@ -151,9 +194,17 @@ export function validateAndBuildMockSuiteZip(payloads, { correlateData = true } 
   if (correlateData && payloads.length > 1) {
     const minLen = Math.min(...payloads.map((p) => (p.examples || []).length));
     for (let i = 0; i < minLen; i++) {
-      const baseKeys = extractBusinessKeys(payloads[0].examples[i].content, payloads[0].examples[i].format || payloads[0].format);
+      const baseKeys = extractBusinessKeys(
+        payloads[0].examples[i].content,
+        payloads[0].examples[i].format || payloads[0].format,
+        effectiveKeys
+      );
       for (let pIdx = 1; pIdx < payloads.length; pIdx++) {
-        const otherKeys = extractBusinessKeys(payloads[pIdx].examples[i].content, payloads[pIdx].examples[i].format || payloads[pIdx].format);
+        const otherKeys = extractBusinessKeys(
+          payloads[pIdx].examples[i].content,
+          payloads[pIdx].examples[i].format || payloads[pIdx].format,
+          effectiveKeys
+        );
         for (const sharedKey of Object.keys(baseKeys)) {
           if (otherKeys[sharedKey] && otherKeys[sharedKey] !== baseKeys[sharedKey]) {
             warnings.push(
@@ -244,7 +295,7 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso: node pack-mock-suite.mjs <batch.txt | suite.json | --demo> [--out suite.zip] [--extract-dir <dir>] [--json]');
+    console.log('Uso: node pack-mock-suite.mjs <batch.txt | suite.json | --demo> [--out suite.zip] [--extract-dir <dir>] [--correlateKey <key1,key2>] [--json]');
     process.exit(0);
   }
 
@@ -253,6 +304,11 @@ if (isMain) {
   const outPath = outIdx !== -1 ? args[outIdx + 1] : null;
   const extIdx = args.indexOf('--extract-dir');
   const extractDir = extIdx !== -1 ? args[extIdx + 1] : null;
+  const corrIdx = args.indexOf('--correlateKey');
+  const cliCorrelateKeys =
+    corrIdx !== -1 && args[corrIdx + 1]
+      ? args[corrIdx + 1].split(',').map((k) => k.trim()).filter(Boolean)
+      : [];
 
   let rawText = '';
   if (args[0] === '--demo') {
@@ -267,7 +323,10 @@ if (isMain) {
   }
 
   const payloads = parseMockSuiteInput(rawText);
-  const result = validateAndBuildMockSuiteZip(payloads, { correlateData: true });
+  const result = validateAndBuildMockSuiteZip(payloads, {
+    correlateData: true,
+    correlationKeys: cliCorrelateKeys
+  });
 
   if (outPath) {
     fs.writeFileSync(path.resolve(outPath), result.zipBuffer);
