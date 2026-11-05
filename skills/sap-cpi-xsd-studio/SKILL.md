@@ -2,8 +2,8 @@
 name: sap-cpi-xsd-studio
 description: >-
   Use this skill when the user wants to infer, generate, or validate W3C XSD 1.0 schemas
-  from single or multiple JSON/XML sample payloads for SAP Cloud Integration (CPI) Message
-  Mapping and XML Validator 2.0.
+  or SAP CPI Graphical Message Mappings (.mmap / <xiObj>) from single or multiple JSON/XML
+  sample payloads for SAP Cloud Integration (CPI) Message Mapping and XML Validator 2.0.
 ---
 
 # SAP CPI XSD Schema Studio
@@ -31,7 +31,7 @@ Before inferring or writing the W3C XSD 1.0 schema, check if key schema constrai
 You can generate a deterministic XSD 1.0 directly from JSON sample files (or refine it with custom constraints) using `validate-xsd.mjs`:
 
 ```bash
-node ./scripts/validate-xsd.mjs --infer <sample1.json> [<sample2.json> ...] --root SalesOrder --ns "http://sap.com/xi/SD/SalesOrder" --prefix ns0 --out SalesOrder.xsd
+node ./scripts/validate-xsd.mjs --infer <sample1.json> [<sample2.json> ...] --root SalesOrder --ns "http://sap.com/xi/SD/SalesOrder" --prefix ns0 [--tolerant] --out SalesOrder.xsd
 ```
 
 Ensure the schema obeys all SAP CPI Type System rules in [xsd-guidelines.md](./references/xsd-guidelines.md):
@@ -60,6 +60,27 @@ node ./scripts/validate-xsd.mjs <path-to-schema.xsd> [--json]
 * Inference & validator script: [validate-xsd.mjs](./scripts/validate-xsd.mjs)
 * Reference guidelines: [xsd-guidelines.md](./references/xsd-guidelines.md)
 * **Verification Gate**: Must pass with `valid: true` and 0 errors before delivering the `.xsd` schema.
+
+### Step 4: Generate or Validate Graphical Message Mappings (`.mmap` / `<xiObj>`) (When Requested)
+If the user requests a standalone SAP CPI **Graphical Message Mapping (`.mmap`)** linking a Source `.xsd` and a Target `.xsd` (located in `src/main/resources/xsd`), generate and validate it with `build-mmap.mjs`:
+
+```bash
+# Generar un archivo .mmap (sintetiza automáticamente los bricks Constant de contenedores padre anidados)
+node ./scripts/build-mmap.mjs \
+  --source-xsd SourceSchema.xsd:SourceRoot \
+  --target-xsd TargetSchema.xsd:TargetRoot \
+  --map "/TargetRoot/id=/SourceRoot/orderId" \
+  --const "/TargetRoot/source=SAP-CPI" \
+  --header "/TargetRoot/request/method=CamelHttpMethod" \
+  --property "/TargetRoot/request/correlationId=SAP_MplCorrelationId" \
+  --out MM_Source_To_Target.mmap
+
+# Validar un archivo .mmap existente
+node ./scripts/build-mmap.mjs --validate MM_Source_To_Target.mmap
+```
+
+* Graphical Message Mapping script: [build-mmap.mjs](./scripts/build-mmap.mjs)
+* If the user wants to inject the generated `.xsd` or `.mmap` directly into an existing iFlow `.zip`, use `clone-iflow-bundle.mjs --source <iFlow.zip> --add-resource <Schema.xsd> --add-resource <Mapping.mmap> --out <iFlow_Updated.zip>`.
 
 
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)

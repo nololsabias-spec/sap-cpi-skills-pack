@@ -15,6 +15,16 @@ import path from 'node:path';
 import { readZipEntries, createZipBuffer } from '../../../shared/zip-utils.mjs';
 import { lintGroovyScript } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
 import { buildDemoBundleZipBuffer, inspectBundle } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
+import { validateXsdForSapCpi } from '../../sap-cpi-xsd-studio/scripts/validate-xsd.mjs';
+import { validateMmapForSapCpi } from '../../sap-cpi-xsd-studio/scripts/build-mmap.mjs';
+
+export function resolveCpiResourceFolder(fileName) {
+  const lower = String(fileName || '').toLowerCase();
+  if (lower.endsWith('.xsd')) return 'src/main/resources/xsd';
+  if (lower.endsWith('.mmap') || lower.endsWith('.xsl') || lower.endsWith('.xslt')) return 'src/main/resources/mapping';
+  if (lower.endsWith('.wsdl')) return 'src/main/resources/wsdl';
+  return 'src/main/resources/script';
+}
 
 function stripRootFolderPrefix(entryPath, rootPrefix) {
   if (rootPrefix && entryPath.startsWith(rootPrefix)) {
@@ -41,17 +51,14 @@ function sortBundleEntries(entries) {
  * strips any accidental top-level parent directory wrapper so META-INF/MANIFEST.MF
  * sits strictly at the root of the ZIP archive, and applies deterministic replacements.
  */
-export function cloneIflowBundleZip(sourceZipPathOrBuf, options) {
+export function cloneIflowBundleZip(sourceZipPathOrBuf, options = {}) {
   const {
     sourceName: explicitOldName,
-    targetName,
+    targetName: explicitTargetName,
     replacements = [], // Array of { from: string, to: string }
-    xpathReplacements = [] // Array of { from: string, to: string }
+    xpathReplacements = [], // Array of { from: string, to: string }
+    additionalResources = [] // Array of { fileName: string, content: string | Buffer, folder?: string }
   } = options;
-
-  if (!targetName) {
-    throw new Error('Debe especificar `targetName` para clonar el bundle del iFlow.');
-  }
 
   const entries = readZipEntries(sourceZipPathOrBuf);
   const rootPrefix = detectRootFolderPrefix(entries);
@@ -64,11 +71,18 @@ export function cloneIflowBundleZip(sourceZipPathOrBuf, options) {
     (symbolicMatch ? symbolicMatch[1].trim() : null) ||
     (iflwEntry ? path.basename(iflwEntry.path, '.iflw') : path.basename(String(sourceZipPathOrBuf), '.zip'));
 
-  const outEntries = entries.map((entry) => {
+  const targetName = explicitTargetName || oldName;
+  if (!targetName) {
+    throw new Error('Debe especificar `targetName` para clonar el bundle del iFlow.');
+  }
+
+  const entryMap = new Map();
+
+  for (const entry of entries) {
     let newPath = stripRootFolderPrefix(entry.path, rootPrefix);
     let content = entry.data;
 
-    if (newPath.endsWith(`${oldName}.iflw`)) {
+    if (newPath.endsWith(`${oldName}.iflw`) && targetName !== oldName) {
       newPath = newPath.replace(`${oldName}.iflw`, `${targetName}.iflw`);
     }
 
@@ -80,7 +94,9 @@ export function cloneIflowBundleZip(sourceZipPathOrBuf, options) {
       newPath.endsWith('.iflw')
     ) {
       let text = entry.text;
-      text = text.split(oldName).join(targetName);
+      if (targetName !== oldName) {
+        text = text.split(oldName).join(targetName);
+      }
 
       if (newPath.endsWith('.iflw')) {
         for (const rep of replacements) {
@@ -97,10 +113,35 @@ export function cloneIflowBundleZip(sourceZipPathOrBuf, options) {
       content = Buffer.from(text, 'utf8');
     }
 
-    return { path: newPath, content };
-  });
+    entryMap.set(newPath, { path: newPath, content });
+  }
 
-  return createZipBuffer(sortBundleEntries(outEntries));
+  // Inject or update loose resources (.xsd, .mmap, .xsl/.xslt, .wsdl, .groovy)
+  for (const res of additionalResources) {
+    const baseName = path.basename(res.fileName);
+    const folder = res.folder || resolveCpiResourceFolder(baseName);
+    const destPath = `${folder.replace(/\/+$/, '')}/${baseName}`;
+    const textContent = Buffer.isBuffer(res.content) ? res.content.toString('utf8') : String(res.content ?? '');
+
+    if (baseName.toLowerCase().endsWith('.xsd')) {
+      const v = validateXsdForSapCpi(textContent);
+      if (!v.valid) {
+        throw new Error(`El recurso XSD ${baseName} contiene errores: ${v.errors.join('; ')}`);
+      }
+    } else if (baseName.toLowerCase().endsWith('.mmap')) {
+      const v = validateMmapForSapCpi(textContent);
+      if (!v.valid) {
+        throw new Error(`El recurso MMAP ${baseName} contiene errores: ${v.errors.join('; ')}`);
+      }
+    }
+
+    entryMap.set(destPath, {
+      path: destPath,
+      content: Buffer.isBuffer(res.content) ? res.content : Buffer.from(textContent, 'utf8')
+    });
+  }
+
+  return createZipBuffer(sortBundleEntries(Array.from(entryMap.values())));
 }
 
 /**
@@ -213,16 +254,17 @@ if (isMain) {
       const nameIdx = args.indexOf('--target-name');
       const outIdx = args.indexOf('--out');
 
-      if (srcIdx === -1 || nameIdx === -1 || outIdx === -1) {
-        throw new Error('Faltan argumentos obligatorios: --source, --target-name y --out.');
+      if (srcIdx === -1 || outIdx === -1) {
+        throw new Error('Faltan argumentos obligatorios: --source y --out.');
       }
 
       const sourcePath = path.resolve(args[srcIdx + 1]);
-      const targetName = args[nameIdx + 1];
+      const targetName = nameIdx !== -1 && args[nameIdx + 1] ? args[nameIdx + 1] : undefined;
       const outPath = path.resolve(args[outIdx + 1]);
 
       const replacements = [];
       const xpathReplacements = [];
+      const additionalResources = [];
       for (let i = 0; i < args.length; i++) {
         if (args[i] === '--replace' && args[i + 1]) {
           const eq = args[i + 1].indexOf('=');
@@ -234,15 +276,29 @@ if (isMain) {
           if (eq !== -1) {
             xpathReplacements.push({ from: args[i + 1].slice(0, eq), to: args[i + 1].slice(eq + 1) });
           }
+        } else if (args[i] === '--add-resource' && args[i + 1]) {
+          const resFile = path.resolve(args[i + 1]);
+          additionalResources.push({
+            fileName: path.basename(resFile),
+            content: fs.readFileSync(resFile)
+          });
         }
       }
 
-      const zipBuf = cloneIflowBundleZip(sourcePath, { targetName, replacements, xpathReplacements });
+      const zipBuf = cloneIflowBundleZip(sourcePath, {
+        targetName,
+        replacements,
+        xpathReplacements,
+        additionalResources
+      });
       fs.mkdirSync(path.dirname(outPath), { recursive: true });
       fs.writeFileSync(outPath, zipBuf);
 
-      console.log(`=== IFLOW BUNDLE CLONADO Y ADAPTADO ===`);
-      console.log(`Origen: ${path.basename(sourcePath)} -> Nuevo Bundle: ${targetName}`);
+      console.log(`=== IFLOW BUNDLE CLONADO / ACTUALIZADO ===`);
+      console.log(`Origen: ${path.basename(sourcePath)}${targetName ? ` -> Nuevo Bundle: ${targetName}` : ''}`);
+      if (additionalResources.length > 0) {
+        console.log(`Recursos inyectados (${additionalResources.length}): ${additionalResources.map((r) => r.fileName).join(', ')}`);
+      }
       console.log(`Archivo generado: ${outPath} (${zipBuf.length} bytes)`);
     }
   } catch (err) {

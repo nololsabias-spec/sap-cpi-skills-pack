@@ -52,12 +52,21 @@ const CHECKS = [
     }
   },
   {
-    skill: 'sap-cpi-xsd-studio',
+    skill: 'sap-cpi-xsd-studio (XSD 1.0)',
     script: 'skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs',
     args: ['--demo', '--json'],
     verify: (out) => {
       const data = JSON.parse(out);
       return data.valid === true && data.nodeCount === 16;
+    }
+  },
+  {
+    skill: 'sap-cpi-xsd-studio (Message Mapping .mmap)',
+    script: 'skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs',
+    args: ['--demo', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.valid === true && data.brickCount === 5;
     }
   },
   {

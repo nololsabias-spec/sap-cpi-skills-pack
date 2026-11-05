@@ -136,9 +136,12 @@ Ejecuta `clone-iflow-bundle.mjs` para clonar cada iFlow de referencia (actualiza
 
 ```bash
 # 1. Clonar y adaptar un iFlow .zip manteniendo intactos sus diagramas BPMN2 y .prop
-node ./scripts/clone-iflow-bundle.mjs --source <Referencia_iFlow.zip> --target-name <Nuevo_iFlow> --out <Nuevo_iFlow.zip> --replace <ScriptViejo.groovy=ScriptNuevo.groovy> --xpath <//nodoViejo=//nodoNuevo>
+node ./scripts/clone-iflow-bundle.mjs --source <Referencia_iFlow.zip> --target-name <Nuevo_iFlow> --out <Nuevo_iFlow.zip> --replace <ScriptViejo.groovy=ScriptNuevo.groovy> --xpath <//nodoViejo=//nodoNuevo> [--add-resource <Esquema.xsd>] [--add-resource <Mapeo.mmap>]
 
-# 2. Actualizar la Script Collection .zip con los nuevos scripts validados
+# 2. Inyectar o actualizar archivos sueltos (.xsd, .mmap, .xsl, .wsdl, .groovy) en un iFlow .zip existente (sin renombrarlo)
+node ./scripts/clone-iflow-bundle.mjs --source <iFlow_Existente.zip> --add-resource <NuevoEsquema.xsd> --add-resource <NuevoMapeo.mmap> --out <iFlow_Actualizado.zip>
+
+# 3. Actualizar la Script Collection .zip con los nuevos scripts validados
 node ./scripts/clone-iflow-bundle.mjs --update-sc <SC_Origen.zip> --scripts-dir <carpeta-scripts> --out <SC_Actualizada.zip> --strict
 ```
 

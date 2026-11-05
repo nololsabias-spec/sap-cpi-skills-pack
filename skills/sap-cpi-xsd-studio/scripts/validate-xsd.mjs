@@ -48,12 +48,12 @@ function mergeSampleObjects(objects) {
   return { fieldMeta, totalObjects };
 }
 
-function renderSequenceFields(objects, indent = '        ') {
+function renderSequenceFields(objects, indent = '        ', tolerantEnvelope = false) {
   const { fieldMeta, totalObjects } = mergeSampleObjects(objects);
   const lines = [];
 
   for (const [key, meta] of fieldMeta.entries()) {
-    const minOccurs = meta.count < totalObjects ? '0' : '1';
+    const minOccurs = tolerantEnvelope || meta.count < totalObjects ? '0' : '1';
     if (meta.isArray) {
       const arrayItems = meta.values.flat().filter((v) => v !== null && v !== undefined);
       const firstItem = arrayItems[0];
@@ -61,7 +61,7 @@ function renderSequenceFields(objects, indent = '        ') {
         lines.push(`${indent}<xsd:element name="${key}" minOccurs="0" maxOccurs="unbounded">`);
         lines.push(`${indent}    <xsd:complexType>`);
         lines.push(`${indent}        <xsd:sequence>`);
-        lines.push(...renderSequenceFields(arrayItems, indent + '            '));
+        lines.push(...renderSequenceFields(arrayItems, indent + '            ', tolerantEnvelope));
         lines.push(`${indent}        </xsd:sequence>`);
         lines.push(`${indent}    </xsd:complexType>`);
         lines.push(`${indent}</xsd:element>`);
@@ -73,7 +73,7 @@ function renderSequenceFields(objects, indent = '        ') {
       lines.push(`${indent}<xsd:element name="${key}" minOccurs="${minOccurs}" maxOccurs="1">`);
       lines.push(`${indent}    <xsd:complexType>`);
       lines.push(`${indent}        <xsd:sequence>`);
-      lines.push(...renderSequenceFields(meta.values, indent + '            '));
+      lines.push(...renderSequenceFields(meta.values, indent + '            ', tolerantEnvelope));
       lines.push(`${indent}        </xsd:sequence>`);
       lines.push(`${indent}    </xsd:complexType>`);
       lines.push(`${indent}</xsd:element>`);
@@ -85,7 +85,7 @@ function renderSequenceFields(objects, indent = '        ') {
       } else if (types.has('xsd:decimal') && types.has('xsd:integer') && types.size === 2) {
         resolvedType = 'xsd:decimal';
       }
-      const nillableAttr = meta.hasNull ? ' nillable="true"' : '';
+      const nillableAttr = tolerantEnvelope || meta.hasNull ? ' nillable="true"' : '';
       lines.push(`${indent}<xsd:element name="${key}" type="${resolvedType}" minOccurs="${minOccurs}" maxOccurs="1"${nillableAttr}/>`);
     }
   }
@@ -98,14 +98,15 @@ export function inferXsdFromJsonSamples({
   rootElement = 'Root',
   targetNamespace = '',
   namespacePrefix = 'ns0',
-  elementFormDefault = 'qualified'
+  elementFormDefault = 'qualified',
+  tolerantEnvelope = false
 }) {
   const parsedObjects = samples.map((s) => (typeof s === 'string' ? JSON.parse(s) : s));
   const nsAttrs = targetNamespace
     ? `\n    targetNamespace="${targetNamespace}"\n    xmlns:${namespacePrefix || 'ns0'}="${targetNamespace}"`
     : '';
 
-  const sequenceLines = renderSequenceFields(parsedObjects, '            ');
+  const sequenceLines = renderSequenceFields(parsedObjects, '            ', tolerantEnvelope);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"${nsAttrs}
@@ -228,9 +229,10 @@ if (isMain) {
     const targetNamespace = getOpt('--ns', 'http://sap.com/xi/SD/SalesOrder');
     const namespacePrefix = getOpt('--prefix', 'ns0');
     const outPath = getOpt('--out', null);
+    const tolerantEnvelope = args.includes('--tolerant');
 
     const samples = sampleFiles.map((f) => fs.readFileSync(path.resolve(f), 'utf8'));
-    const xsd = inferXsdFromJsonSamples({ samples, rootElement, targetNamespace, namespacePrefix });
+    const xsd = inferXsdFromJsonSamples({ samples, rootElement, targetNamespace, namespacePrefix, tolerantEnvelope });
     const validation = validateXsdForSapCpi(xsd);
 
     if (outPath) {

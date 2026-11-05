@@ -13,6 +13,8 @@ import path from 'node:path';
 import { createZipBuffer } from '../../../shared/zip-utils.mjs';
 import { analyzeIflwLocally } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
 import { lintGroovyScript } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
+import { validateXsdForSapCpi } from '../../sap-cpi-xsd-studio/scripts/validate-xsd.mjs';
+import { validateMmapForSapCpi } from '../../sap-cpi-xsd-studio/scripts/build-mmap.mjs';
 
 export const IFLOW_IMPORT_PACKAGE = [
   'com.sap.esb.application.services.cxf.interceptor', 'com.sap.esb.security',
@@ -196,6 +198,37 @@ export function validateAndBuildCpiBundles(spec) {
     { path: 'src/main/resources/parameters.propdef', content: buildParametersPropdef(spec.parameters || {}) },
     { path: `src/main/resources/scenarioflows/integrationflow/${safeIflowName}.iflw`, content: iflwXml }
   ];
+
+  // Optional embedded resources in the iFlow (.xsd, .mmap, .xsl/.xslt, .wsdl, embedded .groovy)
+  for (const xsd of spec.xsdSchemas || []) {
+    const fName = path.basename(xsd.fileName || 'Schema.xsd');
+    const v = validateXsdForSapCpi(xsd.content || '');
+    v.errors.forEach((e) => errors.push(`[XSD: ${fName}] ${e}`));
+    v.warnings.forEach((w) => warnings.push(`[XSD: ${fName}] ${w}`));
+    iflowFiles.push({ path: `src/main/resources/xsd/${fName}`, content: xsd.content || '' });
+  }
+  for (const mmap of spec.messageMappings || []) {
+    const fName = path.basename(mmap.fileName || 'Mapping.mmap');
+    const v = validateMmapForSapCpi(mmap.content || '');
+    v.errors.forEach((e) => errors.push(`[MMAP: ${fName}] ${e}`));
+    v.warnings.forEach((w) => warnings.push(`[MMAP: ${fName}] ${w}`));
+    iflowFiles.push({ path: `src/main/resources/mapping/${fName}`, content: mmap.content || '' });
+  }
+  for (const xslt of spec.xsltMappings || []) {
+    const fName = path.basename(xslt.fileName || 'Transform.xsl');
+    iflowFiles.push({ path: `src/main/resources/mapping/${fName}`, content: xslt.content || '' });
+  }
+  for (const wsdl of spec.wsdlFiles || []) {
+    const fName = path.basename(wsdl.fileName || 'Service.wsdl');
+    iflowFiles.push({ path: `src/main/resources/wsdl/${fName}`, content: wsdl.content || '' });
+  }
+  for (const embScript of spec.embeddedScripts || []) {
+    const fName = path.basename(embScript.fileName || 'EmbeddedScript.groovy');
+    const audit = lintGroovyScript(embScript.content || '', fName);
+    scriptAuditResults.push(audit);
+    iflowFiles.push({ path: `src/main/resources/script/${fName}`, content: embScript.content || '' });
+  }
+
   const iflowZipBuffer = createZipBuffer(iflowFiles);
   const iflowFileName = `${safeIflowName}.zip`;
 
