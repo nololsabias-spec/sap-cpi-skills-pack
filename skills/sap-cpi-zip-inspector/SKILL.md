@@ -78,7 +78,7 @@ If `inspect-iflow-zip.mjs` detects Groovy scripts in `src/main/resources/script/
          - `timeouts`: Añadir `httpRequestTimeout = 60000` ms en llamadas síncronas `ExternalCall` sin timeout.
          - `streaming`: Activar `<key>streaming</key><value>true</value>` en pasos `Splitter`.
          - `csrf`: Activar `<key>xsrfProtection</key><value>1</value>` en canales HTTP modificadores.
-         - Refactorización de scripts `.groovy` incluidos (si el paquete contiene scripts con hallazgos).
+         - `groovy`: Corregir automáticamente errores deterministas de Groovy 2.4 en scripts `.groovy` incluidos (`groovy.xml.XmlSlurper` -> `groovy.util.XmlSlurper`, `Reader.getText("UTF-8")` -> `Reader.getText()` y `JsonSlurper` -> `JsonSlurperClassic`).
        - Una vez que el usuario confirme qué cambios desea aplicar, ejecuta `inspect-iflow-zip.mjs <paquete.zip> --remediate <cambios_elegidos> --out <Paquete_Corregido.zip>` (sin tocar nunca los valores privados de `.prop`) y entrégale el `.zip` resultante validado.
 
 

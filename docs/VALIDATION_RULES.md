@@ -46,7 +46,8 @@ Todo script parte de **100 puntos** y se restan puntos según la severidad de ca
 6. **Seguridad XML Anti-XXE (`SEC-XXE`):** Todo uso de `XmlSlurper` o `XmlParser` debe deshabilitar DTDs externos mediante `setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)`. El analizador de comentarios preserva literales URL (`http://`, `https://`) para evitar falsos positivos al verificar features SAX/DOM.
 8. **Inmutabilidad y Seguridad de Hilos en `@Field` y `Binding` (`MUTABLE_FIELD_STATE` / `UNDECLARED_BINDING_VARIABLE`):** Si se emplea `@Field` (`groovy.transform.Field`) para constantes a nivel de script, debe declararse obligatoriamente con `final` (`@Field final`). Asimismo, toda variable dentro de `processData` debe declararse con `def` o tipo explícito (`String`, `Map`, etc.); asignar variables sin declararlas las inyecta en el `Binding` global compartido de la instancia `Script`, provocando condiciones de carrera entre hilos concurrentes.
 9. **Gestión de Zona Horaria (`TZ-DEFAULT`):** Prohibido usar `new Date()` o `LocalDateTime.now()` sin `ZoneId.of("UTC")` explícito.
-10. **Higiene del Message Processing Log (`MPL-UNCONDITIONAL`):** Todo `addAttachmentAsString` debe ejecutarse únicamente dentro de bloques `catch`, en scripts manejadores de `CamelExceptionCaught` / `SAP_MessageProcessingLogCustomStatus` o condicionado a `LogAttachments` / `SAP_MessageProcessingLogLevel` (`DEBUG` / `TRACE`).
+10. **Higiene del Message Processing Log (`MPL-UNCONDITIONAL`):** Todo `addAttachmentAsString` debe ejecutarse únicamente dentro de bloques `catch`, en scripts manejadores de `CamelExceptionCaught` / `SAP_MessageProcessingLogCustomStatus` o condicionado a `LogAttachments` / `ENABLE_PAYLOAD_LOGGING` / `SAP_MessageProcessingLogLevel` (`DEBUG` / `TRACE`).
+11. **Protección de Cabeceras Reservadas (`RESERVED_HEADER_MUTATION`):** Bloquea la sobrescritura de cabeceras internas de Apache Camel (`Camel*`) y de sistema (`SAP_*`), permitiendo explícitamente las cabeceras oficiales de monitoreo MPL de SAP CPI (`SAP_ApplicationID`, `SAP_Sender`, `SAP_Receiver`, `SAP_MessageType`, `SAP_MplCorrelationId`, `SAP_PregeneratedMplId`).
 
 ### 2.3. Reglas por Directiva Activa (`--directives`)
 - `jsonSlurper`: Exige `groovy.json.JsonSlurperClassic` en lugar de `JsonSlurper` (`LazyMap` no serializable en CPI).
@@ -82,12 +83,13 @@ Todo script parte de **100 puntos** y se restan puntos según la severidad de ca
 
 ---
 
-## 5. Reglas de Esquemas W3C XSD 1.0 (`validate-xsd.mjs`)
+## 5. Reglas de Esquemas W3C XSD 1.0 (`validate-xsd.mjs`) y Mapeos Gráficos `.mmap` (`build-mmap.mjs`)
 
 1. **Prohibición de `<xsd:all>`:** El motor gráfico de Message Mapping de SAP CPI presenta limitaciones severas con `<xsd:all>`; todos los elementos hijos complejos deben modelarse con `<xsd:sequence>`.
 2. **Prevención de *Namespace Prefix Conflict*:** Cuando el esquema define `targetNamespace`, exige declarar también el prefijo propio (`xmlns:tns="..."`) junto con `elementFormDefault="qualified"`.
 3. **Compatibilidad `nillable="true"` + `minOccurs="0"` (SAP Note 2624922):** Advierte cuando un elemento declara `nillable="true"` sin `minOccurs="0"`, ya que el *JSON to XML Converter* de SAP CPI puede omitir etiquetas nulas en lugar de emitir `xsi:nil="true"`.
 4. **Límite de Nodos:** Verifica que el esquema no supere los `20.000` nodos XML para evitar bloqueos de memoria en el editor de mapeos.
+5. **Estructura `<xiObj>` y Contenedores Padre en `.mmap` (`build-mmap.mjs`):** Verifica que todo archivo `.mmap` declare `<xiObj xmlns="urn:sap-com:xi">`, vincule los esquemas origen y destino en `src/main/resources/xsd` (`SOURCE_IFR_MESS` y `TARGET_IFR_MESS`), declare `<tr:XiTrafo xmlns:tr="urn:sap-com:xi:mapping:xitrafo">` e instancie un `<brick type="Dst">` contenedor (`Constant`) para cada nodo padre intermedio en rutas destino anidadas (`/Root/Padre/Hijo`).
 
 ---
 

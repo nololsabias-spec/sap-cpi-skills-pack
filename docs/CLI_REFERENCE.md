@@ -36,12 +36,12 @@ npm test
 Descomprime en memoria un paquete `.zip` de SAP CPI (`IntegrationFlow`, `ScriptCollection` o paquetes compuestos con `.zip` anidados), clasifica sus archivos internos (`.iflw`, `.groovy`, `.xslt`, `.mmap`, `.xsd`, `.prop`), redacta por defecto los valores de `.prop` (`[REDACTED]`), ejecuta la auditoría determinista sobre el modelo BPMN 2.0 (`.iflw`) y permite exportar un **informe ejecutivo en PDF** o generar un **nuevo `.zip` corregido** aplicando únicamente las remediaciones seleccionadas por el usuario.
 
 ```bash
-node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs <archivo.zip | archivo.iflw> [--pdf <informe.pdf>] [--remediate <manifest,https,timeouts,streaming,csrf|all> --out <Corregido.zip>] [--extract-dir <carpeta>] [--show-prop-values] [--json]
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs <archivo.zip | archivo.iflw> [--pdf <informe.pdf>] [--remediate <manifest,https,timeouts,streaming,csrf,groovy|all> --out <Corregido.zip>] [--extract-dir <carpeta>] [--show-prop-values] [--json]
 ```
 
 - `<archivo.zip>`: Ruta al paquete iFlow, Script Collection o paquete compuesto exportado de SAP CPI.
-- `--pdf <informe.pdf>`: Genera un archivo PDF nativo con el resumen ejecutivo, puntuación `0-100`, catálogo de recursos, tabla de hallazgos y cambios propuestos.
-- `--remediate <cambios> --out <Corregido.zip>`: Genera un nuevo paquete `.zip` aplicando únicamente los cambios confirmados por el usuario (`manifest`, `https`, `timeouts`, `streaming`, `csrf` o `all`).
+- `--pdf <informe.pdf>`: Genera un archivo PDF nativo con el resumen ejecutivo, puntuación `0-100`, catálogo de recursos, tabla de hallazgos (incluyendo auditoría de scripts `.groovy` incluidos) y cambios propuestos.
+- `--remediate <cambios> --out <Corregido.zip>`: Genera un nuevo paquete `.zip` aplicando únicamente los cambios confirmados por el usuario (`manifest`, `https`, `timeouts`, `streaming`, `csrf`, `groovy` o `all`). Si se combina con `--pdf`, genera el PDF sobre el paquete ya corregido.
 - `--extract-dir <carpeta>`: Extrae físicamente todos los recursos internos del `.zip` en la carpeta indicada.
 - `--show-prop-values`: Muestra los valores reales de los archivos `.prop` (por defecto se redactan como `[REDACTED]` por privacidad).
 - `--json`: Devuelve el inventario de archivos, hallazgos de auditoría y `availableRemediations` en formato JSON.
@@ -118,11 +118,11 @@ node skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs \
 Permiten inferir y validar esquemas W3C XSD 1.0 y generar/validar mapeos gráficos `.mmap` (`<xiObj>`) para SAP CPI Message Mapping.
 
 ```bash
-# Modo 1: Inferir desde muestras JSON y validar el XSD resultante (--tolerant añade minOccurs="0" nillable="true")
+# Modo 1: Inferir desde muestras JSON y validar el XSD resultante (--tolerant añade minOccurs="0" nillable="true", --no-ns omite targetNamespace)
 node skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs \
   --infer <muestra1.json> [muestra2.json ...] \
   [--root <NombreElementoRaiz>] \
-  [--ns <URI>] \
+  [--ns <URI> | --no-ns] \
   [--tolerant] \
   [--out <salida.xsd>] \
   [--json]
@@ -175,10 +175,10 @@ Estructura de `<suite-spec.json>`:
 ### 2.8. `build-cpi-package.mjs`, `clone-iflow-bundle.mjs` y `extract-for-docs.mjs` (`sap-cpi-architect`)
 
 #### Constructor de Paquetes OSGi (`build-cpi-package.mjs`)
-Genera `<IflowId>.zip`, `<ScriptCollectionId>.zip` y el paquete combinado `Paquete_<IflowId>.zip`.
+Genera `<IflowId>.zip`, `<ScriptCollectionId>.zip` y el paquete combinado `Paquete_<IflowId>.zip`. Soporta incluir tanto contenido en línea (`content` / `iflwXml`) como rutas a archivos ya generados en disco (`filePath` / `iflwPath`) para `groovyScripts`, `xsdSchemas`, `messageMappings`, `xsltMappings`, `wsdlFiles` y `embeddedScripts`.
 
 ```bash
-node skills/sap-cpi-architect/scripts/build-cpi-package.mjs <bundle-spec.json> --out-dir <carpeta-salida>
+node skills/sap-cpi-architect/scripts/build-cpi-package.mjs [--spec] <bundle-spec.json> --out-dir <carpeta-salida>
 ```
 
 #### Clonador y Adaptador de Bundles de Referencia (`clone-iflow-bundle.mjs`)

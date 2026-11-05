@@ -151,20 +151,28 @@ node skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs \
   --no-match "INV-26-ES,ABC-2026-ES"
 ```
 
-### 5.6. Inferencia Multi-Muestra y Validación XSD 1.0 (`sap-cpi-xsd-studio`)
+### 5.6. Inferencia XSD 1.0 y Mapeos Gráficos `.mmap` (`sap-cpi-xsd-studio`)
 
-Infiere esquemas W3C XSD 1.0 a partir de una o varias muestras JSON (marcando automáticamente como `minOccurs="0"` los campos que no aparecen en todas las muestras) y valida un XSD frente a las reglas del Message Mapping de SAP CPI:
+Infiere esquemas W3C XSD 1.0 a partir de una o varias muestras JSON (`--tolerant` para añadir `minOccurs="0" nillable="true"` y `--no-ns` para esquemas sin namespace), valida XSDs y genera/valida mapeos gráficos **`.mmap` (`<xiObj>`)** con síntesis automática de bricks contenedores padre:
 
 ```bash
 # Inferir un XSD combinando múltiples muestras JSON y validarlo
 node skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs \
   --infer ./muestra1.json ./muestra2.json \
   --root OrderRequest \
-  --namespace "http://sap.com/xi/Orders" \
+  --ns "http://sap.com/xi/Orders" \
+  [--tolerant] \
   --out ./OrderRequest.xsd
 
-# Validar un archivo XSD existente
-node skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs ./OrderRequest.xsd
+# Generar un Graphical Message Mapping (.mmap / <xiObj>)
+node skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs \
+  --source-xsd OrderRequest.xsd:OrderRequest \
+  --target-xsd S4Order.xsd:S4SalesOrder \
+  --map "/S4SalesOrder/Header/SalesOrderID=/OrderRequest/orderId" \
+  --const "/S4SalesOrder/Header/SourceSystem=SAP-CPI" \
+  --header "/S4SalesOrder/Header/HttpMethod=CamelHttpMethod" \
+  --property "/S4SalesOrder/Header/CorrelationId=SAP_MplCorrelationId" \
+  --out ./MM_Order_To_S4.mmap
 ```
 
 ### 5.7. Empaquetador de Baterías de Prueba E2E (`sap-cpi-mock-data-generator`)
@@ -185,14 +193,16 @@ node skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs --spec ./sui
   ```bash
   node skills/sap-cpi-architect/scripts/extract-for-docs.mjs ./Paquete_iFlow.zip --validate-doc ./Documentacion_Tecnica.md
   ```
-- **Modo 3 (`clone-iflow-bundle.mjs`):** Clona un iFlow `.zip` de referencia adaptando su identificador OSGi, scripts `.groovy` invocados y rutas XPath del Splitter (manteniendo intactos sus diagramas BPMN2 y archivos `.prop`), o inyecta nuevos scripts validados dentro de una `ScriptCollection.zip`:
+- **Modo 3 (`clone-iflow-bundle.mjs`):** Clona un iFlow `.zip` de referencia adaptando su identificador OSGi, scripts `.groovy` invocados y rutas XPath del Splitter (manteniendo intactos sus diagramas BPMN2 y archivos `.prop`), inyecta archivos sueltos (`.xsd`, `.mmap`, `.xsl`, `.groovy`, `.wsdl`) con `--add-resource`, o actualiza una `ScriptCollection.zip`:
   ```bash
   node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \
     --source ./Referencia_iFlow.zip \
     --target-name Nuevo_iFlow_v1 \
     --out ./dist/Nuevo_iFlow_v1.zip \
     --replace ScriptOrigen.groovy=ScriptNuevo.groovy \
-    --xpath //nodoOrigen=//nodoNuevo
+    --xpath //nodoOrigen=//nodoNuevo \
+    --add-resource ./OrderRequest.xsd \
+    --add-resource ./MM_Order_To_S4.mmap
   ```
 
 ---
