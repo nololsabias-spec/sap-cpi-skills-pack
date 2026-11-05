@@ -416,10 +416,11 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 11. Unconditional MPL Attachment creation (MEDIUM -5)
+  // Recognizes explicit debug flags, catch blocks, and dedicated Exception Subprocess / Error Handler scripts (CamelExceptionCaught / SAP_ErrorModelStepID / SAP_MessageProcessingLogCustomStatus)
   if (/\.addAttachmentAsString\s*\(/.test(cleanCode)) {
-    // Check if every occurrence of addAttachmentAsString is inside an `if (...)` or `catch (...)`
     const hasConditionOrCatch =
       /\bif\s*\([^)]*(?:LogAttachments|debug|trace|log)/i.test(cleanCode) ||
+      /\b(?:CamelExceptionCaught|SAP_ErrorModelStepID|SAP_MessageProcessingLogCustomStatus|ExceptionMessage)\b/.test(cleanCode) ||
       /\bcatch\s*\([^)]+\)\s*\{[\s\S]*?\.addAttachmentAsString/.test(cleanCode);
     if (!hasConditionOrCatch) {
       addFinding(
@@ -428,10 +429,40 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
         'UNCONDITIONAL_MPL_ATTACHMENT',
         'Creación incondicional de MPL Attachment en cada mensaje',
         'Adjuntar payloads en el Message Processing Log en cada ejecución degrada el almacenamiento y rendimiento del tenant.',
-        'Condiciona `addAttachmentAsString` a un bloque `catch` o a `if (message.getProperty("LogAttachments") == "Yes")`. Para IDs de negocio usa `addCustomHeaderProperty`.',
+        'Condiciona `addAttachmentAsString` a un bloque `catch`, a un manejador de `CamelExceptionCaught` o a `if (message.getProperty("LogAttachments") == "Yes")`. Para IDs de negocio usa `addCustomHeaderProperty`.',
         findLineNumber(/\.addAttachmentAsString\s*\(/)
       );
     }
+  }
+
+  // 11b. Undeclared variables leaking into Script Binding (MEDIUM -5)
+  const declaredVars = new Set(['message', 'messageLogFactory', 'binding', 'this', 'it']);
+  const declRegex = /\b(?:def|final|String|int|long|boolean|double|float|BigDecimal|Map|List|Set|Object|Reader|BufferedReader|StringReader|StringWriter|InputStream|Instant|LocalDateTime|ZonedDateTime|ZoneId|DateTimeFormatter|XmlSlurper|MarkupBuilder|StreamingMarkupBuilder|JsonSlurperClassic|JsonBuilder|DataStoreService|DataBean|DataConfig|UUID|Long|Integer|Boolean)\s+([a-zA-Z_][a-zA-Z0-9_]*)\b/g;
+  let dm;
+  while ((dm = declRegex.exec(cleanCode)) !== null) {
+    declaredVars.add(dm[1]);
+  }
+  const undeclaredVars = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*[^=>]/);
+    if (m) {
+      const varName = m[1];
+      if (!declaredVars.has(varName)) {
+        undeclaredVars.push({ varName, lineNo: i + 1 });
+        declaredVars.add(varName);
+      }
+    }
+  }
+  if (undeclaredVars.length > 0) {
+    addFinding(
+      'MEDIUM',
+      'Rendimiento y Heap Memory',
+      'UNDECLARED_BINDING_VARIABLE',
+      `Variable(s) sin declarar (${undeclaredVars.map((u) => u.varName).join(', ')}) almacenadas en el Binding global`,
+      'En Groovy, asignar una variable sin `def` ni tipo explícito la inyecta en el `Binding` compartido de la instancia `Script`, causando retención de memoria y condiciones de carrera entre hilos concurrentes.',
+      `Declara explícitamente el ámbito local con \`def ${undeclaredVars[0].varName} = ...\` o \`String ${undeclaredVars[0].varName} = ...\`.`,
+      undeclaredVars[0].lineNo
+    );
   }
 
   // 12. Static MessageLogFactory call (MEDIUM -5)

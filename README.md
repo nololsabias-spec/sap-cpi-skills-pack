@@ -102,6 +102,8 @@ Analiza un paquete `.zip` exportado de SAP CPI (`IntegrationFlow`, `ScriptCollec
 
 ```bash
 node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --pdf ./Informe_Auditoria.pdf
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --remediate manifest,https,timeouts --out ./Paquete_Corregido.zip
 node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --json
 node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.zip --extract-dir ./inspeccion
 ```
@@ -203,3 +205,17 @@ Para profundizar en la arquitectura, reglas de validación y parámetros de cada
 - [**Referencia de Línea de Comandos (`docs/CLI_REFERENCE.md`)**](./docs/CLI_REFERENCE.md): Sintaxis detallada, opciones, esquemas JSON de entrada y códigos de retorno de todos los scripts.
 - [**Reglas de Validación Determinista (`docs/VALIDATION_RULES.md`)**](./docs/VALIDATION_RULES.md): Catálogo completo de reglas BPMN 2.0, Groovy, XSLT, Regex, XSD y OSGi aplicadas por los validadores.
 - [**Guía de Flujos de Trabajo (`docs/WORKFLOWS_GUIDE.md`)**](./docs/WORKFLOWS_GUIDE.md): Ejemplos prácticos de extremo a extremo para desarrollo, auditoría y empaquetado en SAP CPI.
+- [**Base de Conocimiento y Lecciones Aprendidas (`docs/LESSONS_LEARNED.md`)**](./docs/LESSONS_LEARNED.md): Registro histórico anonimizado de errores reales en SAP CPI y su codificación en los motores CLI.
+
+---
+
+## 7. Harness de Aprendizaje Continuo (`AGENTS.md` / `rules/`)
+
+El paquete incluye un **Harness de Auto-Mejora Continua** ([`AGENTS.md`](./AGENTS.md), [`CLAUDE.md`](./CLAUDE.md) y [`rules/sap-cpi-continuous-learning.md`](./rules/sap-cpi-continuous-learning.md)) que `setup-skills.mjs` instala automáticamente en `.agents/rules/` y `.claude/rules/`.
+
+Cada vez que el usuario detecta un fallo al importar o ejecutar un artefacto en SAP CPI, corrige un resultado o comparte un paquete `.zip` de referencia, el agente:
+1. Resuelve el problema inmediato en el artefacto del usuario.
+2. **Anonimiza y abstrae** la regla técnica genérica (prohibiendo guardar nombres de proyectos privados, clientes, endpoints o valores de `.prop`).
+3. **Codifica la validación o remediación** en el script CLI correspondiente (`skills/*/scripts/*.mjs`).
+4. **Actualiza las `SKILL.md`**, [`docs/VALIDATION_RULES.md`](./docs/VALIDATION_RULES.md) y [`docs/LESSONS_LEARNED.md`](./docs/LESSONS_LEARNED.md).
+5. Ejecuta `node verify-all.mjs` y `node setup-skills.mjs` para propagar la mejora.

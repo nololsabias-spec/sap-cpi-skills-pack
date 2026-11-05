@@ -12,6 +12,11 @@
         └── resources/
             ├── parameters.prop
             ├── parameters.propdef
+            ├── mapping/
+            │   ├── *.xslt
+            │   └── *.mmap
+            ├── xsd/
+            │   └── *.xsd
             └── scenarioflows/
                 └── integrationflow/
                     └── <IflowName>.iflw
@@ -21,9 +26,9 @@
 - `SAP-BundleType: IntegrationFlow`
 - `SAP-NodeType: IFLMAP`
 - `SAP-RuntimeProfile: iflmap`
-- `Bundle-SymbolicName: <IflowName>; singleton:=true`
-- **Vinculación con Script Collection**:
-  `Require-Capability: scriptcollection.<ScriptCollectionName>;resolution:=optional;bundleType:String="ScriptCollection";source:String="reference"`
+- `Bundle-SymbolicName: <IflowName>` (o `<IflowName>; singleton:=true`)
+- **Vinculación con una o varias Script Collections** (separadas por coma si el iFlow consume scripts de múltiples colecciones, p. ej. una colección compartida y una específica):
+  `Require-Capability: scriptcollection.<SharedSC>;resolution:=optional;bundleType:String="ScriptCollection";source:String="reference",scriptcollection.<DomainSC>;resolution:=optional;bundleType:String="ScriptCollection";source:String="reference"`
 
 ---
 

@@ -51,3 +51,12 @@ node ./scripts/pack-mock-suite.mjs <input-batch.txt-or-suite.json> [--out cpi_mo
 * Validator & packager script: [pack-mock-suite.mjs](./scripts/pack-mock-suite.mjs)
 * Correlation reference: [correlation-rules.md](./references/correlation-rules.md)
 * **Verification Gate**: Every generated JSON/XML sample must pass syntax validation (`valid: true`), correlation keys must match across contracts, and the `.zip` archive (with `README_SUITE.txt`) is written to disk.
+
+
+## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
+
+Siempre que el usuario reporte un error o mejora en la generación de payloads de prueba o correlaciones E2E en SAP CPI, tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:
+1. **Anonimizar (Zero Data Leakage)**: Extraer únicamente el patrón estructural genérico, sin guardar jamás datos reales de proyectos privados o clientes.
+2. **Codificar en el Script CLI**: Actualizar `./scripts/pack-mock-suite.mjs` / `./scripts/validate-mock-suite.mjs` para cubrir el nuevo caso.
+3. **Actualizar Documentación y Lecciones**: Documentar la mejora en esta `SKILL.md`, en `docs/VALIDATION_RULES.md` y en `docs/LESSONS_LEARNED.md`.
+4. **Verificar y Sincronizar**: Ejecutar `node verify-all.mjs` y `node setup-skills.mjs` para propagar el aprendizaje a `.agents/` y `.claude/`.

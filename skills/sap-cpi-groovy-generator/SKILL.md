@@ -57,8 +57,9 @@ Write the Groovy script adhering to these mandatory SAP Help Portal rules:
    - When a script aggregates payloads after a `Parallel Multicast` + `Gather` step, deduplicate records in memory using a keyed `Map<String, Object>` (e.g., by `sys_id` or primary business key) before building the XML/JSON output for a downstream `Splitter`.
    - When an API specification defines primary vs. fallback/legacy fields or parent-entity dot-walking (`parent.field`), implement explicit Elvis fallback chains (`record.primaryField ?: record.legacyField ?: null`).
 7. **Explicit UTC Timezone**: Never use `TimeZone.getDefault()` or `new Date().format(...)`. Always use `java.time.*` with `ZoneId.of("UTC")` (or explicit business zone).
-8. **MPL Governance & `ITApiFactory` Service Limits (`PartnerDirectory`, `Keystore`, `ValueMapping`)**:
-   - Obtain the log via `def messageLog = messageLogFactory?.getMessageLog(message)`. Index scalar business keys with `messageLog?.addCustomHeaderProperty(key, val)` (keep values concise `< 200` chars to protect the shared tenant MPL storage quota). Only create attachments (`addAttachmentAsString`) inside `catch` blocks or inside `if (message.getProperty("LogAttachments") == "Yes")`.
+8. **MPL Governance, Custom Status & `ITApiFactory` Service Limits (`PartnerDirectory`, `Keystore`, `ValueMapping`)**:
+   - Obtain the log via `def messageLog = messageLogFactory?.getMessageLog(message)`. Index scalar business keys with `messageLog?.addCustomHeaderProperty(key, val)` (keep values concise `< 200` chars to protect the shared tenant MPL storage quota). Only create attachments (`addAttachmentAsString`) inside `catch` blocks, inside dedicated Exception Subprocess handlers (`if (map.get("CamelExceptionCaught") != null)`), or inside `if (message.getProperty("LogAttachments") == "Yes")`.
+   - **Controlled Error / Custom MPL Status Pattern**: When an iFlow handles a business or controlled error without throwing an unhandled runtime crash, set `message.setProperty("SAP_MessageProcessingLogCustomStatus", "Controlled error")` (or `"Skipped"`, `"RetryScheduled"`) and optionally `messageLog?.setStringProperty("LogLevel", "ERROR")` so operators can filter controlled errors in the SAP CPI Monitor.
    - **`PartnerDirectoryService`**: Partner ID (`Pid`) max **60 chars**, Parameter ID (`Id`) max **1500 chars**. Never call Partner Directory inside a `Splitter` loop; look up parameters once before the Splitter and cache them in Exchange Properties.
    - **`KeystoreService` & `SecureStoreService`**: Keep certificate/key aliases concise (`< 25` chars), never decrypt private keys repeatedly inside message splits, and never log secrets or private keys to the MPL.
    - **`ValueMappingApi`**: Always implement a default fallback value when `getMappedValue(...)` returns `null` or empty.
@@ -73,3 +74,12 @@ node ./scripts/validate-groovy.mjs <path-to-script.groovy | folder | bundle.zip>
 
 * Validator script: [validate-groovy.mjs](./scripts/validate-groovy.mjs)
 * **Verification Requirement**: The script must achieve a **100/100 score** with **0 Critical/High/Medium violations** before presenting the final code to the user. If `validate-groovy.mjs` reports any violation (e.g., an unused import, missing `disallow-doctype-decl`, or unclosed `Reader`), fix the Groovy code and re-run `validate-groovy.mjs` until it passes cleanly.
+
+
+## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
+
+Siempre que el usuario reporte un **error de compilación o runtime en SAP CPI** (ej. firmas de métodos en Groovy 2.4, imports incompatibles, manejo de `Reader`/`InputStream`), corrija un script o comparta una Script Collection de ejemplo, tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:
+1. **Anonimizar (Zero Data Leakage)**: Extraer únicamente la regla técnica genérica de Groovy 2.4 / SAP CPI, sin guardar jamás nombres de proyectos privados, clientes, endpoints ni valores de `.prop`.
+2. **Codificar en el Script CLI**: Añadir la regla de validación en `./scripts/validate-groovy.mjs` para que el fallo quede bloqueado por código en futuras generaciones.
+3. **Actualizar Documentación y Lecciones**: Documentar la regla en esta `SKILL.md`, en `docs/VALIDATION_RULES.md` y en `docs/LESSONS_LEARNED.md`.
+4. **Verificar y Sincronizar**: Ejecutar `node verify-all.mjs` y `node setup-skills.mjs` para propagar el aprendizaje a `.agents/` y `.claude/`.

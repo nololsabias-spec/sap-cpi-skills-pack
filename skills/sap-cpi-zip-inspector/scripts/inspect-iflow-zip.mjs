@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readZipEntries, createZipBuffer } from '../../../shared/zip-utils.mjs';
+import { writeAuditPdfFile } from '../../../shared/pdf-utils.mjs';
 
 export function parseManifestContent(manifestText) {
   if (!manifestText) return { symbolicName: 'Desconocido', version: '1.0.0', name: 'iFlow Bundle', vendor: 'SAP / Custom', importedPackages: [], raw: {} };
@@ -165,6 +166,25 @@ export function analyzeIflwLocally(iflwXml) {
     }
   }
 
+  // Collect messageFlows by sourceRef/targetRef to inspect connected adapter properties for ExternalCall tasks
+  const messageFlowsByRef = new Map();
+  const mfFlowRegex = /<bpmn2:messageFlow\b([^>]*)>([\s\S]*?)<\/bpmn2:messageFlow>/gi;
+  let mfm;
+  while ((mfm = mfFlowRegex.exec(iflwXml)) !== null) {
+    const mfAttrs = parseXmlAttributes(mfm[1]);
+    const mfInner = mfm[2] || '';
+    if (mfAttrs.sourceRef) {
+      const list = messageFlowsByRef.get(mfAttrs.sourceRef) || [];
+      list.push(mfInner);
+      messageFlowsByRef.set(mfAttrs.sourceRef, list);
+    }
+    if (mfAttrs.targetRef) {
+      const list = messageFlowsByRef.get(mfAttrs.targetRef) || [];
+      list.push(mfInner);
+      messageFlowsByRef.set(mfAttrs.targetRef, list);
+    }
+  }
+
   // 4. Synchronous ServiceTasks / CallActivities (ExternalCall) without timeout & Splitters without streaming
   const syncTasksWithoutTimeout = [];
   const splittersWithoutStreaming = [];
@@ -179,9 +199,11 @@ export function analyzeIflwLocally(iflwXml) {
       /key\s*=\s*"activityType"\s+value\s*=\s*"ExternalCall"/i.test(inner) ||
       /<key>activityType<\/key>\s*<value>ExternalCall<\/value>/i.test(inner);
     if (isExternalCall) {
+      const connectedFlows = (attrs.id && messageFlowsByRef.get(attrs.id)) || [];
+      const combinedXml = [inner, ...connectedFlows].join('\n');
       const hasTimeout =
-        /key\s*=\s*"[^"]*timeout[^"]*"\s+value\s*=\s*"[1-9]\d*"/i.test(inner) ||
-        /<key>[^<]*timeout[^<]*<\/key>\s*<value>[1-9]\d*<\/value>/i.test(inner);
+        /key\s*=\s*"[^"]*timeout[^"]*"\s+value\s*=\s*"(?:[1-9]\d*|\{\{[^}]+\}\})"/i.test(combinedXml) ||
+        /<key>[^<]*timeout[^<]*<\/key>\s*<value>(?:[1-9]\d*|\{\{[^}]+\}\})<\/value>/i.test(combinedXml);
       if (!hasTimeout) {
         syncTasksWithoutTimeout.push({
           id: attrs.id || 'ServiceTask',
@@ -237,7 +259,7 @@ export function analyzeIflwLocally(iflwXml) {
   const referencedScriptCollections = [
     ...new Set(
       properties
-        .filter((p) => p.key === 'scriptCollection' && p.val)
+        .filter((p) => (p.key === 'scriptCollection' || p.key === 'scriptBundleId') && p.val)
         .map((p) => p.val)
     )
   ];
@@ -245,6 +267,11 @@ export function analyzeIflwLocally(iflwXml) {
     (p) =>
       (p.key === 'mappingType' && p.val.toLowerCase().includes('xslt')) ||
       (p.key === 'mappingpath' && p.val.toLowerCase().endsWith('.xslt'))
+  ).length;
+  const messageMappingCalls = properties.filter(
+    (p) =>
+      (p.key === 'mappingType' && p.val === 'MessageMapping') ||
+      (p.key === 'mappinguri' && p.val.toLowerCase().endsWith('.mmap'))
   ).length;
 
   // Calculate deterministic Compliance Score (Base 100: Critical -30, High -15, Medium -5)
@@ -273,6 +300,7 @@ export function analyzeIflwLocally(iflwXml) {
       subprocesses: subProcesses.length,
       groovyCalls,
       xsltCalls,
+      messageMappingCalls,
       routers: routersCount,
       serviceTasks: serviceTasksCount,
       channels: channelsCount
@@ -387,6 +415,8 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
   const manifestFiles = [];
   const groovyScripts = [];
   const xsltMappings = [];
+  const messageMappings = [];
+  const xsdSchemas = [];
   const iflwFiles = [];
   const parameterFiles = [];
   const nestedZipFiles = [];
@@ -398,6 +428,10 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
       manifestFiles.push(rec);
     } else if (rec.path.includes('resources/script/') || pLower.endsWith('.groovy') || pLower.endsWith('.gsh')) {
       groovyScripts.push(rec);
+    } else if (pLower.endsWith('.mmap')) {
+      messageMappings.push(rec);
+    } else if (pLower.endsWith('.xsd')) {
+      xsdSchemas.push(rec);
     } else if (rec.path.includes('resources/mapping/') || pLower.endsWith('.xslt') || pLower.endsWith('.xsl')) {
       xsltMappings.push(rec);
     } else if (rec.path.includes('resources/scenarioflows/') || pLower.endsWith('.iflw')) {
@@ -459,6 +493,45 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
     }
   }
 
+  // Compute available automated remediations so the user can choose which ones to apply
+  const availableRemediations = [];
+  if (manifestIssues.length > 0) {
+    availableRemediations.push({
+      id: 'manifest',
+      title: 'Normalizar estructura raíz OSGi y plegado a 72 bytes en MANIFEST.MF',
+      description: 'Elimina carpetas contenedoras intermedias en el ZIP, coloca .project y META-INF/MANIFEST.MF en la raíz y ajusta líneas a 72 bytes UTF-8.'
+    });
+  }
+  if (heuristics.unencryptedChannels?.length > 0) {
+    availableRemediations.push({
+      id: 'https',
+      title: `Actualizar ${heuristics.unencryptedChannels.length} canal(es) http:// a https://`,
+      description: 'Reemplaza el protocolo http:// en texto plano por https:// en las propiedades de adaptadores externos.'
+    });
+  }
+  if (heuristics.syncTasksWithoutTimeout?.length > 0) {
+    availableRemediations.push({
+      id: 'timeouts',
+      title: `Configurar timeout explícito (60000 ms) en ${heuristics.syncTasksWithoutTimeout.length} llamada(s) síncrona(s)`,
+      description: 'Añade <ifl:property><key>httpRequestTimeout</key><value>60000</value></ifl:property> en pasos ExternalCall sin timeout.'
+    });
+  }
+  if (heuristics.splittersWithoutStreaming?.length > 0) {
+    availableRemediations.push({
+      id: 'streaming',
+      title: `Activar streaming="true" en ${heuristics.splittersWithoutStreaming.length} paso(s) Splitter`,
+      description: 'Cambia <key>streaming</key><value>false</value> a true en General/Iterating Splitters para evitar sobrecarga DOM.'
+    });
+  }
+  if (heuristics.csrfDisabledChannels?.length > 0) {
+    availableRemediations.push({
+      id: 'csrf',
+      title: `Activar protección CSRF (xsrfProtection=1) en ${heuristics.csrfDisabledChannels.length} canal(es)`,
+      description: 'Habilita la protección contra Cross-Site Request Forgery en adaptadores HTTP/HTTPS entrantes.'
+    });
+  }
+  heuristics.availableRemediations = availableRemediations;
+
   const nestedBundles = nestedZipFiles.map((nz) => {
     try {
       const subReport = inspectBundle(nz.data, null, { sourceName: nz.name, showPropValues });
@@ -485,6 +558,8 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
       iflwFiles: iflwFiles.map((f) => ({ name: f.name, path: f.path, size: f.size })),
       groovyScripts: groovyScripts.map((f) => ({ name: f.name, path: f.path, size: f.size, content: f.text })),
       xsltMappings: xsltMappings.map((f) => ({ name: f.name, path: f.path, size: f.size })),
+      messageMappings: messageMappings.map((f) => ({ name: f.name, path: f.path, size: f.size })),
+      xsdSchemas: xsdSchemas.map((f) => ({ name: f.name, path: f.path, size: f.size })),
       parameterFiles: parameterFiles.map((f) => ({
         name: f.name,
         path: f.path,
@@ -497,12 +572,269 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
   };
 }
 
+function wrapManifestLine72Local(headerLine) {
+  const full = String(headerLine || '');
+  if (Buffer.byteLength(full, 'utf8') <= 72) return full;
+  const outLines = [];
+  let current = '';
+  for (const ch of full) {
+    if (Buffer.byteLength(current + ch, 'utf8') > 72) {
+      outLines.push(current);
+      current = ' ' + ch;
+    } else {
+      current += ch;
+    }
+  }
+  if (current) outLines.push(current);
+  return outLines.join('\r\n');
+}
+
+/**
+ * Construye el modelo estructurado para exportar el informe de auditoría en PDF
+ */
+export function buildAuditPdfSpec(report) {
+  const blocks = [];
+  const h = report.heuristics || {};
+
+  blocks.push({ type: 'section', text: '1. Resumen Ejecutivo y Metadatos del Paquete OSGi' });
+  blocks.push({ type: 'kv', key: 'Archivo Auditado', value: `${report.fileName} (${report.totalFiles} archivos)` });
+  blocks.push({
+    type: 'kv',
+    key: 'Bundle-SymbolicName',
+    value: `${report.manifestData?.symbolicName || 'Desconocido'} (v${report.manifestData?.version || '1.0.0'})`
+  });
+  blocks.push({ type: 'kv', key: 'Tipo de Artefacto SAP', value: report.manifestData?.bundleType || 'IntegrationFlow' });
+  blocks.push({
+    type: 'kv',
+    key: 'Catálogo de Recursos',
+    value: `${report.catalog.iflwFiles.length} .iflw | ${report.catalog.groovyScripts.length} .groovy | ${report.catalog.xsltMappings.length} .xslt | ${report.catalog.messageMappings.length} .mmap | ${report.catalog.xsdSchemas.length} .xsd | ${report.catalog.parameterFiles.length} .prop`
+  });
+
+  if (report.nestedBundles && report.nestedBundles.length > 0) {
+    blocks.push({ type: 'section', text: `2. Paquetes Anidados Detectados (${report.nestedBundles.length})` });
+    for (const nb of report.nestedBundles) {
+      blocks.push({
+        type: 'bullet',
+        text: `${nb.fileName} [${nb.bundleType || 'ZIP'}] - SymbolicName: ${nb.symbolicName || '-'} | Score: ${nb.score ?? '-'}/100 | .iflw: ${nb.iflwCount ?? 0} | .groovy: ${nb.groovyCount ?? 0}`
+      });
+    }
+  } else {
+    blocks.push({ type: 'section', text: '2. Hallazgos Deterministas de Arquitectura y Seguridad' });
+    let totalFindings = 0;
+
+    if (h.manifestIssues && h.manifestIssues.length > 0) {
+      for (const mi of h.manifestIssues) {
+        totalFindings++;
+        blocks.push({
+          type: 'finding',
+          severity: 'CRÍTICA',
+          component: 'META-INF/MANIFEST.MF',
+          finding: mi,
+          recommendation: 'Colocar .project y META-INF/MANIFEST.MF directamente en la raíz del ZIP y plegar líneas a 72 bytes UTF-8.'
+        });
+      }
+    }
+
+    if (!h.isScriptCollection && !h.hasExceptionSubprocess) {
+      totalFindings++;
+      blocks.push({
+        type: 'finding',
+        severity: 'CRÍTICA',
+        component: 'Integration Process (.iflw)',
+        finding: 'Ausencia de Exception Subprocess (ErrorEventSubProcessTemplate).',
+        recommendation: 'Añadir un Exception Subprocess para capturar errores, indexar logs y evitar fallos silenciosos.'
+      });
+    }
+
+    for (const c of h.unencryptedChannels || []) {
+      totalFindings++;
+      blocks.push({
+        type: 'finding',
+        severity: 'CRÍTICA',
+        component: `Canal (${c.key})`,
+        finding: `Endpoint sin cifrado TLS detectado: ${c.val}`,
+        recommendation: 'Sustituir http:// por https:// y exigir TLS 1.2/1.3 en el adaptador.'
+      });
+    }
+
+    for (const cm of h.contentModifiersReadingBodyToProperty || []) {
+      totalFindings++;
+      blocks.push({
+        type: 'finding',
+        severity: 'CRÍTICA',
+        component: 'Content Modifier (Enricher)',
+        finding: `Copia de \${body} en Exchange Property (${cm.key} = ${cm.val})`,
+        recommendation: 'Evitar duplicar el payload completo en memoria Heap; usar streaming o almacenar solo IDs escalares.'
+      });
+    }
+
+    for (const hs of h.hardcodedSensitivePatterns || []) {
+      totalFindings++;
+      blocks.push({
+        type: 'finding',
+        severity: 'ALTA',
+        component: `Propiedad (${hs.key})`,
+        finding: `${hs.reason}: ${hs.val}`,
+        recommendation: 'Externalizar el valor mediante parámetros configurables {{NombreParametro}}.'
+      });
+    }
+
+    for (const st of h.syncTasksWithoutTimeout || []) {
+      totalFindings++;
+      blocks.push({
+        type: 'finding',
+        severity: 'MEDIA',
+        component: `ExternalCall (${st.name} / ${st.id})`,
+        finding: 'Llamada síncrona Request-Reply sin timeout explícito configurado.',
+        recommendation: 'Configurar un timeout explícito (ej. 60000 ms) en el canal del adaptador.'
+      });
+    }
+
+    for (const sp of h.splittersWithoutStreaming || []) {
+      totalFindings++;
+      blocks.push({
+        type: 'finding',
+        severity: 'MEDIA',
+        component: `Splitter (${sp.name} / ${sp.id})`,
+        finding: 'Paso Splitter con streaming deshabilitado (streaming=false).',
+        recommendation: 'Activar streaming=true para procesar lotes XML/JSON sin saturar el árbol DOM en memoria.'
+      });
+    }
+
+    if (totalFindings === 0) {
+      blocks.push({
+        type: 'paragraph',
+        text: 'Cero hallazgos críticos, altos o medios. El paquete cumple los puntos de control de arquitectura SAP CPI.'
+      });
+    }
+
+    if (h.availableRemediations && h.availableRemediations.length > 0) {
+      blocks.push({ type: 'section', text: '3. Cambios Propuestos Automatizables (Selección del Usuario)' });
+      for (const rem of h.availableRemediations) {
+        blocks.push({
+          type: 'bullet',
+          text: `[${rem.id}] ${rem.title}: ${rem.description}`
+        });
+      }
+    }
+  }
+
+  return {
+    title: `Informe de Auditoría SAP CPI: ${report.fileName}`,
+    subtitle: `SymbolicName: ${report.manifestData?.symbolicName || 'N/A'} | Tipo: ${report.manifestData?.bundleType || 'Bundle'}`,
+    score: h.score ?? 100,
+    blocks
+  };
+}
+
+/**
+ * Aplica al paquete .zip únicamente las correcciones autorizadas por el usuario y genera un nuevo .zip
+ */
+export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], outZipPath) {
+  let entries = [];
+  if (inputPathOrDemo === '--demo') {
+    entries = readZipEntries(buildDemoBundleZipBuffer());
+  } else {
+    entries = readZipEntries(path.resolve(inputPathOrDemo));
+  }
+
+  const fixSet = new Set(selectedFixes.map((s) => s.trim().toLowerCase()));
+  const applyAll = fixSet.has('all');
+
+  // Detect root folder prefix if manifest fix is requested
+  let prefixToStrip = '';
+  if (applyAll || fixSet.has('manifest')) {
+    const mfEntry = entries.find((e) => e.path.endsWith('/META-INF/MANIFEST.MF'));
+    if (mfEntry) {
+      prefixToStrip = mfEntry.path.slice(0, mfEntry.path.length - 'META-INF/MANIFEST.MF'.length);
+    }
+  }
+
+  const appliedChanges = [];
+  const outEntries = [];
+
+  for (const entry of entries) {
+    if (entry.path.startsWith('__MACOSX/') || entry.path.endsWith('.DS_Store')) continue;
+    let relPath = entry.path;
+    if (prefixToStrip && relPath.startsWith(prefixToStrip)) {
+      relPath = relPath.slice(prefixToStrip.length);
+    }
+    if (!relPath) continue;
+
+    let contentBuf = entry.data;
+
+    if ((applyAll || fixSet.has('manifest')) && relPath === 'META-INF/MANIFEST.MF') {
+      const unfolded = (entry.text || '').replace(/\r?\n /g, '');
+      const headerLines = unfolded
+        .split(/\r?\n/)
+        .map((l) => l.trimEnd())
+        .filter(Boolean);
+      const wrapped = headerLines.map(wrapManifestLine72Local).join('\r\n') + '\r\n\r\n';
+      contentBuf = Buffer.from(wrapped, 'utf8');
+      appliedChanges.push('manifest: Normalizada raíz META-INF/MANIFEST.MF y plegado a 72 bytes UTF-8');
+    } else if (relPath.toLowerCase().endsWith('.iflw')) {
+      let xml = entry.text || contentBuf.toString('utf8');
+
+      if (applyAll || fixSet.has('https')) {
+        const before = xml;
+        xml = xml.replace(
+          /(<(?:key|ifl:property)[^>]*>(?:address|httpAddress|httpAddressWithoutQuery|url)<\/key>\s*<value>)http:\/\//gi,
+          '$1https://'
+        );
+        xml = xml.replace(/(key\s*=\s*"(?:address|httpAddress|url)"\s+value\s*=\s*")http:\/\//gi, '$1https://');
+        if (xml !== before) appliedChanges.push('https: Actualizados canales http:// a https://');
+      }
+
+      if (applyAll || fixSet.has('streaming')) {
+        const before = xml;
+        xml = xml.replace(/(<key>streaming<\/key>\s*<value>)false(<\/value>)/gi, '$1true$2');
+        xml = xml.replace(/(key\s*=\s*"streaming"\s+value\s*=\s*")false(")/gi, '$1true$2');
+        if (xml !== before) appliedChanges.push('streaming: Activado streaming=true en pasos Splitter');
+      }
+
+      if (applyAll || fixSet.has('csrf')) {
+        const before = xml;
+        xml = xml.replace(/(<key>xsrfProtection<\/key>\s*<value>)0(<\/value>)/gi, '$11$2');
+        if (xml !== before) appliedChanges.push('csrf: Activada protección CSRF (xsrfProtection=1)');
+      }
+
+      if (applyAll || fixSet.has('timeouts')) {
+        const before = xml;
+        xml = xml.replace(
+          /(<bpmn2:(?:serviceTask|callActivity)\b[^>]*>[\s\S]*?(?:<key>activityType<\/key>\s*<value>ExternalCall<\/value>|key\s*=\s*"activityType"\s+value\s*=\s*"ExternalCall"))(?![\s\S]*?timeout)([\s\S]*?<\/bpmn2:extensionElements>)/gi,
+          '$1\n        <ifl:property><key>httpRequestTimeout</key><value>60000</value></ifl:property>$2'
+        );
+        if (xml !== before) appliedChanges.push('timeouts: Añadido httpRequestTimeout=60000 ms en llamadas ExternalCall');
+      }
+
+      contentBuf = Buffer.from(xml, 'utf8');
+    }
+
+    outEntries.push({ path: relPath, content: contentBuf });
+  }
+
+  outEntries.sort((a, b) => {
+    const rank = (p) => (p === '.project' ? 0 : p === 'META-INF/MANIFEST.MF' ? 1 : p === 'metainfo.prop' ? 3 : 2);
+    return rank(a.path) - rank(b.path) || a.path.localeCompare(b.path);
+  });
+
+  const zipBuf = createZipBuffer(outEntries);
+  if (outZipPath) {
+    const resolvedOut = path.resolve(outZipPath);
+    fs.mkdirSync(path.dirname(resolvedOut), { recursive: true });
+    fs.writeFileSync(resolvedOut, zipBuf);
+  }
+  return { outZipPath: outZipPath ? path.resolve(outZipPath) : null, sizeBytes: zipBuf.length, appliedChanges };
+}
+
 // CLI Runner
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso: node inspect-iflow-zip.mjs <archivo.zip | archivo.iflw | --demo> [--extract-dir <carpeta>] [--show-prop-values] [--json]');
+    console.log(
+      'Uso: node inspect-iflow-zip.mjs <archivo.zip | archivo.iflw | --demo> [--pdf <informe.pdf>] [--remediate <manifest,https,timeouts,streaming,csrf|all> --out < Corregido.zip>] [--extract-dir <carpeta>] [--show-prop-values] [--json]'
+    );
     process.exit(0);
   }
 
@@ -511,9 +843,23 @@ if (isMain) {
   const showPropValues = args.includes('--show-prop-values');
   const extractIdx = args.indexOf('--extract-dir');
   const extractDir = extractIdx !== -1 ? args[extractIdx + 1] : null;
+  const pdfIdx = args.indexOf('--pdf');
+  const pdfPath = pdfIdx !== -1 ? args[pdfIdx + 1] : null;
+  const remIdx = args.indexOf('--remediate');
+  const remSpec = remIdx !== -1 ? (args[remIdx + 1] || 'all').split(',') : null;
+  const outIdx = args.indexOf('--out');
+  const outZipPath = outIdx !== -1 ? args[outIdx + 1] : null;
 
   try {
     const report = inspectBundle(target, extractDir, { showPropValues });
+    if (pdfPath) {
+      const pdfSpec = buildAuditPdfSpec(report);
+      const pdfBytes = writeAuditPdfFile(path.resolve(pdfPath), pdfSpec);
+      report.pdfGenerated = { path: path.resolve(pdfPath), sizeBytes: pdfBytes };
+    }
+    if (remSpec && outZipPath) {
+      report.remediationResult = remediateBundleZip(target, remSpec, outZipPath);
+    }
     if (jsonFlag) {
       console.log(JSON.stringify(report, null, 2));
     } else {
@@ -523,7 +869,7 @@ if (isMain) {
       if (report.heuristics.manifestIssues && report.heuristics.manifestIssues.length > 0) {
         report.heuristics.manifestIssues.forEach((mi) => console.log(`  [!] ${mi}`));
       }
-      console.log(`Catálogo: ${report.catalog.iflwFiles.length} .iflw | ${report.catalog.groovyScripts.length} .groovy | ${report.catalog.xsltMappings.length} .xslt | ${report.catalog.parameterFiles.length} .prop`);
+      console.log(`Catálogo: ${report.catalog.iflwFiles.length} .iflw | ${report.catalog.groovyScripts.length} .groovy | ${report.catalog.xsltMappings.length} .xslt | ${report.catalog.messageMappings.length} .mmap | ${report.catalog.xsdSchemas.length} .xsd | ${report.catalog.parameterFiles.length} .prop`);
       if (report.nestedBundles && report.nestedBundles.length > 0) {
         console.log(`\n--- PAQUETES ANIDADOS DETECTADOS (${report.nestedBundles.length}) ---`);
         report.nestedBundles.forEach((nb) => {
@@ -555,6 +901,19 @@ if (isMain) {
             console.log(`   - Scripts invocados: ${report.heuristics.referencedScripts.join(', ')}`);
           }
         }
+        if (report.heuristics.availableRemediations?.length > 0) {
+          console.log(`\n--- CAMBIOS AUTOMATIZABLES DISPONIBLES (Para confirmar con el usuario) ---`);
+          report.heuristics.availableRemediations.forEach((r) => {
+            console.log(`   - [${r.id}] ${r.title}`);
+          });
+        }
+      }
+      if (report.pdfGenerated) {
+        console.log(`\n[OK] Informe PDF generado en: ${report.pdfGenerated.path} (${report.pdfGenerated.sizeBytes} bytes)`);
+      }
+      if (report.remediationResult) {
+        console.log(`\n[OK] Paquete iFlow corregido generado en: ${report.remediationResult.outZipPath} (${report.remediationResult.sizeBytes} bytes)`);
+        report.remediationResult.appliedChanges.forEach((ac) => console.log(`   * ${ac}`));
       }
       if (extractDir) {
         console.log(`\nArchivos extraídos en: ${path.resolve(extractDir)}`);

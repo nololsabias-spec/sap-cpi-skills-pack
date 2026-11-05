@@ -48,7 +48,11 @@ if (agentType === 'claude' || agentType === 'both') {
 for (const agentRoot of rootsToInstall) {
   const destSkills = path.join(agentRoot, 'skills');
   const destShared = path.join(agentRoot, 'shared');
+  const destRules = path.join(agentRoot, 'rules');
   copyRecursiveSync(path.join(ROOT_DIR, 'skills'), destSkills);
   copyRecursiveSync(path.join(ROOT_DIR, 'shared'), destShared);
-  console.log(`[OK] 8 Skills de SAP CPI y utilidades instaladas en: ${agentRoot}`);
+  if (fs.existsSync(path.join(ROOT_DIR, 'rules'))) {
+    copyRecursiveSync(path.join(ROOT_DIR, 'rules'), destRules);
+  }
+  console.log(`[OK] 8 Skills de SAP CPI, utilidades y harness de aprendizaje instaladas en: ${agentRoot}`);
 }

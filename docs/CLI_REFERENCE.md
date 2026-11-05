@@ -33,16 +33,18 @@ npm test
 ## 2. Scripts por Módulo
 
 ### 2.1. `inspect-iflow-zip.mjs` (`sap-cpi-zip-inspector`)
-Descomprime en memoria un paquete `.zip` de SAP CPI (`IntegrationFlow`, `ScriptCollection` o paquetes compuestos con `.zip` anidados), clasifica sus archivos internos, redacta por defecto los valores de `.prop` (`[REDACTED]`) y ejecuta la auditoría de 5 puntos sobre el modelo BPMN 2.0 (`.iflw`).
+Descomprime en memoria un paquete `.zip` de SAP CPI (`IntegrationFlow`, `ScriptCollection` o paquetes compuestos con `.zip` anidados), clasifica sus archivos internos (`.iflw`, `.groovy`, `.xslt`, `.mmap`, `.xsd`, `.prop`), redacta por defecto los valores de `.prop` (`[REDACTED]`), ejecuta la auditoría determinista sobre el modelo BPMN 2.0 (`.iflw`) y permite exportar un **informe ejecutivo en PDF** o generar un **nuevo `.zip` corregido** aplicando únicamente las remediaciones seleccionadas por el usuario.
 
 ```bash
-node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs <archivo.zip | archivo.iflw> [--extract-dir <carpeta>] [--show-prop-values] [--json]
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs <archivo.zip | archivo.iflw> [--pdf <informe.pdf>] [--remediate <manifest,https,timeouts,streaming,csrf|all> --out <Corregido.zip>] [--extract-dir <carpeta>] [--show-prop-values] [--json]
 ```
 
 - `<archivo.zip>`: Ruta al paquete iFlow, Script Collection o paquete compuesto exportado de SAP CPI.
+- `--pdf <informe.pdf>`: Genera un archivo PDF nativo con el resumen ejecutivo, puntuación `0-100`, catálogo de recursos, tabla de hallazgos y cambios propuestos.
+- `--remediate <cambios> --out <Corregido.zip>`: Genera un nuevo paquete `.zip` aplicando únicamente los cambios confirmados por el usuario (`manifest`, `https`, `timeouts`, `streaming`, `csrf` o `all`).
 - `--extract-dir <carpeta>`: Extrae físicamente todos los recursos internos del `.zip` en la carpeta indicada.
 - `--show-prop-values`: Muestra los valores reales de los archivos `.prop` (por defecto se redactan como `[REDACTED]` por privacidad).
-- `--json`: Devuelve el inventario de archivos y los hallazgos de auditoría en formato JSON.
+- `--json`: Devuelve el inventario de archivos, hallazgos de auditoría y `availableRemediations` en formato JSON.
 
 ---
 

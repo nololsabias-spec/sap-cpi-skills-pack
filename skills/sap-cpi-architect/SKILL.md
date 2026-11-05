@@ -54,6 +54,13 @@ Generate the complete BPMN 2.0 XML implementing every step of the plan following
 - All synchronous `ExternalCall` tasks must declare an explicit `timeout` property (e.g., `60000`).
 - Every Script Task must reference `<ifl:property key="scriptFunction" value="processData"/>` and `<ifl:property key="script" value="<fileName>"/>`.
 - Must include `<bpmndi:BPMNDiagram>` coordinates so the SAP CPI Web UI editor renders the diagram cleanly.
+- **Patrones Opcionales para *Handlers* Transversales Reutilizables**:
+  - **Handler Centralizado de Errores y Observabilidad (`ProcessDirect` -> `Parallel Multicast`)**:
+    - Recibe un sobre XML de error vía `ProcessDirect` (`{{PD_address}}`) desde los `Exception Subprocess` de otros iFlows, respaldado por un XSD tolerante donde todos los campos son `minOccurs="0" nillable="true"` (incluyendo `Environment`, `InterfaceName`, `InterfaceDescription`, `ObjectID`, `ExceptionMessage`, `OriginalMessageProcessingLogID`, `SAP_MessageProcessingLogID`, `SAP_MplCorrelationId` y banderas como `SendBody`).
+    - Usa un `Parallel Multicast` para dividir el flujo en dos ramas: (1) una rama de alerta por correo (`Mail` SMTP con `starttls_mandatory`) que formatea una tabla HTML en un `Content Modifier`, y (2) una rama de observabilidad hacia **SAP Cloud Logging / OpenSearch** que evalúa `${property.SendBody.toLowerCase()} = 'yes'` en un `Router` para elegir entre dos `Message Mapping` (`WithBody.mmap` vs `NoBody.mmap`), convierte la salida con `XML to JSON Converter` (`xmlJsonSuppressRootElement=true`) y la envía por `HTTP` POST con certificado de cliente (`{{CloudLoggingCertificate}}`).
+    - Incluye su propio `Exception Subprocess` local que inspecciona `CamelExceptionCaught` y guarda el detalle como adjunto MPL (`addAttachmentAsString`) para evitar bucles infinitos si falla el servidor de correo o de logs.
+  - **Handler Centralizado de Refresco de Tokens (`StartTimerEvent` -> `LocalIntegrationProcess` -> Global `Data Store`)**:
+    - Inicia con un `StartTimerEvent` parametrizado (`{{TokenTimer}}` de tipo `custom:schedule` en `parameters.propdef`), delega la llamada `ExternalCall` y extracción del token a un `LocalIntegrationProcess` (`processType="directCall"`), limpia cabeceras y propiedades internas en un `Content Modifier` mediante acciones `Delete` (`$name=Authorization`, `$name=SAP_MonitoringStateProperties`, `$name=Content-Length`, etc.) y persiste la cabecera/token en un **Data Store Global Cifrado** (`activityType="DBstorage"`, `operation="put"`, `visibility="global"`, `encrypt="true"`, `override="true"`, `includeMessageHeaders="true"`).
 
 ### Etapa 3: Scripts Groovy (`src/main/resources/script/*.groovy`)
 Author each Groovy script planned in `groovyScriptsPlan[]` following all SAP CPI Scripting Guidelines (`def Message processData(Message message)`, `Reader` streaming, `JsonSlurperClassic`, `XmlSlurper` with `disallow-doctype-decl`, `ZoneId.of("UTC")`, conditional MPL attachments, `CPI-ERR:` exception rethrow).
@@ -138,3 +145,12 @@ node ./scripts/clone-iflow-bundle.mjs --update-sc <SC_Origen.zip> --scripts-dir 
 * Cloner & SC Updater script: [clone-iflow-bundle.mjs](./scripts/clone-iflow-bundle.mjs)
 * **Normalización Automática de Estructura OSGi ZIP**: `clone-iflow-bundle.mjs` detecta y elimina automáticamente cualquier carpeta raíz intermedia heredada del `.zip` de origen (`stripRootFolderPrefix`), garantizando que `.project` y `META-INF/MANIFEST.MF` queden siempre en la raíz del `.zip` y con plegado de 72 bytes UTF-8 (`wrapManifestLine72`).
 * Verifica finalmente todos los `.zip` generados ejecutando `inspect-iflow-zip.mjs` sobre cada paquete resultante (comprobando `manifestIssues: []`) e indica al usuario qué archivos `.zip` individuales debe subir en SAP CPI (*Script Collection* vs *Integration Flow*).
+
+
+## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
+
+Siempre que el usuario reporte un **error de subida o ejecución en SAP CPI**, corrija un artefacto generado o comparta un paquete `.zip` de referencia, tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:
+1. **Anonimizar (Zero Data Leakage)**: Extraer únicamente el patrón técnico genérico de SAP CPI, sin guardar jamás nombres de proyectos privados, clientes, endpoints ni valores de `.prop`.
+2. **Codificar en el Script CLI**: Actualizar el script validador/generador correspondiente en `./scripts/` para detectar o prevenir determinísticamente ese caso en el futuro.
+3. **Actualizar Documentación y Lecciones**: Documentar la mejora en esta `SKILL.md`, en `docs/VALIDATION_RULES.md` y en `docs/LESSONS_LEARNED.md`.
+4. **Verificar y Sincronizar**: Ejecutar `node verify-all.mjs` y `node setup-skills.mjs` para propagar el aprendizaje a `.agents/` y `.claude/`.

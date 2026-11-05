@@ -43,6 +43,12 @@ Ensure the schema obeys all SAP CPI Type System rules in [xsd-guidelines.md](./r
   - If the XSD declares `targetNamespace` and `elementFormDefault="qualified"`, runtime XML payloads must include namespace prefixes (or configure Runtime Namespace Mapping in the iFlow); if mapping flat/prefix-less intermediate XML produced by a JSON-to-XML Converter, use `elementFormDefault="unqualified"` or omit `targetNamespace`.
 - Use canonical types: `xsd:date` (`YYYY-MM-DD`), `xsd:dateTime` (`YYYY-MM-DDTHH:mm:ss...`), `xsd:decimal`, `xsd:integer`, `xsd:boolean`, `xsd:string`.
 - Keep total `<xsd:element>` + `<xsd:attribute>` nodes under the 20,000-node CPI Type System limit.
+- **Reference Patterns for Shared Handlers & Observability Schemas**:
+  - **Tolerant Handler Envelope Pattern**: When designing an input XSD for a shared/reusable handler iFlow (e.g., a central `ProcessDirect` Error/Alert Handler called by multiple iFlows), declare all child elements as `minOccurs="0" nillable="true"`. This ensures that callers emitting partial envelopes (e.g., omitting `UserAgent` or `Body`) never cause downstream Content Modifiers or Message Mappings (`.mmap`) to fail.
+  - **Unified Multi-Platform Cloud Logging / OpenSearch Schema Pattern**: When designing an output XSD for central observability shared across **SAP Integration Suite (CPI)** and **SAP API Management (APIM)**:
+    1. Define a common top-level envelope (`timestamp`, `duration_ms`, `level`, `msg`, `source`, `environment`, `package`, `artifact_name`, `step_name`, `request`, `response`, and flat MPL correlation IDs `original_sap_messageprocessinglogid`, `sap_messageprocessinglogid`, `sap_mplcorrelationid`, `sap_pregeneratedmplid`).
+    2. Restrict `<request><headers>` to a **fixed subset of headers** (e.g., `user_agent`, `content_type`) to prevent *mapping explosion* in OpenSearch index templates.
+    3. Isolate platform-specific fields inside optional sub-containers (`<integration_suite minOccurs="0">` vs `<apim minOccurs="0">`) and use `<xs:simpleType>` enumerations for `LogLevel` (`DEBUG|INFO|WARN|ERROR`) and `LogSource` (`integration-suite|api-manager`).
 
 ### Step 3: Validate the XSD Schema
 Run the validator against the `.xsd` file:
@@ -54,3 +60,12 @@ node ./scripts/validate-xsd.mjs <path-to-schema.xsd> [--json]
 * Inference & validator script: [validate-xsd.mjs](./scripts/validate-xsd.mjs)
 * Reference guidelines: [xsd-guidelines.md](./references/xsd-guidelines.md)
 * **Verification Gate**: Must pass with `valid: true` and 0 errors before delivering the `.xsd` schema.
+
+
+## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
+
+Siempre que el usuario reporte un fallo de validación en Message Mapping o XML Validator 2.0 en SAP CPI o comparta esquemas `.xsd` de referencia, tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:
+1. **Anonimizar (Zero Data Leakage)**: Extraer únicamente el patrón estructural W3C XSD 1.0 genérico, sin guardar jamás nombres de proyectos privados, clientes ni datos confidenciales.
+2. **Codificar en el Script CLI**: Actualizar `./scripts/validate-xsd.mjs` para cubrir el nuevo caso.
+3. **Actualizar Documentación y Lecciones**: Documentar la mejora en esta `SKILL.md`, en `docs/VALIDATION_RULES.md` y en `docs/LESSONS_LEARNED.md`.
+4. **Verificar y Sincronizar**: Ejecutar `node verify-all.mjs` y `node setup-skills.mjs` para propagar el aprendizaje a `.agents/` y `.claude/`.

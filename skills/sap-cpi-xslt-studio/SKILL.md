@@ -55,3 +55,12 @@ node ./scripts/validate-xslt.mjs <path-to-mapping.xslt> [--engine 2.0|1.0] [--js
 * Validator script: [validate-xslt.mjs](./scripts/validate-xslt.mjs)
 * Reference scenarios: [xslt-scenarios.md](./references/xslt-scenarios.md)
 * **Verification Gate**: Fix any reported anti-hallucination error, engine mismatch, or missing namespace/parameter declaration before delivering the final `.xslt` file.
+
+
+## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
+
+Siempre que el usuario reporte un error de transformación XSLT 1.0 (Xalan) o 2.0/3.0 (Saxon-HE) en SAP CPI, tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:
+1. **Anonimizar (Zero Data Leakage)**: Extraer únicamente la regla técnica genérica de XSLT / extensiones `cpi:*`, sin guardar jamás nombres de proyectos privados o clientes.
+2. **Codificar en el Script CLI**: Actualizar `./scripts/validate-xslt.mjs` para detectar determinísticamente ese caso en el futuro.
+3. **Actualizar Documentación y Lecciones**: Documentar la regla en esta `SKILL.md`, en `docs/VALIDATION_RULES.md` y en `docs/LESSONS_LEARNED.md`.
+4. **Verificar y Sincronizar**: Ejecutar `node verify-all.mjs` y `node setup-skills.mjs` para propagar el aprendizaje a `.agents/` y `.claude/`.

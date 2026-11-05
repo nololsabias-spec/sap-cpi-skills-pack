@@ -43,3 +43,12 @@ node ./scripts/test-camel-regex.mjs --pattern "^[A-Z]+-\d{4}-(\d+)-[A-Z]{2}$" --
 
 * Sandbox & validator script: [test-camel-regex.mjs](./scripts/test-camel-regex.mjs)
 * **Verification Gate**: All `--match` strings must evaluate to `MATCH`, all `--no-match` strings must evaluate to `NO_MATCH`, and 0 structural/ReDoS errors may remain. Deliver the 4 structured blocks: `[REGEX_PATTERN]`, `[CAMEL_SIMPLE]`, `[EXPLANATION]`, and `[TEST_CASES]`.
+
+
+## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
+
+Siempre que el usuario reporte un fallo de evaluación en un Router/Filter/Content Modifier de SAP CPI (expresiones Camel Simple o Java Regex), tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:
+1. **Anonimizar (Zero Data Leakage)**: Extraer únicamente el patrón técnico genérico de Camel Simple / Java Pattern, sin guardar jamás datos de proyectos privados o clientes.
+2. **Codificar en el Script CLI**: Actualizar `./scripts/test-camel-regex.mjs` / `./scripts/test-cpi-regex.mjs` para cubrir el nuevo caso.
+3. **Actualizar Documentación y Lecciones**: Documentar la mejora en esta `SKILL.md`, en `docs/VALIDATION_RULES.md` y en `docs/LESSONS_LEARNED.md`.
+4. **Verificar y Sincronizar**: Ejecutar `node verify-all.mjs` y `node setup-skills.mjs` para propagar el aprendizaje a `.agents/` y `.claude/`.
