@@ -70,25 +70,31 @@ node mcp-server.mjs --self-test
 ```text
 sap-cpi-skills-pack/
 ├── README.md                           # Guía principal de instalación y uso
-├── package.json                        # Scripts de verificación (npm test) y demostraciones
-├── setup-skills.mjs                    # Instalador de skills en .agents/ y .claude/
-├── verify-all.mjs                      # Suite de pruebas integrales de los 8 módulos
+├── AGENTS.md / CLAUDE.md               # Harness de ingeniería y aprendizaje continuo (Codex / Antigravity / Claude)
+├── mcp-server.mjs                      # Servidor MCP local (stdio JSON-RPC 2.0, 11 tools + 9 resources)
+├── package.json                        # Scripts de verificación (npm test), MCP y demostraciones
+├── setup-skills.mjs                    # Instalador universal Multi-IDE (Antigravity, Claude, Codex, Cursor, Copilot, Windsurf, Cline)
+├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills + servidor MCP
+├── rules/
+│   └── sap-cpi-continuous-learning.md  # Regla de auto-evolución continua y privacidad estricta
 ├── shared/
-│   └── zip-utils.mjs                   # Motor ZIP nativo (lectura/escritura DEFLATE y CRC32)
+│   ├── zip-utils.mjs                   # Motor ZIP nativo (lectura/escritura DEFLATE, CRC32 y normalización OSGi)
+│   └── pdf-utils.mjs                   # Motor PDF 1.4 nativo (informes ejecutivos de auditoría multipágina)
 ├── docs/
-│   ├── ARCHITECTURE.md                 # Arquitectura interna, flujo IA + CLI y motor ZIP
-│   ├── CLI_REFERENCE.md                # Referencia completa de comandos, argumentos y flags
+│   ├── ARCHITECTURE.md                 # Arquitectura interna, modo dual Skills + MCP, motor ZIP y PDF
+│   ├── CLI_REFERENCE.md                # Referencia completa de comandos, argumentos, flags y herramientas MCP
 │   ├── VALIDATION_RULES.md             # Reglas de validación SAP CPI, scoring y seguridad
-│   └── WORKFLOWS_GUIDE.md              # Flujos de trabajo prácticos paso a paso
+│   ├── WORKFLOWS_GUIDE.md              # Flujos de trabajo prácticos paso a paso
+│   └── LESSONS_LEARNED.md              # Base de conocimiento viva con lecciones reales de SAP CPI anonimizadas
 └── skills/
-    ├── sap-cpi-zip-inspector/          # 1. Inspector de paquetes .zip y auditor BPMN 2.0 (.iflw)
-    ├── sap-cpi-groovy-generator/       # 2. Generador Groovy (10 directivas) y linter estático
+    ├── sap-cpi-zip-inspector/          # 1. Inspector de paquetes .zip, auditor BPMN 2.0 (.iflw), PDF y autorremediador
+    ├── sap-cpi-groovy-generator/       # 2. Generador Groovy 2.4 / 4 y linter estático
     ├── sap-cpi-code-auditor/           # 3. Auditor de calidad/seguridad Groovy (Score 0-100)
     ├── sap-cpi-xslt-studio/            # 4. Validador y generador XSLT 1.0 (Xalan) y 2.0/3.0 (Saxon-HE)
     ├── sap-cpi-regex-studio/           # 5. Sandbox Regex + Apache Camel Simple (Router/Modifier)
-    ├── sap-cpi-xsd-studio/             # 6. Inferencia multi-muestra y validador W3C XSD 1.0
+    ├── sap-cpi-xsd-studio/             # 6. Inferencia XSD 1.0 y generador/validador de Mapeos Gráficos (.mmap)
     ├── sap-cpi-mock-data-generator/    # 7. Validador de correlación E2E y empaquetador de pruebas
-    └── sap-cpi-architect/              # 8. Constructor de bundles OSGi (.zip) y Documentador técnico
+    └── sap-cpi-architect/              # 8. Constructor/Clonador de bundles OSGi (.zip) y Documentador técnico
 ```
 
 ---

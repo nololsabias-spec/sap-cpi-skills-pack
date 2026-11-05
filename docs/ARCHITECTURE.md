@@ -44,20 +44,33 @@ SAP CPI distribuye sus artefactos (Integration Flows y Script Collections) como 
 - **Privacidad en archivos `.prop`**: Los valores de configuración dentro de archivos `.prop` (`parameters.prop`, `metainfo.prop`) se enmascaran automáticamente como `clave=[REDACTED]` y se transfieren íntegros a nivel de `Buffer` durante clonaciones o autorremediaciones.
 - **Harness de Auto-Mejora Continua ([`AGENTS.md`](../AGENTS.md) y [`rules/sap-cpi-continuous-learning.md`](../rules/sap-cpi-continuous-learning.md))**: Cada vez que se detecta un error real en SAP CPI o se inspecciona un paquete de referencia, el agente abstrae la regla técnica (sin ningún dato de proyecto privado ni cliente), la programa en el validador CLI correspondiente y la registra en [`docs/LESSONS_LEARNED.md`](./LESSONS_LEARNED.md).
 
-### 2.4. Portabilidad de Rutas entre el Repositorio y `.agents/` / `.claude/`
-La carpeta `shared/` se ubica al mismo nivel jerárquico que `skills/`. Cuando se ejecuta [`setup-skills.mjs`](../setup-skills.mjs), el instalador copia tanto `skills/<nombre>` como `shared/zip-utils.mjs` dentro de `.agents/` y `.claude/`:
+### 2.4. Arquitectura Dual (Skills Multi-IDE + Servidor MCP Local `stdio`)
+La carpeta `shared/` y `mcp-server.mjs` se ubican al mismo nivel jerárquico que `skills/`. Cuando se ejecuta [`setup-skills.mjs`](../setup-skills.mjs), el instalador adapta y despliega los artefactos para todos los IDEs y asistentes de IA modernos:
 
 ```text
 <proyecto-destino>/
+├── AGENTS.md                                # OpenAI Codex CLI / GPT Agents / Antigravity
+├── .mcp.json                                # Autodescubrimiento MCP (Claude Code / Desktop)
 ├── .agents/
-│   ├── shared/zip-utils.mjs
-│   └── skills/<skill-name>/scripts/*.mjs
-└── .claude/
-    ├── shared/zip-utils.mjs
-    └── skills/<skill-name>/scripts/*.mjs
+│   ├── mcp-server.mjs                       # Servidor MCP local (stdio JSON-RPC 2.0)
+│   ├── rules/sap-cpi-continuous-learning.md # Harness de auto-mejora continua
+│   ├── shared/{zip-utils.mjs,pdf-utils.mjs} # Motores nativos ZIP y PDF 1.4
+│   └── skills/<skill-name>/scripts/*.mjs    # Las 8 skills y sus motores CLI
+├── .claude/                                 # Simétrico a .agents/ para Claude Code
+├── .cursor/
+│   ├── mcp.json                             # Registro automático del servidor MCP en Cursor
+│   └── rules/*.mdc                          # Reglas MDC activadas por globs (*.groovy, *.iflw, *.xsd, *.mmap)
+├── .github/
+│   ├── copilot-instructions.md              # Instrucciones globales para GitHub Copilot
+│   └── instructions/sap-cpi.instructions.md # Instrucciones tipadas para Copilot Agent Mode
+├── .vscode/mcp.json                         # Registro automático del servidor MCP en VS Code
+├── .windsurf/rules/sap-cpi.md               # Reglas para Windsurf IDE
+└── .clinerules/sap-cpi.md                   # Reglas para Cline / Roo Code
 ```
 
-Gracias a esta simetría, las importaciones relativas `../../../shared/zip-utils.mjs` desde cualquier script funcionan de forma idéntica tanto al ejecutarse dentro de `sap-cpi-skills-pack` como una vez instaladas en otro proyecto.
+Gracias a este diseño híbrido:
+1. **Las Skills y Reglas (`.agents/skills`, `AGENTS.md`, `.cursor/rules`, `.github/copilot-instructions.md`)** proporcionan la metodología arquitectónica (los 3 pasos de diseño, el *Clarification Gate* previo y el protocolo de aprendizaje continuo).
+2. **El Servidor MCP Local (`mcp-server.mjs`)** permite que el IDE invoque las 11 herramientas de validación y empaquetado directamente por JSON-RPC 2.0 sobre `stdin`/`stdout` en local, sin abrir puertos de red y sin pedir confirmación de terminal en cada comando.
 
 ---
 
