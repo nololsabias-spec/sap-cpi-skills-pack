@@ -105,6 +105,9 @@ function buildUnifiedInstructionsMarkdown(baseSkillDir = '.agents') {
   const continuousRule = fs.existsSync(path.join(ROOT_DIR, 'rules', 'sap-cpi-continuous-learning.md'))
     ? fs.readFileSync(path.join(ROOT_DIR, 'rules', 'sap-cpi-continuous-learning.md'), 'utf8')
     : '';
+  const privacyRule = fs.existsSync(path.join(ROOT_DIR, 'rules', 'sap-cpi-privacy-sanitize.md'))
+    ? fs.readFileSync(path.join(ROOT_DIR, 'rules', 'sap-cpi-privacy-sanitize.md'), 'utf8')
+    : '';
 
   return `${harnessText.trim()}
 
@@ -112,10 +115,10 @@ function buildUnifiedInstructionsMarkdown(baseSkillDir = '.agents') {
 
 ## 3. Catálogo de Skills y Herramientas MCP / CLI Instaladas (\`${baseSkillDir}/\`)
 
-Tienes disponibles tanto el **Servidor MCP local (\`node ${baseSkillDir}/mcp-server.mjs\`)** con 20 herramientas nativas (\`cpi_inspect_zip\`, \`cpi_remediate_zip\`, \`cpi_diff_bundles\`, \`cpi_validate_groovy\`, \`cpi_audit_groovy\`, \`cpi_generate_groovy_template\`, \`cpi_infer_xsd\`, \`cpi_validate_xsd\`, \`cpi_build_mmap\`, \`cpi_simulate_mmap\`, \`cpi_validate_xslt\`, \`cpi_test_regex\`, \`cpi_pack_mock_suite\`, \`cpi_build_package\`, \`cpi_clone_bundle\`, \`cpi_get_iflow_endpoints\`, \`cpi_extract_bundle_file\`, \`cpi_export_technical_doc\`, \`cpi_export_api_client\`, \`cpi_build_value_mapping\`) como las guías detalladas en \`${baseSkillDir}/skills/\`:
+Tienes disponibles tanto el **Servidor MCP local (\`node ${baseSkillDir}/mcp-server.mjs\`)** con 22 herramientas nativas (\`cpi_inspect_zip\`, \`cpi_remediate_zip\`, \`cpi_sanitize_zip\`, \`cpi_restore_zip\`, \`cpi_diff_bundles\`, \`cpi_validate_groovy\`, \`cpi_audit_groovy\`, \`cpi_generate_groovy_template\`, \`cpi_infer_xsd\`, \`cpi_validate_xsd\`, \`cpi_build_mmap\`, \`cpi_simulate_mmap\`, \`cpi_validate_xslt\`, \`cpi_test_regex\`, \`cpi_pack_mock_suite\`, \`cpi_build_package\`, \`cpi_clone_bundle\`, \`cpi_get_iflow_endpoints\`, \`cpi_extract_bundle_file\`, \`cpi_export_technical_doc\`, \`cpi_export_api_client\`, \`cpi_build_value_mapping\`) como las guías detalladas en \`${baseSkillDir}/skills/\`:
 
 1. **Arquitecto SAP CPI**: \`${baseSkillDir}/skills/sap-cpi-architect/SKILL.md\` (\`build-cpi-package.mjs\`, \`clone-iflow-bundle.mjs\`, \`extract-for-docs.mjs\`, \`export-api-client.mjs\`, \`build-value-mapping.mjs\`)
-2. **Inspector y Auditor de Paquetes .zip / .iflw + Differ + PDF**: \`${baseSkillDir}/skills/sap-cpi-zip-inspector/SKILL.md\` (\`inspect-iflow-zip.mjs\`, \`diff-iflow-zip.mjs\`)
+2. **Inspector y Auditor de Paquetes .zip / .iflw + Differ + PDF**: \`${baseSkillDir}/skills/sap-cpi-zip-inspector/SKILL.md\` (\`inspect-iflow-zip.mjs\`, \`diff-iflow-zip.mjs\`, \`sanitize-iflow-zip.mjs\`)
 3. **Generador de Scripts Groovy 2.4 / 4**: \`${baseSkillDir}/skills/sap-cpi-groovy-generator/SKILL.md\` (\`validate-groovy.mjs\`)
 4. **Auditor y Refactorizador Groovy**: \`${baseSkillDir}/skills/sap-cpi-code-auditor/SKILL.md\` (\`audit-groovy.mjs\`)
 5. **Estudio de Esquemas XSD 1.0, Mapeos .mmap y Simulador**: \`${baseSkillDir}/skills/sap-cpi-xsd-studio/SKILL.md\` (\`validate-xsd.mjs\`, \`build-mmap.mjs\`, \`simulate-mmap.mjs\`)
@@ -126,7 +129,7 @@ Tienes disponibles tanto el **Servidor MCP local (\`node ${baseSkillDir}/mcp-ser
 ---
 
 ${continuousRule.trim()}
-`;
+${privacyRule ? `\n---\n\n${privacyRule.trim()}\n` : ''}`;
 }
 
 function installAgentBundle(agentRoot) {

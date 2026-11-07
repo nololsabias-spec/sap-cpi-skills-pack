@@ -176,6 +176,7 @@ node ./scripts/export-api-client.mjs <iflow.zip | --demo> --endpoints [--json]
 - `build-value-mapping.mjs` lee CSV RFC 4180 (comillas, `,` o `;` detectado automáticamente) y avisa de pares agencia/valor duplicados en lugar de fallar con stack trace.
 - `export-api-client.mjs` toma la ruta del sender HTTPS de `urlPath` (SOAP/IDoc/ProcessDirect usan `address`) y rechaza bundles que no son un iFlow (p. ej. una Script Collection).
 - `clone-iflow-bundle.mjs` actualiza las referencias del `.iflw` cuando renombra scripts de una Script Collection.
+- `build-cpi-package.mjs` se niega a empaquetar (`SANITIZED-001`) si el `.iflw` o los scripts contienen alias de `sanitize-iflow-zip.mjs` (`*.sanitized.invalid`, `SANITIZED_*`, `urn:sanitized:`). Restaura primero con `--restore` (LL-027).
 
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 

@@ -42,6 +42,11 @@ SAP CPI distribuye sus artefactos (Integration Flows y Script Collections) como 
 
 ### 2.3. Privacidad por Defecto (`Privacy-First Inspection`) y Harness de Aprendizaje Continuo
 - **Privacidad en archivos `.prop`**: Los valores de configuración dentro de archivos `.prop` (`parameters.prop`, `metainfo.prop`) se enmascaran automáticamente como `clave=[REDACTED]` y se transfieren íntegros a nivel de `Buffer` durante clonaciones o autorremediaciones.
+- **Limpieza Reversible de Bundles Reales ([`shared/cpi-sanitizer.mjs`](../shared/cpi-sanitizer.mjs), [`rules/sap-cpi-privacy-sanitize.md`](../rules/sap-cpi-privacy-sanitize.md))**: antes de leer una exportación real, el agente pregunta si limpiarla. El flujo es *limpiar → trabajar → restaurar*:
+  1. `sanitize-iflow-zip.mjs` (MCP `cpi_sanitize_zip`) sustituye valores de `.prop` (y su reutilización en otros archivos), secretos (PEM, claves AWS, JWT, Bearer, `password=`…), hosts de URLs, URNs no estándar, emails, IPv4, alias de credenciales del `.iflw` y los términos de `--terms` por alias deterministas y sintácticamente válidos (`host-NNN.sanitized.invalid`, `user-NNN@sanitized.invalid`, `198.51.100.N`, `urn:sanitized:ns-NNN`, `SANITIZED_{CRED,PARAM,SECRET,TERM}_NNN`). Varios zips en una misma llamada comparten el mapa.
+  2. Los namespaces y URIs estándar (W3C, OMG, SAP, Apache, OASIS, `xml.org`…) y los metadatos de adaptador (`cmdVariantUri`, `Vendor`) no se tocan, para no alterar el comportamiento en runtime (p. ej. features de protección XXE). `MANIFEST.MF` se transforma por línea lógica y se vuelve a plegar a 72 bytes; los zips anidados se procesan recursivamente.
+  3. El mapa (`*.sanitize-map.json`, o `sanitize-map.json` con `--out-dir`; valores originales) queda solo en local y está ignorado en `.gitignore`. `--restore` (MCP `cpi_restore_zip`) reaplica los valores también en archivos editados, re-añade las muestras retiradas con `--drop-samples` y avisa de alias desaparecidos.
+  4. **Guardas**: `inspect-iflow-zip.mjs` marca cualquier alias pendiente (incluso en zips anidados) como `SANITIZED-001` (CRÍTICO) y `build-cpi-package.mjs` devuelve `valid: false`, de modo que un bundle limpio nunca llega al tenant por error.
 - **Harness de Auto-Mejora Continua ([`AGENTS.md`](../AGENTS.md) y [`rules/sap-cpi-continuous-learning.md`](../rules/sap-cpi-continuous-learning.md))**: Cada vez que se detecta un error real en SAP CPI o se inspecciona un paquete de referencia, el agente abstrae la regla técnica (sin ningún dato de proyecto privado ni cliente), la programa en el validador CLI correspondiente y la registra en [`docs/LESSONS_LEARNED.md`](./LESSONS_LEARNED.md).
 
 ### 2.4. Arquitectura Dual (Skills Multi-IDE + Servidor MCP Local `stdio`)
@@ -54,7 +59,8 @@ La carpeta `shared/` y `mcp-server.mjs` se ubican al mismo nivel jerárquico que
 ├── .agents/
 │   ├── mcp-server.mjs                       # Servidor MCP local (stdio JSON-RPC 2.0)
 │   ├── rules/sap-cpi-continuous-learning.md # Harness de auto-mejora continua
-│   ├── shared/{zip-utils.mjs,pdf-utils.mjs} # Motores nativos ZIP y PDF 1.4
+│   ├── rules/sap-cpi-privacy-sanitize.md    # Regla de limpieza reversible de bundles reales
+│   ├── shared/*.mjs                         # Motores nativos ZIP, PDF 1.4, XML, regex y sanitizador
 │   └── skills/<skill-name>/scripts/*.mjs    # Las 8 skills y sus motores CLI
 ├── .claude/                                 # Simétrico a .agents/ para Claude Code
 ├── .cursor/
@@ -70,7 +76,7 @@ La carpeta `shared/` y `mcp-server.mjs` se ubican al mismo nivel jerárquico que
 
 Gracias a este diseño híbrido:
 1. **Las Skills y Reglas (`.agents/skills`, `AGENTS.md`, `.cursor/rules`, `.github/copilot-instructions.md`)** proporcionan la metodología arquitectónica (los 3 pasos de diseño, el *Clarification Gate* previo y el protocolo de aprendizaje continuo).
-2. **El Servidor MCP Local (`mcp-server.mjs`)** permite que el IDE invoque las 20 herramientas de validación y empaquetado directamente por JSON-RPC 2.0 sobre `stdin`/`stdout` en local, sin abrir puertos de red y sin pedir confirmación de terminal en cada comando. Valida los argumentos contra `inputSchema` (`-32602`), responde `-32700`/`-32600` ante JSON o peticiones inválidas y restringe las rutas a `CPI_MCP_ROOT`, que `setup-skills.mjs --mcp` escribe en `env` de cada `mcp.json` generado.
+2. **El Servidor MCP Local (`mcp-server.mjs`)** permite que el IDE invoque las 22 herramientas de validación y empaquetado directamente por JSON-RPC 2.0 sobre `stdin`/`stdout` en local, sin abrir puertos de red y sin pedir confirmación de terminal en cada comando. Valida los argumentos contra `inputSchema` (`-32602`), responde `-32700`/`-32600` ante JSON o peticiones inválidas y restringe las rutas a `CPI_MCP_ROOT`, que `setup-skills.mjs --mcp` escribe en `env` de cada `mcp.json` generado.
 
 ---
 

@@ -23,6 +23,8 @@ Aplicadas por `inspect-iflow-zip.mjs` y `build-cpi-package.mjs`:
 | `ZIP-001` | `CRITICAL` | **Zip-Slip y Rutas Inseguras** | Se rechaza cualquier entrada con ruta absoluta, letra de unidad, `..` o bytes nulos, tanto al leer como al crear o extraer `.zip` (`resolveInside`). |
 | `ZIP-002` | `CRITICAL` | **Límites Anti Zip-Bomb** | Máx. 5000 entradas, 64 MB por entrada, 256 MB en total y ratio de compresión ≤ 200 (en entradas > 1 MB). Ajustable con `readZipEntries(input, { limits })`. |
 | `PRIV-001` | `CRITICAL` | **Redacción de `.prop`** | Los valores de `parameters.prop` (y de cualquier `.prop` salvo `metainfo.prop`) se devuelven como `[REDACTED]` en `extractBundleFile` y `diff-iflow-zip`, y como `{{key}}` en Postman/OpenAPI. Solo se muestran con opt-in explícito (`showPropValues` / `--resolve-params`). |
+| `PRIV-002` | `INFO` | **Limpieza reversible** | `sanitize-iflow-zip.mjs` / `cpi_sanitize_zip` sustituye endpoints, emails, IPv4, URNs privados, alias de credenciales, secretos, valores de `.prop` y `--terms` por alias consistentes. El mapa local (`*.sanitize-map.json`, permisos 0600, en `.gitignore`) permite `--restore`. |
+| `SANITIZED-001` | `CRITICAL` | **Bundle con alias de limpieza** | El inspector (−40) y `build-cpi-package.mjs` (error) detectan `*.sanitized.invalid`, `SANITIZED_{CRED,PARAM,SECRET,TERM}_NNN` o `urn:sanitized:`. El bundle fallaría en el tenant: hay que restaurarlo antes de importarlo. |
 
 ---
 

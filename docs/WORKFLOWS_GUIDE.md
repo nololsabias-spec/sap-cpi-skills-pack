@@ -226,3 +226,26 @@ node skills/sap-cpi-architect/scripts/build-value-mapping.mjs \
   --out ./dist/VM_OrderStatuses_S4.zip
 ```
 El archivo `.zip` resultante estará listo para ser importado directamente en SAP Integration Suite con su naturaleza OSGi, metadatos y `value_mapping.xml`.
+
+---
+
+## Escenario 11: Trabajar con un iFlow Real sin Exponer Datos Privados (Limpiar → Trabajar → Restaurar)
+
+Cuando compartes con la IA una exportación real de tu tenant (endpoints, alias de credenciales, parámetros externalizados, nombres de cliente), el agente pregunta primero si quieres limpiarla ([`rules/sap-cpi-privacy-sanitize.md`](../rules/sap-cpi-privacy-sanitize.md)).
+
+```bash
+# 1. Limpiar uno o varios bundles con un mapa compartido (los nombres de cliente/proyecto van en --terms)
+node skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs ./export/FlowA.zip ./export/FlowB.zip \
+  --out-dir ./work --terms ClienteDemo,ProyectoDemo
+
+# 2. Trabajar solo sobre las copias limpias (auditar, editar Groovy/XSD/XSLT/.iflw manteniendo los alias)
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./work/FlowA.sanitized.zip
+
+# 3. Restaurar los valores reales antes de importar en SAP CPI
+node skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs --restore ./work/FlowA.sanitized.zip \
+  --map ./work/sanitize-map.json --out ./dist/FlowA.zip
+```
+
+- La IA **nunca** lee el mapa (`sanitize-map.json` / `*.sanitize-map.json`); está ignorado por Git junto con `*.sanitized.zip` y `*.restored.zip`.
+- Mientras quede algún alias, el inspector reporta `SANITIZED-001` (CRÍTICO) y el empaquetador se niega a generar el bundle.
+- Para comprobar que la limpieza no deja nada sin cubrir, simula antes con `--check` (solo recuentos, no escribe nada) y revisa los recuentos; los nombres propios en texto libre solo se ocultan si están en `--terms`.

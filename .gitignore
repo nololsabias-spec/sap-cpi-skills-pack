@@ -42,3 +42,25 @@ docs/TEST_PLAN_PROMPT.md
 .claude/
 .cursor/
 .mcp.json
+
+# Limpieza reversible: los mapas contienen valores originales y nunca se suben
+*sanitize-map.json
+*.sanitized.zip
+*.restored.zip
+
+# Artefactos SAP CPI reales o de prueba: nunca se suben (el pack genera los suyos en memoria o en tmp).
+# Si algún día hace falta un ejemplo sintético versionado, añádelo a propósito con `git add -f`.
+*.zip
+*.iflw
+*.prop
+*.propdef
+*.mmap
+*.wsdl
+*.edmx
+*.xsd
+*.xsl
+*.xslt
+*.pdf
+# Carpetas de pruebas locales con exportaciones reales
+realtest*/
+prueba*/

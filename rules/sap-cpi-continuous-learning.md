@@ -26,6 +26,7 @@ Cada vez que se active uno de los disparadores anteriores, ejecuta estos 5 pasos
 - Si el hallazgo puede detectarse, prevenirse o autocorregirse mediante código, actualiza el script CLI correspondiente en `sap-cpi-skills-pack` (o en `.agents/skills/` si trabajas en modo standalone):
   - Errores de compilación/runtime Groovy 2.4 / Groovy 4 -> `skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs`
   - Auditoría de paquetes `.zip`, `.iflw`, `.mmap`, `.xsd` y autorremediación -> `skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs`
+  - Detección/limpieza de datos privados y restauración de bundles reales -> `shared/cpi-sanitizer.mjs` y `skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs`
   - Empaquetado OSGi `MANIFEST.MF`, `.project` y generación de `.iflw` -> `skills/sap-cpi-architect/scripts/build-cpi-package.mjs` y `clone-iflow-bundle.mjs`
   - Inferencia/validación XSD -> `skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs`
   - Validación XSLT 1.0/2.0 -> `skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs`

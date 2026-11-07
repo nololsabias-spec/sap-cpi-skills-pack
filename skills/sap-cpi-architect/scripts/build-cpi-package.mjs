@@ -12,6 +12,7 @@ import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createZipBuffer } from '../../../shared/zip-utils.mjs';
+import { SANITIZED_MARKER_RE } from '../../../shared/cpi-sanitizer.mjs';
 import { analyzeIflwLocally } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
 import { lintGroovyScript } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
 import { validateXsdForSapCpi } from '../../sap-cpi-xsd-studio/scripts/validate-xsd.mjs';
@@ -305,6 +306,15 @@ export function validateAndBuildCpiBundles(spec, baseDir = process.cwd()) {
     const audit = lintGroovyScript(content, fName);
     scriptAuditResults.push(audit);
     iflowFiles.push({ path: `src/main/resources/script/${fName}`, content });
+  }
+
+  // SANITIZED-001: never package content that still carries sanitizer aliases (it would fail at runtime)
+  const sanitizedHits = [
+    ...iflowFiles.filter((fl) => SANITIZED_MARKER_RE.test(String(fl.content))).map((fl) => fl.path),
+    ...(spec.groovyScripts || []).filter((sc) => SANITIZED_MARKER_RE.test(String(resolveContent(sc)))).map((sc) => scriptNameOf(sc))
+  ];
+  if (sanitizedHits.length > 0) {
+    errors.push(`[SANITIZED-001] ${sanitizedHits.length} archivo(s) contienen alias de limpieza (SANITIZED_*, *.sanitized.invalid). Restaura los valores reales con 'sanitize-iflow-zip.mjs --restore' (o usa los valores reales) antes de empaquetar.`);
   }
 
   const iflowZipBuffer = createZipBuffer(iflowFiles);
