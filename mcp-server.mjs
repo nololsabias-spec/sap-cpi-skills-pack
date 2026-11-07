@@ -30,6 +30,8 @@ import { validateXsltStylesheet } from './skills/sap-cpi-xslt-studio/scripts/val
 import { validateAndTestCamelRegex } from './skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs';
 import { validateAndBuildCpiBundles, DEMO_ARCHITECT_SPEC } from './skills/sap-cpi-architect/scripts/build-cpi-package.mjs';
 import { cloneIflowBundleZip, updateScriptCollectionBundleZip } from './skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs';
+import { sanitizeInputs, restoreInput, loadMap, writeMap, defaultOutPath, defaultMapPath } from './skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs';
+import { SANITIZE_CATEGORIES } from './shared/cpi-sanitizer.mjs';
 import { validateAndBuildMockSuiteZip, parseMockSuiteInput, DEMO_BATCH_TEXT } from './skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs';
 
 const SERVER_DIR = moduleDir(import.meta.url);
@@ -143,6 +145,37 @@ export const MCP_TOOLS = [
         pdfPath: { type: 'string', description: 'Ruta opcional para generar el informe PDF post-remediación.' }
       },
       required: ['filePath', 'fixes', 'outZipPath']
+    }
+  },
+  {
+    name: 'cpi_sanitize_zip',
+    description:
+      'Crea una copia LIMPIADA (reversible) de uno o varios .zip de SAP CPI: sustituye endpoints, hosts, emails, IPs, alias de credenciales, valores de parameters.prop, secretos, namespaces privados y los términos indicados (cliente/proyecto) por alias coherentes. Úsala ANTES de leer un bundle con información confidencial. Devuelve solo recuentos y rutas; el mapa de restauración queda en local y nunca debe leerse.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filePaths: { type: 'array', items: { type: 'string' }, description: 'Rutas a los .zip de origen (comparten un mismo mapa de alias).' },
+        outDir: { type: 'string', description: 'Carpeta de salida opcional (por defecto junto a cada zip: <nombre>.sanitized.zip).' },
+        mapPath: { type: 'string', description: 'Ruta opcional del mapa (se reutiliza si existe para mantener los mismos alias).' },
+        terms: { type: 'array', items: { type: 'string' }, description: 'Nombres de cliente/proyecto a sustituir (mínimo 3 caracteres).' },
+        keep: { type: 'array', items: { type: 'string', enum: SANITIZE_CATEGORIES }, description: 'Categorías que NO se limpian.' },
+        dropSamples: { type: 'boolean', description: 'Retira payloads de ejemplo (se re-añaden al restaurar).' }
+      },
+      required: ['filePaths']
+    }
+  },
+  {
+    name: 'cpi_restore_zip',
+    description:
+      'Restaura los valores reales en un .zip limpiado (y posiblemente modificado) usando su mapa local. Falla sin escribir nada si encuentra alias desconocidos. Devuelve solo recuentos, nunca valores.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filePath: { type: 'string', description: 'Ruta al .zip limpiado.' },
+        mapPath: { type: 'string', description: 'Ruta al mapa .sanitize-map.json.' },
+        outZipPath: { type: 'string', description: 'Ruta de salida opcional (por defecto <nombre>.restored.zip).' }
+      },
+      required: ['filePath', 'mapPath']
     }
   },
   {
@@ -482,6 +515,41 @@ export function executeMcpTool(name, args = {}) {
         postReport.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
       }
       return postReport;
+    }
+    case 'cpi_sanitize_zip': {
+      const inPaths = args.filePaths.map((p) => resolveUserPath(p));
+      const outDir = args.outDir ? resolveUserPath(args.outDir) : null;
+      const outPaths = inPaths.map((p) => (outDir ? path.join(outDir, path.basename(defaultOutPath(p))) : defaultOutPath(p)));
+      const mapPath = args.mapPath ? resolveUserPath(args.mapPath) : outDir ? path.join(outDir, 'sanitize-map.json') : defaultMapPath(outPaths[0]);
+      const { results, map } = sanitizeInputs(
+        inPaths.map((p) => ({ name: path.basename(p), data: fs.readFileSync(p) })),
+        { map: loadMap(mapPath), terms: args.terms || [], keep: args.keep || [], dropSamples: Boolean(args.dropSamples) }
+      );
+      if (outDir) fs.mkdirSync(outDir, { recursive: true });
+      results.forEach((r, i) => fs.writeFileSync(outPaths[i], r.buffer));
+      writeMap(mapPath, map);
+      return {
+        mapPath,
+        mapWarning: 'El mapa contiene los valores originales: no lo leas ni lo muestres. Trabaja solo con los .sanitized.zip.',
+        bundles: results.map((r, i) => ({ input: r.name, output: outPaths[i], totals: r.totals, aliasCount: r.aliasesUsed.length, files: r.files }))
+      };
+    }
+    case 'cpi_restore_zip': {
+      const src = resolveUserPath(args.filePath);
+      const map = loadMap(resolveUserPath(args.mapPath));
+      if (!map) throw new Error('No existe el mapa indicado.');
+      const r = restoreInput(fs.readFileSync(src), map);
+      const out = args.outZipPath ? resolveUserPath(args.outZipPath) : src.replace(/(\.sanitized)?\.zip$/i, '') + '.restored.zip';
+      if (r.ok) fs.writeFileSync(out, r.buffer);
+      return {
+        ok: r.ok,
+        output: r.ok ? out : null,
+        restoredFiles: r.restoredFiles,
+        readdedFiles: r.readdedFiles,
+        unknownAliases: r.unknownAliases,
+        missingAliases: r.missingAliases,
+        modifiedSinceSanitize: r.modifiedSinceSanitize
+      };
     }
     case 'cpi_validate_groovy': {
       const code = args.code || (args.filePath ? fs.readFileSync(resolveUserPath(args.filePath), 'utf8') : '');
@@ -956,7 +1024,7 @@ if (isMain) {
     const summary = {
       valid:
         initRes?.result?.serverInfo?.name === 'sap-cpi-skills-pack' &&
-        toolsRes?.result?.tools?.length === 20 &&
+        toolsRes?.result?.tools?.length === 22 &&
         resList?.result?.resources?.length >= 8 &&
         parsedCall.totalFiles === 4,
       toolsCount: toolsRes?.result?.tools?.length,

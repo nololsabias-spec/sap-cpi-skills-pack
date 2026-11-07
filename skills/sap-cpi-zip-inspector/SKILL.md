@@ -13,6 +13,13 @@ This skill inspects OSGi `.zip` bundles exported from SAP Cloud Integration (SAP
 
 ## Workflow Steps
 
+### Step -1: Privacy Gate (Limpieza reversible antes de leer)
+Si el bundle es una exportación real de un tenant (no generado por las skills ni `--demo`), aplica la regla `rules/sap-cpi-privacy-sanitize.md` **antes de abrirlo**: pregunta una vez si quiere limpiarlo (Sí / No / Limpiar siempre) y qué nombres de cliente o proyecto ocultar. Si dice que sí:
+```bash
+node scripts/sanitize-iflow-zip.mjs <in.zip...> --out-dir <carpeta> [--terms Cliente,Proyecto] [--drop-samples]
+```
+(MCP: `cpi_sanitize_zip`). Trabaja solo con los `.sanitized.zip` y **nunca** leas el mapa (`*.sanitize-map.json`, o `sanitize-map.json` con `--out-dir`). Antes de importar en CPI, restaura con `--restore <limpio.zip> --map <mapa.json> --out <final.zip>` (MCP: `cpi_restore_zip`). El inspector marca los bundles con alias como `SANITIZED-001` (CRÍTICO).
+
 ### Step 0: Interactive Discovery & Clarification Gate
 Before running the audit or generating the remediation plan, check if any context is missing and **ask brief clarifying questions when needed**:
 1. **Target Artifact Path**: If the user has not specified which `.zip` bundle or `.iflw` file to inspect, ask for the path (or offer to run `--demo` on a sample bundle).
@@ -93,6 +100,7 @@ If `inspect-iflow-zip.mjs` detects Groovy scripts in `src/main/resources/script/
 - `parseManifestContent` devuelve `symbolicName` sin directivas y `symbolicNameDirectives` (p. ej. `['singleton:=true']`).
 - La consola muestra también Basic Auth/CSRF (`IFLW-008`), splitters y routers. Vía MCP, `extractDir` escribe los `.prop` redactados.
 - `cpi_get_iflow_endpoints` (MCP) devuelve los endpoints sender/receiver sin valores de `parameters.prop`.
+- `sanitize-iflow-zip.mjs` (LL-027) sustituye URLs, hosts, emails, IPv4, URNs privados, alias de credenciales, secretos y valores de `.prop` (también donde se reutilizan en Groovy, XSD, `.iflw` o `MANIFEST.MF`) por alias consistentes entre varios zips. `--restore` devuelve cada archivo byte a byte (el `MANIFEST.MF`, equivalente semánticamente). `--check` falla si el bundle aún contiene alias.
 
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 

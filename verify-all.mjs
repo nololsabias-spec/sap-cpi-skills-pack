@@ -125,6 +125,15 @@ const CHECKS = [
     }
   },
   {
+    skill: 'sap-cpi-zip-inspector (Reversible Sanitizer)',
+    script: 'skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs',
+    args: ['--demo', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return Array.isArray(data.leaks) && data.leaks.length === 0 && data.roundTripIdentical === true && data.mismatches.length === 0;
+    }
+  },
+  {
     skill: 'sap-cpi-architect (Inbound API Client Generator - Postman & OpenAPI)',
     script: 'skills/sap-cpi-architect/scripts/export-api-client.mjs',
     args: ['--demo', '--json'],
@@ -152,12 +161,12 @@ const CHECKS = [
     }
   },
   {
-    skill: 'mcp-server.mjs (Local JSON-RPC 2.0 MCP Server - 20 Tools)',
+    skill: 'mcp-server.mjs (Local JSON-RPC 2.0 MCP Server - 22 Tools)',
     script: 'mcp-server.mjs',
     args: ['--self-test', '--json'],
     verify: (out) => {
       const data = JSON.parse(out);
-      return data.valid === true && data.toolsCount === 20 && data.sampleToolCallOk === true;
+      return data.valid === true && data.toolsCount === 22 && data.sampleToolCallOk === true;
     }
   }
 ];

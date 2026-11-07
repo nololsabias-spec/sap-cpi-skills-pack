@@ -20,11 +20,11 @@ node setup-skills.mjs [--target <directorio>] [--agent all|both|antigravity|clau
 | `--mcp` | Registra automáticamente el servidor MCP local (`node <ruta-absoluta>/.agents/mcp-server.mjs`) en `.mcp.json` y `.cursor/mcp.json`, y con `${workspaceFolder}/.agents/mcp-server.mjs` en `.vscode/mcp.json`. La ruta absoluta evita `CONNECTION_CLOSED` cuando el IDE se abre desde una subcarpeta (Claude Code hereda el `.mcp.json` de carpetas padre). |
 
 ### 1.1b. `mcp-server.mjs` (Servidor MCP Local `stdio` JSON-RPC 2.0)
-Expone los 20 motores deterministas como herramientas MCP (`tools/list`, `tools/call`) y las 8 `SKILL.md` como recursos y prompts MCP (`resources/list`, `prompts/list`).
+Expone los 22 motores deterministas (incluidos `cpi_sanitize_zip` y `cpi_restore_zip`) como herramientas MCP (`tools/list`, `tools/call`) y las 8 `SKILL.md` como recursos y prompts MCP (`resources/list`, `prompts/list`).
 
 ```bash
 node mcp-server.mjs              # Modo servidor stdio (invocado automáticamente por el IDE)
-node mcp-server.mjs --self-test  # Autoverificación de las 20 tools y 9 resources MCP
+node mcp-server.mjs --self-test  # Autoverificación de las 22 tools y 9 resources MCP
 ```
 
 **Raíces de ficheros permitidas (seguridad)**: toda ruta recibida por una herramienta MCP debe estar dentro de una raíz permitida; si no, la llamada devuelve error.
@@ -38,7 +38,7 @@ node mcp-server.mjs --self-test  # Autoverificación de las 20 tools y 9 resourc
 El directorio temporal del sistema siempre está permitido. `setup-skills.mjs --mcp` registra el servidor con ruta absoluta, de modo que arranca aunque el IDE se abra desde otro directorio.
 
 ### 1.2. `verify-all.mjs` (Suite de Auto-Verificación)
-Ejecuta pruebas integrales sobre los 16 módulos deterministas y el servidor MCP creando artefactos sintéticos en memoria/temporal y verificando su salida.
+Ejecuta pruebas integrales sobre los 17 módulos deterministas y el servidor MCP creando artefactos sintéticos en memoria/temporal y verificando su salida.
 
 ```bash
 node verify-all.mjs
@@ -78,6 +78,21 @@ node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs --demo [--pdf <diff
 - `--pdf <informe-diff.pdf>`: Genera un informe comparativo formal en PDF con tablas de recursos, checklist de parámetros y delta de cumplimiento.
 - `--show-prop-values`: Muestra los valores reales de los parámetros (por defecto `[REDACTED]`).
 - `--json`: Salida estructurada de cambios topológicos, archivos y parámetros.
+
+### 2.1c. `sanitize-iflow-zip.mjs` (`sap-cpi-zip-inspector`)
+
+Limpieza reversible de bundles reales antes de compartirlos con un agente IA:
+```bash
+node skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs <a.zip> [b.zip...] [--out <limpio.zip> | --out-dir <carpeta>] [--map <mapa.json>] [--terms A,B | --terms-file <f>] [--keep secrets,urls,...] [--drop-samples] [--json]
+node skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs --restore <limpio.zip> --map <mapa.json> [--out <final.zip>] [--json]
+node skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs --check <zip>
+node skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs --demo [--json]
+```
+- Varios zips en una llamada comparten mapa: el mismo valor recibe el mismo alias.
+- `--keep`: categorías que no se tocan (`secrets, urls, namespaces, emails, ips, hosts, credentials, params, terms`).
+- `--drop-samples`: retira los payloads de ejemplo; `--restore` los vuelve a añadir.
+- `--check`: exit 1 si el bundle contiene alias (`SANITIZED-001`).
+- El mapa (`<in>.sanitized.sanitize-map.json` por defecto, `sanitize-map.json` con `--out-dir`) contiene los valores originales: es local, tiene permisos 0600 y está en `.gitignore`.
 
 ---
 

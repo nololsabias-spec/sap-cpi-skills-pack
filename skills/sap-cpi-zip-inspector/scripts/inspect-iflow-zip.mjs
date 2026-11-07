@@ -13,6 +13,7 @@ import path from 'node:path';
 import { readZipEntries, createZipBuffer, resolveInside, redactPropText } from '../../../shared/zip-utils.mjs';
 import { writeAuditPdfFile } from '../../../shared/pdf-utils.mjs';
 import { refoldManifest } from '../../../shared/manifest-utils.mjs';
+import { findSanitizedEntries } from '../../../shared/cpi-sanitizer.mjs';
 import { lintGroovyScript } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
 
 export function parseManifestContent(manifestText) {
@@ -505,6 +506,11 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
   } else if (nestedZipFiles.length === 0 && !sourceName.toLowerCase().endsWith('.iflw') && !sourceName.toLowerCase().endsWith('.xml')) {
     manifestIssues.push(`CRÍTICO: No se encontró 'META-INF/MANIFEST.MF' en el paquete.`);
   }
+  // SANITIZED-001: a copy produced by sanitize-iflow-zip.mjs must be restored before importing it into CPI
+  const sanitizedPaths = findSanitizedEntries(entries);
+  if (sanitizedPaths.length > 0) {
+    manifestIssues.push(`CRÍTICO [SANITIZED-001]: ${sanitizedPaths.length} archivo(s) contienen alias de limpieza (SANITIZED_*, *.sanitized.invalid, urn:sanitized:*). Es una copia limpiada para la IA: ejecuta 'sanitize-iflow-zip.mjs --restore <zip> --map <mapa>' antes de importarla en SAP CPI.`);
+  }
 
   const groovyAuditResults = groovyScripts.map((g) => lintGroovyScript(g.text || '', g.name));
   const isScriptCollection = manifestData.bundleType === 'ScriptCollection' || (iflwFiles.length === 0 && groovyScripts.length > 0 && manifestFiles.length > 0);
@@ -659,6 +665,7 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
     fileName: sourceName,
     totalFiles: entries.length,
     manifestData,
+    sanitized: { detected: sanitizedPaths.length > 0, files: sanitizedPaths },
     nestedBundles,
     catalog: {
       manifestFiles: manifestFiles.map((f) => ({ name: f.name, path: f.path, size: f.size })),

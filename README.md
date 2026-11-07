@@ -73,15 +73,18 @@ Las herramientas MCP solo aceptan rutas dentro del workspace (`CPI_MCP_ROOT`, `C
 sap-cpi-skills-pack/
 ├── README.md                           # Guía principal de instalación y uso
 ├── AGENTS.md / CLAUDE.md               # Harness de ingeniería y aprendizaje continuo (Codex / Antigravity / Claude)
-├── mcp-server.mjs                      # Servidor MCP local (stdio JSON-RPC 2.0, 20 tools + 9 resources)
+├── mcp-server.mjs                      # Servidor MCP local (stdio JSON-RPC 2.0, 22 tools + 9 resources)
 ├── package.json                        # Scripts de verificación (npm test), MCP y demostraciones
 ├── setup-skills.mjs                    # Instalador universal Multi-IDE (Antigravity, Claude, Codex, Cursor, Copilot, Windsurf, Cline)
-├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills (16 módulos) + servidor MCP
+├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills (17 módulos) + servidor MCP
 ├── rules/
-│   └── sap-cpi-continuous-learning.md  # Regla de auto-evolución continua y privacidad estricta
+│   ├── sap-cpi-continuous-learning.md  # Regla de auto-evolución continua y privacidad estricta
+│   └── sap-cpi-privacy-sanitize.md     # Regla de limpieza reversible de bundles reales (preguntar, limpiar, restaurar)
 ├── shared/
 │   ├── zip-utils.mjs                   # Motor ZIP nativo (lectura/escritura DEFLATE, CRC32 y normalización OSGi)
-│   └── pdf-utils.mjs                   # Motor PDF 1.4 nativo (informes ejecutivos de auditoría multipágina)
+│   ├── pdf-utils.mjs                   # Motor PDF 1.4 nativo (informes ejecutivos de auditoría multipágina)
+│   ├── cpi-sanitizer.mjs               # Limpieza reversible: alias consistentes + restauración desde mapa local
+│   └── …                               # cli-utils, manifest-utils, xml-lite, java-regex, safe-regex
 ├── docs/
 │   ├── ARCHITECTURE.md                 # Arquitectura interna, modo dual Skills + MCP, motor ZIP y PDF
 │   ├── CLI_REFERENCE.md                # Referencia completa de comandos, argumentos, flags y herramientas MCP
@@ -90,7 +93,7 @@ sap-cpi-skills-pack/
 │   └── LESSONS_LEARNED.md              # Base de conocimiento viva con lecciones reales de SAP CPI anonimizadas
 └── skills/
     ├── sap-cpi-zip-inspector/          # 1. Inspector .zip, auditor BPMN2, differ semántico, PDF y remediador
-    │   └── scripts/                    #    (inspect-iflow-zip.mjs, diff-iflow-zip.mjs)
+    │   └── scripts/                    #    (inspect-iflow-zip.mjs, diff-iflow-zip.mjs, sanitize-iflow-zip.mjs)
     ├── sap-cpi-groovy-generator/       # 2. Generador Groovy 2.4 / 4 y linter estático (validate-groovy.mjs)
     ├── sap-cpi-code-auditor/           # 3. Auditor de calidad/seguridad Groovy (Score 0-100, audit-groovy.mjs)
     ├── sap-cpi-xslt-studio/            # 4. Validador y generador XSLT 1.0/2.0/3.0 (validate-xslt.mjs)
@@ -109,7 +112,7 @@ sap-cpi-skills-pack/
 
 | # | Skill | Funcionalidad Principal | Script CLI |
 | :- | :--- | :--- | :--- |
-| **1** | `sap-cpi-zip-inspector` | Descomprime artefactos `.zip` (`IntegrationFlow`, `ScriptCollection` o paquetes anidados), redacta `.prop` por privacidad, inventaría recursos, audita riesgos BPMN 2.0 y CPILint, genera informes PDF ejecutivos y **compara semánticamente dos versiones de paquetes iFlow** eliminando el ruido BPMNDI. | `inspect-iflow-zip.mjs`<br>`diff-iflow-zip.mjs` |
+| **1** | `sap-cpi-zip-inspector` | Descomprime artefactos `.zip` (`IntegrationFlow`, `ScriptCollection` o paquetes anidados), redacta `.prop` por privacidad, inventaría recursos, audita riesgos BPMN 2.0 y CPILint, genera informes PDF ejecutivos y **compara semánticamente dos versiones de paquetes iFlow** eliminando el ruido BPMNDI. | `inspect-iflow-zip.mjs`<br>`diff-iflow-zip.mjs`<br>`sanitize-iflow-zip.mjs` |
 | **2** | `sap-cpi-groovy-generator` | Genera y valida scripts Groovy (Script v1 y Groovy 4 v2 API) individualmente o en lote (carpetas/`.zip`), aplicando prevención de OOM, anti-XXE, `@Field final` y *Ensure Upgrade Readiness*. | `validate-groovy.mjs` |
 | **3** | `sap-cpi-code-auditor` | Audita scripts Groovy calculando una puntuación determinista (`0-100`), desglosa vulnerabilidades por severidad y verifica refactorizaciones. | `audit-groovy.mjs` |
 | **4** | `sap-cpi-xslt-studio` | Genera y valida transformaciones XSLT 1.0 (Xalan) y XSLT 2.0/3.0 (Saxon-HE), incluyendo `json-to-xml()`, `<xsl:param>` e interacción con cabeceras/propiedades del Exchange (`cpi:*` / `sapci:*`). | `validate-xslt.mjs` |
@@ -135,7 +138,13 @@ node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.
 
 # Comparar semánticamente dos versiones de un paquete (iFlow o Script Collection) con reporte PDF
 node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs ./iFlow_v1.zip ./iFlow_v2.zip --pdf ./Comparativa.pdf
+
+# Limpieza reversible antes de compartir un bundle real con la IA (y restauración antes de importarlo)
+node skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs ./Paquete_iFlow.zip --terms Cliente,Proyecto
+node skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs --restore ./Paquete_iFlow.sanitized.zip --map ./Paquete_iFlow.sanitize-map.json --out ./Paquete_Final.zip
 ```
+
+Con la regla `rules/sap-cpi-privacy-sanitize.md`, el agente pregunta antes de leer un bundle real si quieres limpiarlo. Los alias son sintácticamente válidos, así que puede editar Groovy, XSD o `.iflw` sobre la copia limpia; `--restore` devuelve los valores reales. El mapa nunca se sube a Git.
 
 ### 5.2. Validador y Linter de Scripts Groovy (`sap-cpi-groovy-generator`)
 
@@ -274,3 +283,5 @@ Cada vez que el usuario detecta un fallo al importar o ejecutar un artefacto en 
 3. **Codifica la validación o remediación** en el script CLI correspondiente (`skills/*/scripts/*.mjs`).
 4. **Actualiza las `SKILL.md`**, [`docs/VALIDATION_RULES.md`](./docs/VALIDATION_RULES.md) y [`docs/LESSONS_LEARNED.md`](./docs/LESSONS_LEARNED.md).
 5. Ejecuta `node verify-all.mjs` y `node setup-skills.mjs` para propagar la mejora.
+
+Además, la regla [`rules/sap-cpi-privacy-sanitize.md`](./rules/sap-cpi-privacy-sanitize.md) hace que el agente **pregunte antes de leer** un `.zip`/`.iflw` exportado de un tenant real si quiere limpiarlo. Si aceptas, trabaja solo sobre una copia `.sanitized.zip` con alias reversibles, nunca lee el mapa de valores originales (`sanitize-map.json`, ignorado por Git) y te recuerda restaurar con `--restore` antes de importar en SAP CPI (el inspector marca `SANITIZED-001` y el empaquetador se niega mientras queden alias).

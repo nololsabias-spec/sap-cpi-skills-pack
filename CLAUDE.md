@@ -10,3 +10,4 @@ Consulta y sigue estrictamente las directrices definidas en [`AGENTS.md`](./AGEN
    - Actualizar la `SKILL.md` implicada, `docs/VALIDATION_RULES.md` y `docs/LESSONS_LEARNED.md`.
    - Ejecutar `node verify-all.mjs` y `node setup-skills.mjs`.
 2. **Privacidad Estricta**: Nunca leas ni imprimas valores de archivos `.prop`, y jamás incluyas nombres de proyectos privados, clientes ni endpoints reales en las skills, tests o commits.
+3. **Limpieza Reversible de Bundles Reales** ([`rules/sap-cpi-privacy-sanitize.md`](./rules/sap-cpi-privacy-sanitize.md)): antes de leer un `.zip`/`.iflw` exportado de un tenant, pregunta si limpiarlo; trabaja solo con el `.sanitized.zip`, no leas nunca el `*.sanitize-map.json` y recuerda restaurar (`--restore`) antes de importar en SAP CPI.
