@@ -48,7 +48,7 @@ Generate the complete BPMN 2.0 XML implementing every step of the plan following
   - All `Splitter` steps (`General Splitter` / `Iterating Splitter`) must enable streaming (`<ifl:property key="streaming" value="true"/>`) and use direct XPath expressions without heavy predicates.
   - Never pass mega-payloads (> 50 MB) directly into a graphical Message Mapping (DOM trap); always place a streaming `Splitter` before the Message Mapping.
 - **Router Optimization**:
-  - Extract XML values into typed Exchange Properties (`java.lang.String`, `java.lang.Long`) in a `Content Modifier` *before* the `Router`, and evaluate `${property.Field}` (Camel Simple) instead of evaluating repeated XPath across multiple Router branches.
+  - Extract XML values into typed Exchange Properties (`java.lang.String`, `java.lang.Long`) in a `Content Modifier` *before* the `Router`, and evaluate `${exchangeProperty.Field}` (Camel Simple) instead of evaluating repeated XPath across multiple Router branches.
   - Order Router branches from most frequent to least frequent, and always define a `default` route on `<bpmn2:exclusiveGateway>`.
 - All external endpoints must use `https://` and externalized parameters `{{PARAM_NAME}}`.
 - All synchronous `ExternalCall` tasks must declare an explicit `timeout` property (e.g., `60000`).
@@ -57,7 +57,7 @@ Generate the complete BPMN 2.0 XML implementing every step of the plan following
 - **Patrones Opcionales para *Handlers* Transversales Reutilizables**:
   - **Handler Centralizado de Errores y Observabilidad (`ProcessDirect` -> `Parallel Multicast`)**:
     - Recibe un sobre XML de error vía `ProcessDirect` (`{{PD_address}}`) desde los `Exception Subprocess` de otros iFlows, respaldado por un XSD tolerante donde todos los campos son `minOccurs="0" nillable="true"` (incluyendo `Environment`, `InterfaceName`, `InterfaceDescription`, `ObjectID`, `ExceptionMessage`, `OriginalMessageProcessingLogID`, `SAP_MessageProcessingLogID`, `SAP_MplCorrelationId` y banderas como `SendBody`).
-    - Usa un `Parallel Multicast` para dividir el flujo en dos ramas: (1) una rama de alerta por correo (`Mail` SMTP con `starttls_mandatory`) que formatea una tabla HTML en un `Content Modifier`, y (2) una rama de observabilidad hacia **SAP Cloud Logging / OpenSearch** que evalúa `${property.SendBody.toLowerCase()} = 'yes'` en un `Router` para elegir entre dos `Message Mapping` (`WithBody.mmap` vs `NoBody.mmap`), convierte la salida con `XML to JSON Converter` (`xmlJsonSuppressRootElement=true`) y la envía por `HTTP` POST con certificado de cliente (`{{CloudLoggingCertificate}}`).
+    - Usa un `Parallel Multicast` para dividir el flujo en dos ramas: (1) una rama de alerta por correo (`Mail` SMTP con `starttls_mandatory`) que formatea una tabla HTML en un `Content Modifier`, y (2) una rama de observabilidad hacia **SAP Cloud Logging / OpenSearch** que evalúa `${exchangeProperty.SendBody.toLowerCase()} = 'yes'` en un `Router` para elegir entre dos `Message Mapping` (`WithBody.mmap` vs `NoBody.mmap`), convierte la salida con `XML to JSON Converter` (`xmlJsonSuppressRootElement=true`) y la envía por `HTTP` POST con certificado de cliente (`{{CloudLoggingCertificate}}`).
     - Incluye su propio `Exception Subprocess` local que inspecciona `CamelExceptionCaught` y guarda el detalle como adjunto MPL (`addAttachmentAsString`) para evitar bucles infinitos si falla el servidor de correo o de logs.
   - **Handler Centralizado de Refresco de Tokens (`StartTimerEvent` -> `LocalIntegrationProcess` -> Global `Data Store`)**:
     - Inicia con un `StartTimerEvent` parametrizado (`{{TokenTimer}}` de tipo `custom:schedule` en `parameters.propdef`), delega la llamada `ExternalCall` y extracción del token a un `LocalIntegrationProcess` (`processType="directCall"`), limpia cabeceras y propiedades internas en un `Content Modifier` mediante acciones `Delete` (`$name=Authorization`, `$name=SAP_MonitoringStateProperties`, `$name=Content-Length`, etc.) y persiste la cabecera/token en un **Data Store Global Cifrado** (`activityType="DBstorage"`, `operation="put"`, `visibility="global"`, `encrypt="true"`, `override="true"`, `includeMessageHeaders="true"`).
@@ -80,6 +80,8 @@ node ./scripts/build-cpi-package.mjs <spec.json | --demo> --out-dir ./dist-packa
   - Always remind the user to upload `<scriptCollectionName>.zip` (in *Add -> Script Collection*) and `<iflowName>.zip` (in *Add -> Integration Flow*) individually, rather than uploading the outer `Paquete_<iflowName>.zip` wrapper.
 
 ---
+
+> **Formatos OSGi reales (verificados con exportaciones de SAP)**: `.project` con buildCommand `org.eclipse.jdt.core.javabuilder` y naturalezas `org.eclipse.jdt.core.javanature` + `com.sap.ide.ifl.project.support.project.nature` + `com.sap.ide.ifl.bsn` (iFlow / Script Collection) o `com.sap.ide.ifl.valmap` (Value Mapping). Los Value Mapping (`build-value-mapping.mjs`) usan `<vm version="2.0"><group id="<hex32>"><entry><agency/><schema/><value/></entry>…</group></vm>` y un MANIFEST con `Import-Package: com.sap.xi.mapping.camel.valmap` y `Bundle-Activator: com.sap.xi.mapping.camel.valmap.ValueMappingActivator`. `value_mapping.xml` va en la **raíz** del bundle (como en el ejemplo oficial `TestValueMap.zip` de SAP) y `Bundle-SymbolicName` lleva `; singleton:=true`. Por convención, el Value Mapping se crea en el **mismo paquete de integración** que el iFlow que lo consume, pero los pares agencia/identificador son globales al tenant y no pueden repetirse entre Value Mappings desplegados.
 
 ## Modo 2: Documentar iFlow Existente (Ingeniería Inversa en 8 Secciones)
 
@@ -122,7 +124,7 @@ Use this mode when the user provides an existing SAP CPI package (`.zip` contain
 ### Paso 1: Adaptar o Crear los Scripts en la Script Collection
 1. Crea los nuevos scripts `.groovy` (y actualiza los existentes si el usuario lo solicitó) manteniendo el patrón arquitectónico de la Script Collection original.
 2. Asegúrate de que:
-   - En scripts Groovy 2.4 (`com.sap.gateway.ip.core.customdev.util.Message`), se importe **`groovy.util.XmlSlurper`** (nunca `groovy.xml.XmlSlurper`, que falla al compilar con `unable to resolve class groovy.xml.XmlSlurper`).
+   - El paquete de `XmlSlurper` coincida con la versión de Groovy del paso Script (que no se deduce de la API `Message`): **Groovy 2.4** → `groovy.util.XmlSlurper` (`groovy.xml.XmlSlurper` falla con `unable to resolve class`); **Groovy 4** → `groovy.xml.XmlSlurper` (`groovy.util.XmlSlurper` fue eliminado). Valida con `validate-groovy.mjs --groovy 2.4|4`.
    - Al leer desde un `Reader` (`BufferedReader` / `StringReader`), **nunca** se invoque `bodyReader.getText('UTF-8')` con parámetro de charset (lanza `MissingMethodException`); usa `bodyReader.getText()` **sin argumentos** o pasa `bodyReader` directamente a `.parse(bodyReader)`.
    - Toda constante a nivel de script con `@Field` incluya `final` (`@Field final`), el parseo XML deshabilite `disallow-doctype-decl`, y el parseo JSON use `JsonSlurperClassic`.
 3. Valida todos los scripts en lote con `validate-groovy.mjs`:
@@ -161,12 +163,19 @@ node ./scripts/export-api-client.mjs <iflow.zip | --demo> --endpoints [--json]
 ```
 
 * Script CLI: [export-api-client.mjs](./scripts/export-api-client.mjs)
-* **Extracción de Matriz de Endpoints (`--endpoints` o MCP `cpi_get_iflow_endpoints`)**: Extrae en milisegundos los canales inbound y outbound, detecta protección CSRF (`isCsrfProtected`), resolución de direcciones y timeouts desde `parameters.prop`, y rechaza con gracia paquetes sin `.iflw` como Script Collections.
+* **Extracción de Matriz de Endpoints (`--endpoints` o MCP `cpi_get_iflow_endpoints`)**: Extrae en milisegundos los canales inbound y outbound, detecta protección CSRF (`isCsrfProtected`) y timeouts, conserva las direcciones externalizadas como `{{param}}` (los valores de `parameters.prop` solo se resuelven con `--resolve-params`) y rechaza con gracia paquetes sin `.iflw` como Script Collections.
 * **Handshake CSRF Automático**: Genera una petición GET independiente y programa un script `prerequest` en el POST (`pm.sendRequest` con `X-CSRF-Token: Fetch` y `Basic {{CPI_BASIC_AUTH}}`) para autorizar llamadas de forma autónoma tanto en Postman UI como en Newman / CI/CD.
-* **Resolución de Parámetros Externalizados**: Si la URL del adaptador remitente usa `{{param}}` (ej. `{{StorefrontEndpoint}}`), se resuelve automáticamente leyendo `parameters.prop`.
+* **Parámetros Externalizados (privacidad por defecto)**: Si la URL del adaptador remitente usa `{{param}}` (ej. `{{StorefrontEndpoint}}`), se conserva como variable `{{param}}` de Postman/OpenAPI. Solo con `--resolve-params` (opt-in explícito; `resolveParams: true` en MCP) se leen los valores de `parameters.prop`.
 * **Esquemas y Payloads Duales**: Sintetiza ejemplos tanto en `application/xml` como en `application/json` a partir de los esquemas XSD del paquete.
 
 
+
+## Qué garantiza el script (LL-021, LL-022)
+
+- `build-cpi-package.mjs` no escribe ningún zip si hay errores, escapa `parameters.prop`/`.propdef` como `java.util.Properties` (`\\`, `=`, `:` y saltos de línea) y escapa el texto XML. El DEMO lleva el timeout en el canal (`messageFlow`), no en la tarea.
+- `build-value-mapping.mjs` lee CSV RFC 4180 (comillas, `,` o `;` detectado automáticamente) y avisa de pares agencia/valor duplicados en lugar de fallar con stack trace.
+- `export-api-client.mjs` toma la ruta del sender HTTPS de `urlPath` (SOAP/IDoc/ProcessDirect usan `address`) y rechaza bundles que no son un iFlow (p. ej. una Script Collection).
+- `clone-iflow-bundle.mjs` actualiza las referencias del `.iflw` cuando renombra scripts de una Script Collection.
 
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 

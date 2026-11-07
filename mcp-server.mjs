@@ -10,8 +10,10 @@
  *   node mcp-server.mjs                (Starts MCP stdio server)
  *   node mcp-server.mjs --self-test    (Runs deterministic self-test of MCP tools/resources/prompts)
  */
+import { isMainModule, moduleDir } from './shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { writeAuditPdfFile } from './shared/pdf-utils.mjs';
 import { extractBundleFile } from './shared/zip-utils.mjs';
 import { inspectBundle, buildAuditPdfSpec, remediateBundleZip } from './skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
@@ -30,7 +32,73 @@ import { validateAndBuildCpiBundles, DEMO_ARCHITECT_SPEC } from './skills/sap-cp
 import { cloneIflowBundleZip, updateScriptCollectionBundleZip } from './skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs';
 import { validateAndBuildMockSuiteZip, parseMockSuiteInput, DEMO_BATCH_TEXT } from './skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs';
 
-const SERVER_DIR = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const SERVER_DIR = moduleDir(import.meta.url);
+
+/**
+ * S3 — Path sandbox for MCP tool arguments. A prompt-injected model must not be able to read or
+ * write arbitrary files (e.g. ~/.ssh, other repos) through this server. Every path argument is
+ * resolved against the workspace root and must stay inside an allowed root:
+ *   - CPI_MCP_ROOT or CLAUDE_PROJECT_DIR (when set), otherwise the server's working directory
+ *   - the OS temp directory
+ *   - extra roots in CPI_MCP_ALLOWED_ROOTS (separated by path.delimiter)
+ * Set CPI_MCP_UNSAFE_PATHS=1 to disable the check (not recommended).
+ */
+function realOrResolved(p) {
+  let cur = path.resolve(p);
+  const tail = [];
+  while (!fs.existsSync(cur)) {
+    const parent = path.dirname(cur);
+    if (parent === cur) return path.resolve(p);
+    tail.unshift(path.basename(cur));
+    cur = parent;
+  }
+  try {
+    return path.join(fs.realpathSync(cur), ...tail);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/** True for the user's home folder or a filesystem/drive root: too broad to be a workspace. */
+function isTooBroadRoot(p) {
+  const r = realOrResolved(path.resolve(p));
+  const norm = (x) => (process.platform === 'win32' ? x.toLowerCase() : x).replace(/[\\/]+$/, '');
+  return norm(r) === norm(path.parse(r).root) || norm(r) === norm(realOrResolved(os.homedir()));
+}
+
+export function getAllowedRoots() {
+  const extra = (process.env.CPI_MCP_ALLOWED_ROOTS || '').split(path.delimiter).filter(Boolean);
+  // Workspace the server was installed into (<workspace>/.agents/mcp-server.mjs) or the repo itself.
+  // Needed because CLAUDE_PROJECT_DIR may point to a sub-folder when .mcp.json is inherited from a parent.
+  const installRoot = ['.agents', '.claude'].includes(path.basename(SERVER_DIR)) ? path.dirname(SERVER_DIR) : SERVER_DIR;
+  // Strict mode: an explicit CPI_MCP_ROOT (written by setup-skills --mcp) is the only root, plus CPI_MCP_ALLOWED_ROOTS.
+  if (process.env.CPI_MCP_ROOT) {
+    return [...new Set([process.env.CPI_MCP_ROOT, ...extra].map(realOrResolved))];
+  }
+  let primary = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  // A server launched from the home folder or C:\ must not expose the whole disk (LL-019).
+  if (isTooBroadRoot(primary)) primary = installRoot;
+  return [...new Set([primary, installRoot, os.tmpdir(), ...extra].map(realOrResolved))];
+}
+
+export function resolveUserPath(p) {
+  if (p === undefined || p === null || p === '') return p;
+  if (typeof p !== 'string' || p.includes('\0')) throw new Error('Ruta inválida.');
+  const roots = getAllowedRoots();
+  const abs = realOrResolved(path.resolve(roots[0], p));
+  if (process.env.CPI_MCP_UNSAFE_PATHS === '1') return abs;
+  const norm = (x) => (process.platform === 'win32' ? x.toLowerCase() : x);
+  const inside = roots.some((r) => {
+    const rel = path.relative(norm(r), norm(abs));
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  });
+  if (!inside) {
+    throw new Error(
+      `Ruta fuera del workspace permitido: ${p}. Raíces permitidas: ${roots.join(', ')} (añade otras con CPI_MCP_ALLOWED_ROOTS).`
+    );
+  }
+  return abs;
+}
 
 const SKILL_IDS = [
   'sap-cpi-architect',
@@ -86,7 +154,8 @@ export const MCP_TOOLS = [
       properties: {
         code: { type: 'string', description: 'Código fuente Groovy a validar (opcional si se indica filePath).' },
         filePath: { type: 'string', description: 'Ruta al archivo .groovy en disco (opcional si se indica code).' },
-        fileName: { type: 'string', description: 'Nombre identificador del script (ej. TransformOrder.groovy).' }
+        fileName: { type: 'string', description: 'Nombre identificador del script (ej. TransformOrder.groovy).' },
+        groovyVersion: { type: 'string', enum: ['2.4', '4'], description: 'Versión de Groovy del paso Script (2.4 o 4). Sin ella, las APIs XML dependientes de versión se reportan como MEDIUM en lugar de error de compilación; no se infiere de la API Message v1/v2.' }
       }
     }
   },
@@ -99,7 +168,8 @@ export const MCP_TOOLS = [
       properties: {
         originalCode: { type: 'string', description: 'Código Groovy original.' },
         refactoredCode: { type: 'string', description: 'Código Groovy refactorizado (opcional).' },
-        fileName: { type: 'string', description: 'Nombre del archivo Groovy.' }
+        fileName: { type: 'string', description: 'Nombre del archivo Groovy.' },
+        groovyVersion: { type: 'string', enum: ['2.4', '4'], description: 'Versión de Groovy del paso Script (2.4 o 4). Sin ella, las APIs XML dependientes de versión se reportan como MEDIUM en lugar de error de compilación; no se infiere de la API Message v1/v2.' }
       },
       required: ['originalCode']
     }
@@ -243,6 +313,8 @@ export const MCP_TOOLS = [
         headers: { type: 'object', description: 'Mapa clave-valor de cabeceras simuladas (ej. {"SapSender": "CRM"}).' },
         properties: { type: 'object', description: 'Mapa clave-valor de propiedades Exchange simuladas.' },
         isJson: { type: 'boolean', description: 'Indica explícitamente si el payload origen es JSON.' },
+        targetXsdContent: { type: 'string', description: 'XSD destino opcional: la salida generada se valida contra él.' },
+        targetXsdPath: { type: 'string', description: 'Ruta al XSD destino (alternativa a targetXsdContent).' },
         outPath: { type: 'string', description: 'Ruta opcional donde guardar el XML de destino simulado.' }
       }
     }
@@ -294,7 +366,7 @@ export const MCP_TOOLS = [
   {
     name: 'cpi_build_value_mapping',
     description:
-      'Construye paquetes OSGi (.zip) de Value Mapping estándar para SAP CPI a partir de especificaciones JSON o tablas CSV (con metainfo.prop, .project com.sap.ide.ifl.nature.valuemapping y value_mapping.xml).',
+      'Construye paquetes OSGi (.zip) de Value Mapping estándar para SAP CPI a partir de especificaciones JSON o tablas CSV (con metainfo.prop, .project con nature com.sap.ide.ifl.valmap y value_mapping.xml en formato <vm version="2.0">).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -331,6 +403,8 @@ export const MCP_TOOLS = [
         rawContent: { type: 'string', description: 'Contenido raw de la especificación (formato bloques === PAYLOAD o JSON).' },
         correlateData: { type: 'boolean', description: 'Indica si se valida la coherencia de claves entre contratos (default: true).' },
         correlationKeys: { type: 'array', items: { type: 'string' }, description: 'Claves de correlación (ej. ["orderId", "customerId"]).' },
+        strict: { type: 'boolean', description: 'Si es true, los desajustes de correlación y un número distinto de ejemplos entre contratos son errores (valid:false, sin ZIP).' },
+        timestamp: { type: 'boolean', description: 'Incluir la fecha actual en README/index/ZIP (por defecto la salida es reproducible byte a byte).' },
         outZipPath: { type: 'string', description: 'Ruta opcional donde guardar el archivo .zip de la suite.' },
         outputZipPath: { type: 'string', description: 'Ruta opcional donde guardar el archivo .zip de la suite (alias de outZipPath).' }
       }
@@ -385,34 +459,38 @@ export const MCP_TOOLS = [
 export function executeMcpTool(name, args = {}) {
   switch (name) {
     case 'cpi_inspect_zip': {
-      const report = inspectBundle(args.filePath || '--demo', args.extractDir || null);
+      const report = inspectBundle(args.filePath === '--demo' ? '--demo' : resolveUserPath(args.filePath), args.extractDir ? resolveUserPath(args.extractDir) : null, {
+        redactExtractedProps: true
+      });
       if (args.pdfPath) {
         const pdfSpec = buildAuditPdfSpec(report);
-        const bytes = writeAuditPdfFile(path.resolve(args.pdfPath), pdfSpec);
-        report.pdfGenerated = { path: path.resolve(args.pdfPath), sizeBytes: bytes };
+        const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
+        report.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
       }
       return report;
     }
     case 'cpi_remediate_zip': {
       const fixes = Array.isArray(args.fixes) ? args.fixes : ['all'];
-      const remRes = remediateBundleZip(args.filePath, fixes, args.outZipPath);
-      const postReport = inspectBundle(args.outZipPath);
+      const srcPath = args.filePath === '--demo' ? '--demo' : resolveUserPath(args.filePath);
+      const outZip = resolveUserPath(args.outZipPath);
+      const remRes = remediateBundleZip(srcPath, fixes, outZip);
+      const postReport = inspectBundle(outZip);
       postReport.remediationResult = remRes;
       if (args.pdfPath) {
         const pdfSpec = buildAuditPdfSpec(postReport);
-        const bytes = writeAuditPdfFile(path.resolve(args.pdfPath), pdfSpec);
-        postReport.pdfGenerated = { path: path.resolve(args.pdfPath), sizeBytes: bytes };
+        const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
+        postReport.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
       }
       return postReport;
     }
     case 'cpi_validate_groovy': {
-      const code = args.code || (args.filePath ? fs.readFileSync(path.resolve(args.filePath), 'utf8') : '');
+      const code = args.code || (args.filePath ? fs.readFileSync(resolveUserPath(args.filePath), 'utf8') : '');
       const fName = args.fileName || (args.filePath ? path.basename(args.filePath) : 'Script.groovy');
-      return lintGroovyScript(code, fName);
+      return lintGroovyScript(code, fName, { groovyVersion: args.groovyVersion });
     }
     case 'cpi_audit_groovy': {
-      const orig = lintGroovyScript(args.originalCode || '', args.fileName || 'Original.groovy');
-      const ref = args.refactoredCode ? lintGroovyScript(args.refactoredCode, args.fileName || 'Refactored.groovy') : null;
+      const orig = lintGroovyScript(args.originalCode || '', args.fileName || 'Original.groovy', { groovyVersion: args.groovyVersion });
+      const ref = args.refactoredCode ? lintGroovyScript(args.refactoredCode, args.fileName || 'Refactored.groovy', { groovyVersion: args.groovyVersion }) : null;
       return compareAuditResults(orig, ref);
     }
     case 'cpi_infer_xsd': {
@@ -424,26 +502,26 @@ export function executeMcpTool(name, args = {}) {
       });
       const validation = validateXsdForSapCpi(xsd);
       if (args.outPath) {
-        fs.mkdirSync(path.dirname(path.resolve(args.outPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.outPath), xsd, 'utf8');
+        fs.mkdirSync(path.dirname(resolveUserPath(args.outPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.outPath), xsd, 'utf8');
       }
-      return { xsd, validation, outPath: args.outPath ? path.resolve(args.outPath) : null };
+      return { xsd, validation, outPath: args.outPath ? resolveUserPath(args.outPath) : null };
     }
     case 'cpi_validate_xsd': {
-      const content = args.xsdContent || (args.filePath ? fs.readFileSync(path.resolve(args.filePath), 'utf8') : '');
+      const content = args.xsdContent || (args.filePath ? fs.readFileSync(resolveUserPath(args.filePath), 'utf8') : '');
       return validateXsdForSapCpi(content);
     }
     case 'cpi_build_mmap': {
       const mmapXml = generateMmapXml(args);
       const validation = validateMmapForSapCpi(mmapXml);
       if (args.outPath) {
-        fs.mkdirSync(path.dirname(path.resolve(args.outPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.outPath), mmapXml, 'utf8');
+        fs.mkdirSync(path.dirname(resolveUserPath(args.outPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.outPath), mmapXml, 'utf8');
       }
-      return { mmapXml, validation, outPath: args.outPath ? path.resolve(args.outPath) : null };
+      return { mmapXml, validation, outPath: args.outPath ? resolveUserPath(args.outPath) : null };
     }
     case 'cpi_validate_xslt': {
-      const content = args.xsltContent || (args.filePath ? fs.readFileSync(path.resolve(args.filePath), 'utf8') : '');
+      const content = args.xsltContent || (args.filePath ? fs.readFileSync(resolveUserPath(args.filePath), 'utf8') : '');
       return validateXsltStylesheet(content, args.engine || null);
     }
     case 'cpi_test_regex': {
@@ -462,14 +540,14 @@ export function executeMcpTool(name, args = {}) {
         if (!args.specPath || args.specPath === '--demo') {
           specObj = DEMO_ARCHITECT_SPEC;
         } else {
-          const p = path.resolve(args.specPath);
+          const p = resolveUserPath(args.specPath);
           baseDir = path.dirname(p);
           specObj = JSON.parse(fs.readFileSync(p, 'utf8'));
         }
       }
       const res = validateAndBuildCpiBundles(specObj, baseDir);
       if (args.outDir) {
-        const targetDir = path.resolve(args.outDir);
+        const targetDir = resolveUserPath(args.outDir);
         fs.mkdirSync(targetDir, { recursive: true });
         fs.writeFileSync(path.join(targetDir, res.artifacts.iflowFileName), res.artifacts.iflowZipBuffer);
         if (res.artifacts.scriptCollectionZipBuffer) {
@@ -494,69 +572,70 @@ export function executeMcpTool(name, args = {}) {
     }
     case 'cpi_clone_bundle': {
       const additionalResources = (args.resourceFiles || []).map((rf) => {
-        const abs = path.resolve(rf);
+        const abs = resolveUserPath(rf);
         return { fileName: path.basename(abs), content: fs.readFileSync(abs) };
       });
-      const buf = cloneIflowBundleZip(path.resolve(args.sourceZipPath), {
+      const buf = cloneIflowBundleZip(resolveUserPath(args.sourceZipPath), {
         targetName: args.targetName,
         additionalResources
       });
-      const outAbs = path.resolve(args.outZipPath);
+      const outAbs = resolveUserPath(args.outZipPath);
       fs.mkdirSync(path.dirname(outAbs), { recursive: true });
       fs.writeFileSync(outAbs, buf);
       return { outZipPath: outAbs, sizeBytes: buf.length, injectedResources: additionalResources.map((r) => r.fileName) };
     }
     case 'cpi_simulate_mmap': {
-      const mmapContent = args.mmapContent || (args.mmapPath ? fs.readFileSync(path.resolve(args.mmapPath), 'utf8') : '');
-      const inputPayload = args.sourcePayload || (args.sourcePayloadPath ? fs.readFileSync(path.resolve(args.sourcePayloadPath), 'utf8') : '');
+      const mmapContent = args.mmapContent || (args.mmapPath ? fs.readFileSync(resolveUserPath(args.mmapPath), 'utf8') : '');
+      const inputPayload = args.sourcePayload || (args.sourcePayloadPath ? fs.readFileSync(resolveUserPath(args.sourcePayloadPath), 'utf8') : '');
       const sim = simulateMmapExecution({
         mmapContent,
         inputPayload,
         headers: args.headers,
-        properties: args.properties
+        properties: args.properties,
+        targetXsdContent: args.targetXsdContent || (args.targetXsdPath ? fs.readFileSync(resolveUserPath(args.targetXsdPath), 'utf8') : null)
       });
       if (args.outPath && sim.outputXml) {
-        fs.mkdirSync(path.dirname(path.resolve(args.outPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.outPath), sim.outputXml, 'utf8');
+        fs.mkdirSync(path.dirname(resolveUserPath(args.outPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.outPath), sim.outputXml, 'utf8');
       }
       return sim;
     }
     case 'cpi_diff_bundles': {
-      const diff = diffBundles(path.resolve(args.baseZipPath), path.resolve(args.targetZipPath));
+      const diff = diffBundles(resolveUserPath(args.baseZipPath), resolveUserPath(args.targetZipPath));
       if (args.pdfPath) {
         const pdfSpec = buildDiffPdfSpec(diff);
-        const bytes = writeAuditPdfFile(path.resolve(args.pdfPath), pdfSpec);
-        diff.pdfGenerated = { path: path.resolve(args.pdfPath), sizeBytes: bytes };
+        const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
+        diff.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
       }
       if (args.outJsonPath) {
-        fs.mkdirSync(path.dirname(path.resolve(args.outJsonPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.outJsonPath), JSON.stringify(diff, null, 2), 'utf8');
+        fs.mkdirSync(path.dirname(resolveUserPath(args.outJsonPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.outJsonPath), JSON.stringify(diff, null, 2), 'utf8');
       }
       return diff;
     }
     case 'cpi_export_technical_doc': {
-      const doc = extractIflowDocumentation(args.filePath === '--demo' ? '--demo' : path.resolve(args.filePath));
+      const doc = extractIflowDocumentation(args.filePath === '--demo' ? '--demo' : resolveUserPath(args.filePath));
       if (args.pdfPath) {
         const pdfSpec = buildTechnicalDocPdfSpec(doc.report, doc.markdownDocument);
-        const bytes = writeAuditPdfFile(path.resolve(args.pdfPath), pdfSpec);
-        doc.pdfGenerated = { path: path.resolve(args.pdfPath), sizeBytes: bytes };
+        const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
+        doc.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
       }
       if (args.markdownPath) {
-        fs.mkdirSync(path.dirname(path.resolve(args.markdownPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.markdownPath), doc.markdownDocument, 'utf8');
+        fs.mkdirSync(path.dirname(resolveUserPath(args.markdownPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.markdownPath), doc.markdownDocument, 'utf8');
       }
       return doc;
     }
     case 'cpi_export_api_client': {
-      const res = exportApiClientArtifacts(path.resolve(args.filePath), {
-        outDir: args.outDir ? path.resolve(args.outDir) : null,
+      const res = exportApiClientArtifacts(resolveUserPath(args.filePath), {
+        outDir: args.outDir ? resolveUserPath(args.outDir) : null,
         baseUrl: args.baseUrl,
         authType: args.authType
       });
       return res;
     }
     case 'cpi_build_value_mapping': {
-      const csvContent = args.csvContent || (args.csvPath ? fs.readFileSync(path.resolve(args.csvPath), 'utf8') : null);
+      const csvContent = args.csvContent || (args.csvPath ? fs.readFileSync(resolveUserPath(args.csvPath), 'utf8') : null);
       const res = validateAndBuildValueMappingBundle({
         name: args.name,
         description: args.description,
@@ -569,13 +648,13 @@ export function executeMcpTool(name, args = {}) {
         targetSchema: args.targetSchema
       });
       if (args.outZipPath && res.zipBuffer) {
-        fs.mkdirSync(path.dirname(path.resolve(args.outZipPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.outZipPath), res.zipBuffer);
+        fs.mkdirSync(path.dirname(resolveUserPath(args.outZipPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.outZipPath), res.zipBuffer);
       }
       const { zipBuffer, ...summary } = res;
       return {
         ...summary,
-        outZipPath: args.outZipPath ? path.resolve(args.outZipPath) : null
+        outZipPath: args.outZipPath ? resolveUserPath(args.outZipPath) : null
       };
     }
     case 'cpi_pack_mock_suite': {
@@ -600,7 +679,7 @@ export function executeMcpTool(name, args = {}) {
       } else if (!args.specPath || args.specPath === '--demo') {
         payloads = parseMockSuiteInput(DEMO_BATCH_TEXT);
       } else {
-        const raw = fs.readFileSync(path.resolve(args.specPath), 'utf8');
+        const raw = fs.readFileSync(resolveUserPath(args.specPath), 'utf8');
         payloads = parseMockSuiteInput(raw);
       }
       if (!Array.isArray(payloads) || payloads.length === 0) {
@@ -608,27 +687,29 @@ export function executeMcpTool(name, args = {}) {
       }
       const res = validateAndBuildMockSuiteZip(payloads, {
         correlateData: args.correlateData !== false,
-        correlationKeys
+        correlationKeys,
+        strict: args.strict === true,
+        generatedAt: args.timestamp === true ? new Date() : null
       });
       const targetZip = args.outputZipPath || args.outZipPath;
       if (targetZip && res.zipBuffer) {
-        fs.mkdirSync(path.dirname(path.resolve(targetZip)), { recursive: true });
-        fs.writeFileSync(path.resolve(targetZip), res.zipBuffer);
+        fs.mkdirSync(path.dirname(resolveUserPath(targetZip)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(targetZip), res.zipBuffer);
       }
       const { zipBuffer, ...summary } = res;
       return {
         ...summary,
-        outZipPath: targetZip ? path.resolve(targetZip) : null,
-        outputZipPath: targetZip ? path.resolve(targetZip) : null,
+        outZipPath: targetZip ? resolveUserPath(targetZip) : null,
+        outputZipPath: targetZip ? resolveUserPath(targetZip) : null,
         sizeBytes: zipBuffer?.length || 0
       };
     }
     case 'cpi_get_iflow_endpoints': {
-      const p = args.filePath === '--demo' ? '--demo' : path.resolve(args.filePath);
+      const p = args.filePath === '--demo' ? '--demo' : resolveUserPath(args.filePath);
       return extractIflowEndpointsSummary(p);
     }
     case 'cpi_extract_bundle_file': {
-      const zipPath = path.resolve(args.zipPath);
+      const zipPath = resolveUserPath(args.zipPath);
       return extractBundleFile(zipPath, args.fileName);
     }
     case 'cpi_generate_groovy_template': {
@@ -681,22 +762,79 @@ export function readMcpResource(uri) {
   throw new Error(`Recurso MCP no encontrado: ${uri}`);
 }
 
+export const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+
+/** JSON-RPC error carrying a code (-32602 invalid params, -32601 not found, ...). */
+export class JsonRpcError extends Error {
+  constructor(code, message, data) {
+    super(message);
+    this.code = code;
+    this.data = data;
+  }
+}
+
+const rpcError = (id, code, message, data) => ({ jsonrpc: '2.0', id: id ?? null, error: { code, message, ...(data ? { data } : {}) } });
+
+/** Checks tools/call arguments against the tool's inputSchema (required + primitive types). */
+export function validateToolArguments(toolName, args) {
+  const tool = MCP_TOOLS.find((t) => t.name === toolName);
+  if (!tool) throw new JsonRpcError(-32602, `Unknown tool: ${toolName}`);
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+    throw new JsonRpcError(-32602, `Invalid params: 'arguments' de ${toolName} debe ser un objeto.`);
+  }
+  const schema = tool.inputSchema || {};
+  const missing = (schema.required || []).filter((k) => args[k] === undefined || args[k] === null || args[k] === '');
+  if (missing.length) {
+    throw new JsonRpcError(-32602, `Invalid params: faltan campos obligatorios en ${toolName}: ${missing.join(', ')}`, { missing });
+  }
+  const typeOf = (v) => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v === 'number' && Number.isInteger(v) ? 'integer' : typeof v);
+  const wrong = [];
+  for (const [k, v] of Object.entries(args)) {
+    const want = schema.properties?.[k]?.type;
+    if (!want || v === undefined) continue;
+    const got = typeOf(v);
+    const ok = want === got || (want === 'number' && got === 'integer') || (Array.isArray(want) && want.includes(got));
+    if (!ok) wrong.push(`${k} (esperado ${want}, recibido ${got})`);
+  }
+  if (wrong.length) throw new JsonRpcError(-32602, `Invalid params en ${toolName}: ${wrong.join('; ')}`);
+}
+
+/**
+ * Entry point for one parsed JSON-RPC value. Handles batches (arrays) and invalid requests (-32600).
+ * Returns the response object/array, or null when nothing must be sent (notifications).
+ */
+export function handleJsonRpcPayload(payload) {
+  if (Array.isArray(payload)) {
+    if (payload.length === 0) return rpcError(null, -32600, 'Invalid Request: empty batch');
+    const out = payload.map((m) => handleJsonRpcMessage(m)).filter(Boolean);
+    return out.length ? out : null;
+  }
+  return handleJsonRpcMessage(payload);
+}
+
 export function handleJsonRpcMessage(msg) {
-  if (!msg || typeof msg !== 'object') return null;
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
+    return rpcError(null, -32600, 'Invalid Request: el mensaje debe ser un objeto JSON-RPC 2.0');
+  }
   const { id, method, params } = msg;
 
   // Notifications have no id and expect no response
-  if (id === undefined || id === null) {
+  if (id === undefined) {
     return null;
+  }
+  if (typeof method !== 'string' || (id !== null && typeof id !== 'string' && typeof id !== 'number')) {
+    return rpcError(id, -32600, 'Invalid Request: falta method o id inválido');
   }
 
   try {
     if (method === 'initialize') {
+      const requested = params?.protocolVersion;
       return {
         jsonrpc: '2.0',
         id,
         result: {
-          protocolVersion: params?.protocolVersion || '2024-11-05',
+          // Echo the client's version when supported; otherwise answer with our latest (MCP version negotiation).
+          protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(requested) ? requested : SUPPORTED_PROTOCOL_VERSIONS[0],
           capabilities: {
             tools: { listChanged: false },
             resources: { subscribe: false, listChanged: false },
@@ -720,8 +858,16 @@ export function handleJsonRpcMessage(msg) {
 
     if (method === 'tools/call') {
       const toolName = params?.name;
-      const toolArgs = params?.arguments || {};
-      const data = executeMcpTool(toolName, toolArgs);
+      const toolArgs = params?.arguments === undefined ? {} : params.arguments;
+      if (typeof toolName !== 'string') throw new JsonRpcError(-32602, "Invalid params: falta 'name'");
+      validateToolArguments(toolName, toolArgs);
+      let data;
+      try {
+        data = executeMcpTool(toolName, toolArgs);
+      } catch (err) {
+        // Tool execution failures are reported in-band (MCP spec), protocol errors as JSON-RPC errors.
+        return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `Error ejecutando ${toolName}: ${err.message}` }], isError: true } };
+      }
       return {
         jsonrpc: '2.0',
         id,
@@ -738,7 +884,13 @@ export function handleJsonRpcMessage(msg) {
 
     if (method === 'resources/read') {
       const uri = params?.uri;
-      const text = readMcpResource(uri);
+      if (typeof uri !== 'string') throw new JsonRpcError(-32602, "Invalid params: falta 'uri'");
+      let text;
+      try {
+        text = readMcpResource(uri);
+      } catch (err) {
+        throw new JsonRpcError(-32002, err.message, { uri });
+      }
       return {
         jsonrpc: '2.0',
         id,
@@ -763,6 +915,7 @@ export function handleJsonRpcMessage(msg) {
 
     if (method === 'prompts/get') {
       const promptName = params?.name;
+      if (!SKILL_IDS.includes(promptName)) throw new JsonRpcError(-32602, `Invalid params: prompt desconocido: ${promptName}`);
       const text = readMcpResource(`cpi://skills/${promptName}`);
       return {
         jsonrpc: '2.0',
@@ -780,19 +933,13 @@ export function handleJsonRpcMessage(msg) {
       error: { code: -32601, message: `Method not found: ${method}` }
     };
   } catch (err) {
-    return {
-      jsonrpc: '2.0',
-      id,
-      result: {
-        content: [{ type: 'text', text: `Error ejecutando ${method}: ${err.message}` }],
-        isError: true
-      }
-    };
+    if (err instanceof JsonRpcError) return rpcError(id, err.code, err.message, err.data);
+    return rpcError(id, -32603, `Internal error en ${method}: ${err.message}`);
   }
 }
 
 // CLI Self-Test Mode or Stdio Server Mode
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.includes('--self-test')) {
@@ -840,6 +987,16 @@ if (isMain) {
     }
   };
 
+  const parseAndHandle = (text) => {
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch (err) {
+      return rpcError(null, -32700, `Parse error: ${err.message}`);
+    }
+    return handleJsonRpcPayload(payload);
+  };
+
   process.stdin.on('data', (chunk) => {
     buffer = Buffer.concat([buffer, chunk]);
 
@@ -852,24 +1009,14 @@ if (isMain) {
         if (buffer.length < headerByteLen + bodyByteLen) break;
         const bodyStr = buffer.subarray(headerByteLen, headerByteLen + bodyByteLen).toString('utf8');
         buffer = buffer.subarray(headerByteLen + bodyByteLen);
-        try {
-          const msg = JSON.parse(bodyStr);
-          sendResponse(handleJsonRpcMessage(msg));
-        } catch {
-          // ignore malformed frame
-        }
+        sendResponse(parseAndHandle(bodyStr));
       } else {
         const nlIdx = buffer.indexOf(0x0a); // '\n'
         if (nlIdx === -1) break;
         const lineStr = buffer.subarray(0, nlIdx).toString('utf8').trim();
         buffer = buffer.subarray(nlIdx + 1);
         if (!lineStr) continue;
-        try {
-          const msg = JSON.parse(lineStr);
-          sendResponse(handleJsonRpcMessage(msg));
-        } catch {
-          // ignore non-JSON line
-        }
+        sendResponse(parseAndHandle(lineStr));
       }
     }
   });

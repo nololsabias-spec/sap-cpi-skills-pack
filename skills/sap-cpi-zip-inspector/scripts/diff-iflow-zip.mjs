@@ -13,8 +13,10 @@
  *   node diff-iflow-zip.mjs --demo [--pdf <diff.pdf>] [--json]
  *   node diff-iflow-zip.mjs <v1.zip> <v2.zip> [--pdf <diff.pdf>] [--show-prop-values] [--json]
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { inspectBundle, buildDemoBundleZipBuffer } from './inspect-iflow-zip.mjs';
 import { writeAuditPdfFile } from '../../../shared/pdf-utils.mjs';
 import { createZipBuffer, readZipEntries } from '../../../shared/zip-utils.mjs';
@@ -67,9 +69,65 @@ function parsePropLines(propText) {
   return map;
 }
 
+/** Raw entries of a bundle (zip path/buffer, '--demo', or a loose .iflw/.xml). */
+function loadBundleEntries(target) {
+  if (target === '--demo') return readZipEntries(buildDemoBundleZipBuffer());
+  if (Buffer.isBuffer(target)) return readZipEntries(target);
+  const resolved = path.resolve(target);
+  if (/\.(iflw|xml)$/i.test(resolved)) {
+    const data = fs.readFileSync(resolved);
+    return [{ name: path.basename(resolved), path: path.basename(resolved), size: data.length, data }];
+  }
+  return readZipEntries(resolved);
+}
+
+const sha256 = (buf) => crypto.createHash('sha256').update(buf || Buffer.alloc(0)).digest('hex');
+const STEP_TAGS = 'callActivity|serviceTask|task|scriptTask|exclusiveGateway|parallelGateway|inclusiveGateway|eventBasedGateway|subProcess|startEvent|endEvent|intermediateCatchEvent|intermediateThrowEvent|boundaryEvent';
+
+/** Extracts BPMN steps (id, type, name) and message flows (channels) from every .iflw in the bundle. */
+export function extractIflowSteps(entries) {
+  const steps = new Map();
+  const channels = new Map();
+  for (const e of entries) {
+    if (!/\.iflw$/i.test(e.path || e.name)) continue;
+    const xml = (e.data || Buffer.from(e.text || '')).toString('utf8');
+    const rx = new RegExp(`<(?:\\w+:)?(${STEP_TAGS})\\b([^>]*)>`, 'g');
+    let m;
+    while ((m = rx.exec(xml))) {
+      const id = /\bid="([^"]*)"/.exec(m[2])?.[1];
+      if (!id) continue;
+      const name = /\bname="([^"]*)"/.exec(m[2])?.[1] || '';
+      steps.set(id, { id, type: m[1], name });
+    }
+    const mf = /<(?:\w+:)?messageFlow\b([^>]*)>/g;
+    while ((m = mf.exec(xml))) {
+      const id = /\bid="([^"]*)"/.exec(m[1])?.[1];
+      if (!id) continue;
+      channels.set(id, { id, name: /\bname="([^"]*)"/.exec(m[1])?.[1] || '' });
+    }
+  }
+  return { steps, channels };
+}
+
+function diffMaps(a, b, same) {
+  const added = [];
+  const removed = [];
+  const changed = [];
+  for (const [k, v] of b) {
+    if (!a.has(k)) added.push(v);
+    else if (!same(a.get(k), v)) changed.push({ id: k, from: a.get(k), to: v });
+  }
+  for (const [k, v] of a) if (!b.has(k)) removed.push(v);
+  return { added, removed, changed };
+}
+
 export function compareIflowBundles(bundlePathA, bundlePathB, options = {}) {
-  const reportA = inspectBundle(bundlePathA, null, options);
-  const reportB = inspectBundle(bundlePathB, null, options);
+  // Real values are needed in memory to detect MODIFIED parameters; they are masked on output
+  // unless options.showPropValues is set (S4: .prop values never leave the process by default).
+  const reveal = Boolean(options.showPropValues);
+  const mask = (v) => (reveal ? v : '[REDACTED]');
+  const reportA = inspectBundle(bundlePathA, null, { ...options, showPropValues: true });
+  const reportB = inspectBundle(bundlePathB, null, { ...options, showPropValues: true });
 
   // 1. Manifest Diff
   const manifestDiff = {
@@ -83,16 +141,21 @@ export function compareIflowBundles(bundlePathA, bundlePathB, options = {}) {
   };
 
   // 2. Resource Catalog Diff (added, removed, modified)
-  const mapFilesA = new Map(
-    Object.values(reportA.catalog)
-      .flat()
-      .map((f) => [f.name, f])
-  );
-  const mapFilesB = new Map(
-    Object.values(reportB.catalog)
-      .flat()
-      .map((f) => [f.name, f])
-  );
+  // Compared by SHA-256 of the content keyed by full path: a same-length edit (timeout 1000 -> 2000)
+  // is a modification too. Directory entries are ignored.
+  const entriesA = loadBundleEntries(bundlePathA);
+  const entriesB = loadBundleEntries(bundlePathB);
+  const toMap = (entries) =>
+    new Map(
+      entries
+        .filter((e) => !(e.path || e.name).endsWith('/'))
+        .map((e) => {
+          const p = e.path || e.name;
+          return [p, { name: path.posix.basename(p), path: p, size: e.size ?? e.data?.length ?? 0, hash: sha256(e.data) }];
+        })
+    );
+  const mapFilesA = toMap(entriesA);
+  const mapFilesB = toMap(entriesB);
 
   const addedFiles = [];
   const removedFiles = [];
@@ -101,11 +164,11 @@ export function compareIflowBundles(bundlePathA, bundlePathB, options = {}) {
 
   for (const [name, fileB] of mapFilesB.entries()) {
     if (!mapFilesA.has(name)) {
-      addedFiles.push({ name, size: fileB.size, path: fileB.path });
+      addedFiles.push({ name: fileB.name, size: fileB.size, path: fileB.path });
     } else {
       const fileA = mapFilesA.get(name);
-      if (fileA.size !== fileB.size || (fileA.content && fileB.content && fileA.content !== fileB.content)) {
-        modifiedFiles.push({ name, oldSize: fileA.size, newSize: fileB.size, path: fileB.path });
+      if (fileA.hash !== fileB.hash) {
+        modifiedFiles.push({ name: fileB.name, oldSize: fileA.size, newSize: fileB.size, path: fileB.path, sameSize: fileA.size === fileB.size });
       } else {
         unchangedFiles.push(name);
       }
@@ -114,7 +177,7 @@ export function compareIflowBundles(bundlePathA, bundlePathB, options = {}) {
 
   for (const [name, fileA] of mapFilesA.entries()) {
     if (!mapFilesB.has(name)) {
-      removedFiles.push({ name, size: fileA.size, path: fileA.path });
+      removedFiles.push({ name: fileA.name, size: fileA.size, path: fileA.path });
     }
   }
 
@@ -130,14 +193,14 @@ export function compareIflowBundles(bundlePathA, bundlePathB, options = {}) {
 
   for (const [key, valB] of propsB.entries()) {
     if (!propsA.has(key)) {
-      addedParams.push({ key, value: valB });
+      addedParams.push({ key, value: mask(valB) });
     } else if (propsA.get(key) !== valB) {
-      modifiedParams.push({ key, oldValue: propsA.get(key), newValue: valB });
+      modifiedParams.push({ key, oldValue: mask(propsA.get(key)), newValue: mask(valB) });
     }
   }
   for (const [key, valA] of propsA.entries()) {
     if (!propsB.has(key)) {
-      removedParams.push({ key, value: valA });
+      removedParams.push({ key, value: mask(valA) });
     }
   }
 
@@ -185,6 +248,12 @@ export function compareIflowBundles(bundlePathA, bundlePathB, options = {}) {
     });
   }
 
+  // 5. BPMN steps and channels (added / removed / renamed or retyped)
+  const sA = extractIflowSteps(entriesA);
+  const sB = extractIflowSteps(entriesB);
+  const stepsDiff = diffMaps(sA.steps, sB.steps, (x, y) => x.type === y.type && x.name === y.name);
+  const channelsDiff = diffMaps(sA.channels, sB.channels, (x, y) => x.name === y.name);
+
   const result = {
     bundleA: { name: reportA.fileName, version: reportA.manifestData?.version, score: scoreA },
     bundleB: { name: reportB.fileName, version: reportB.manifestData?.version, score: scoreB },
@@ -201,7 +270,10 @@ export function compareIflowBundles(bundlePathA, bundlePathB, options = {}) {
       removed: removedParams,
       modified: modifiedParams
     },
-    topologyChanges
+    stepsDiff,
+    channelsDiff,
+    topologyChanges,
+    identical: addedFiles.length === 0 && removedFiles.length === 0 && modifiedFiles.length === 0 && !manifestDiff.hasChanged
   };
 
   return result;
@@ -229,8 +301,17 @@ export function buildDiffPdfSpec(diffResult) {
       blocks.push({ type: 'finding', severity: 'MEDIUM', component: `Parámetro Modificado (${p.key})`, finding: `${p.oldValue} -> ${p.newValue}`, recommendation: 'Verificar alineación con el entorno destino.' });
     }
   }
-  if (diffResult.parametersDiff.added.length === 0 && diffResult.parametersDiff.modified.length === 0) {
-    blocks.push({ type: 'paragraph', text: 'No se detectaron nuevos parámetros ni modificaciones en parameters.prop.' });
+  for (const p of diffResult.parametersDiff.removed || []) {
+    blocks.push({ type: 'finding', severity: 'LOW', component: `Parámetro Eliminado (${p.key})`, finding: 'Ya no existe en parameters.prop.', recommendation: 'Eliminar la configuración obsoleta del entorno destino.' });
+  }
+  if (diffResult.parametersDiff.added.length === 0 && diffResult.parametersDiff.modified.length === 0 && !(diffResult.parametersDiff.removed || []).length) {
+    blocks.push({ type: 'paragraph', text: 'No se detectaron parámetros nuevos, modificados ni eliminados en parameters.prop.' });
+  }
+  const md = diffResult.manifestDiff;
+  if (md?.hasChanged) {
+    for (const k of ['symbolicName', 'version', 'bundleType']) {
+      if (md[k].from !== md[k].to) blocks.push({ type: 'kv', key: `MANIFEST ${k}`, value: `${md[k].from ?? '-'} -> ${md[k].to ?? '-'}` });
+    }
   }
 
   blocks.push({ type: 'section', text: '3. Diferencias en Recursos del Paquete OSGi' });
@@ -238,7 +319,7 @@ export function buildDiffPdfSpec(diffResult) {
     blocks.push({ type: 'bullet', text: `[AÑADIDO] ${f.name} (${f.path} - ${f.size} bytes)` });
   }
   for (const f of diffResult.filesDiff.modified) {
-    blocks.push({ type: 'bullet', text: `[MODIFICADO] ${f.name} (${f.oldSize} -> ${f.newSize} bytes)` });
+    blocks.push({ type: 'bullet', text: `[MODIFICADO] ${f.path} (${f.oldSize} -> ${f.newSize} bytes${f.sameSize ? ', mismo tamaño, contenido distinto' : ''})` });
   }
   for (const f of diffResult.filesDiff.removed) {
     blocks.push({ type: 'bullet', text: `[ELIMINADO] ${f.name} (${f.size} bytes)` });
@@ -247,8 +328,20 @@ export function buildDiffPdfSpec(diffResult) {
     blocks.push({ type: 'paragraph', text: 'Los recursos empaquetados en ambos bundles son idénticos.' });
   }
 
+  const sd = diffResult.stepsDiff || { added: [], removed: [], changed: [] };
+  const cd = diffResult.channelsDiff || { added: [], removed: [], changed: [] };
+  if (sd.added.length + sd.removed.length + sd.changed.length + cd.added.length + cd.removed.length + cd.changed.length > 0) {
+    blocks.push({ type: 'section', text: '4. Pasos y Canales del iFlow' });
+    for (const s of sd.added) blocks.push({ type: 'bullet', text: `[PASO AÑADIDO] ${s.name || s.id} (${s.type})` });
+    for (const s of sd.removed) blocks.push({ type: 'bullet', text: `[PASO ELIMINADO] ${s.name || s.id} (${s.type})` });
+    for (const s of sd.changed) blocks.push({ type: 'bullet', text: `[PASO MODIFICADO] ${s.id}: ${s.from.name}/${s.from.type} -> ${s.to.name}/${s.to.type}` });
+    for (const c of cd.added) blocks.push({ type: 'bullet', text: `[CANAL AÑADIDO] ${c.name || c.id}` });
+    for (const c of cd.removed) blocks.push({ type: 'bullet', text: `[CANAL ELIMINADO] ${c.name || c.id}` });
+    for (const c of cd.changed) blocks.push({ type: 'bullet', text: `[CANAL RENOMBRADO] ${c.from.name} -> ${c.to.name}` });
+  }
+
   if (diffResult.topologyChanges.length > 0) {
-    blocks.push({ type: 'section', text: '4. Cambios Semánticos de Topología y Seguridad BPMN 2.0' });
+    blocks.push({ type: 'section', text: '5. Cambios Semánticos de Topología y Seguridad BPMN 2.0' });
     for (const tc of diffResult.topologyChanges) {
       blocks.push({ type: 'bullet', text: `${tc.item}: ${tc.from} -> ${tc.to}` });
     }
@@ -263,13 +356,15 @@ export function buildDiffPdfSpec(diffResult) {
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log('Uso 1 (Demo): node diff-iflow-zip.mjs --demo [--pdf <informe.pdf>] [--json]');
     console.log('Uso 2 (Diff): node diff-iflow-zip.mjs <v1.zip> <v2.zip> [--pdf <informe.pdf>] [--show-prop-values] [--json]');
-    process.exit(0);
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   const jsonFlag = args.includes('--json');
@@ -304,13 +399,36 @@ if (isMain) {
 
     console.log(`\n--- RECURSOS MODIFICADOS (${result.filesDiff.modified.length}) / AÑADIDOS (${result.filesDiff.added.length}) / ELIMINADOS (${result.filesDiff.removed.length}) ---`);
     result.filesDiff.added.forEach((f) => console.log(`  + [AÑADIDO] ${f.name} (${f.size} bytes)`));
-    result.filesDiff.modified.forEach((f) => console.log(`  ~ [MODIFICADO] ${f.name} (${f.oldSize} -> ${f.newSize} bytes)`));
-    result.filesDiff.removed.forEach((f) => console.log(`  - [ELIMINADO] ${f.name}`));
+    result.filesDiff.modified.forEach((f) => console.log(`  ~ [MODIFICADO] ${f.path} (${f.oldSize} -> ${f.newSize} bytes${f.sameSize ? ', mismo tamaño' : ''})`));
+    result.filesDiff.removed.forEach((f) => console.log(`  - [ELIMINADO] ${f.path}`));
+    if (result.identical) console.log('  (bundles idénticos byte a byte)');
 
-    if (result.parametersDiff.added.length > 0 || result.parametersDiff.modified.length > 0) {
+    const md = result.manifestDiff;
+    if (md.hasChanged) {
+      console.log('\n--- MANIFEST.MF ---');
+      for (const k of ['symbolicName', 'version', 'bundleType']) {
+        if (md[k].from !== md[k].to) console.log(`  ~ ${k}: ${md[k].from ?? '-'} -> ${md[k].to ?? '-'}`);
+      }
+    }
+
+    const sd = result.stepsDiff;
+    const cd = result.channelsDiff;
+    if (sd.added.length + sd.removed.length + sd.changed.length + cd.added.length + cd.removed.length + cd.changed.length > 0) {
+      console.log('\n--- PASOS Y CANALES DEL iFLOW ---');
+      sd.added.forEach((s) => console.log(`  + [PASO] ${s.name || s.id} (${s.type})`));
+      sd.removed.forEach((s) => console.log(`  - [PASO] ${s.name || s.id} (${s.type})`));
+      sd.changed.forEach((s) => console.log(`  ~ [PASO] ${s.id}: ${s.from.name}/${s.from.type} -> ${s.to.name}/${s.to.type}`));
+      cd.added.forEach((c) => console.log(`  + [CANAL] ${c.name || c.id}`));
+      cd.removed.forEach((c) => console.log(`  - [CANAL] ${c.name || c.id}`));
+      cd.changed.forEach((c) => console.log(`  ~ [CANAL] ${c.from.name} -> ${c.to.name}`));
+    }
+
+    const pd = result.parametersDiff;
+    if (pd.added.length > 0 || pd.modified.length > 0 || pd.removed.length > 0) {
       console.log(`\n--- CHECKLIST DE PARÁMETROS EXTERNALIZADOS (PARAMETERS.PROP) ---`);
-      result.parametersDiff.added.forEach((p) => console.log(`  + [NUEVO PARÁMETRO] ${p.key} = ${p.value}`));
-      result.parametersDiff.modified.forEach((p) => console.log(`  ~ [MODIFICADO] ${p.key}: ${p.oldValue} -> ${p.newValue}`));
+      pd.added.forEach((p) => console.log(`  + [NUEVO PARÁMETRO] ${p.key} = ${p.value}`));
+      pd.modified.forEach((p) => console.log(`  ~ [MODIFICADO] ${p.key}: ${p.oldValue} -> ${p.newValue}`));
+      pd.removed.forEach((p) => console.log(`  - [ELIMINADO] ${p.key}`));
     }
 
     if (result.topologyChanges.length > 0) {

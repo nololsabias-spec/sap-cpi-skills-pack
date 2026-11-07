@@ -4,7 +4,56 @@
  * Compatible with SAP CPI OSGi bundles (.zip).
  */
 import fs from 'node:fs';
+import path from 'node:path';
 import zlib from 'node:zlib';
+import { safeRegexFindIndex } from './safe-regex.mjs';
+
+/**
+ * Safety limits against zip bombs. Real SAP CPI bundles are a few MB at most.
+ * Override per call with readZipEntries(input, { limits: {...} }).
+ */
+export const ZIP_LIMITS = Object.freeze({
+  maxEntries: 5000,
+  maxEntryBytes: 64 * 1024 * 1024, // 64 MB per entry
+  maxTotalBytes: 256 * 1024 * 1024, // 256 MB per archive
+  maxRatio: 200 // uncompressed / compressed, only enforced above 1 MB
+});
+
+/**
+ * Returns a normalized, relative, forward-slash entry path, or null when the path is unsafe
+ * (absolute, drive-letter, UNC, contains '..' segments or NUL). Prevents zip-slip.
+ */
+export function sanitizeEntryPath(rawPath) {
+  if (typeof rawPath !== 'string' || !rawPath || rawPath.includes('\0')) return null;
+  const p = rawPath.replace(/\\/g, '/');
+  if (p.startsWith('/') || /^[a-zA-Z]:/.test(p) || p.startsWith('//')) return null;
+  const parts = p.split('/').filter((seg) => seg !== '' && seg !== '.');
+  if (parts.some((seg) => seg === '..')) return null;
+  return parts.join('/') + (p.endsWith('/') ? '/' : '');
+}
+
+/**
+ * Resolves `entryPath` inside `baseDir` and throws if the result escapes it (zip-slip guard
+ * for any code that writes extracted entries to disk).
+ */
+export function resolveInside(baseDir, entryPath) {
+  const safe = sanitizeEntryPath(entryPath);
+  if (safe === null) throw new Error(`Ruta de entrada ZIP insegura rechazada (zip-slip): ${entryPath}`);
+  const base = path.resolve(baseDir);
+  const target = path.resolve(base, safe);
+  const rel = path.relative(base, target);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`Ruta de entrada ZIP fuera del directorio de destino rechazada (zip-slip): ${entryPath}`);
+  }
+  return target;
+}
+
+/** Heuristic: NUL bytes in the first 8 KB -> binary. */
+function looksBinary(buf) {
+  const n = Math.min(buf.length, 8192);
+  for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
+  return false;
+}
 
 // Precomputed CRC32 table for universal Node.js compatibility (Node 16+)
 const CRC_TABLE = new Uint32Array(256);
@@ -27,19 +76,23 @@ export function crc32(buf) {
 /**
  * Creates a ZIP Buffer from an array of { path: string, content: string | Buffer }
  * @param {Array<{ path: string, content: string | Buffer }>} files
+ * @param {{ date?: Date }} [options] fixed entry mtime (for reproducible / golden-test archives)
  * @returns {Buffer}
  */
-export function createZipBuffer(files) {
+export function createZipBuffer(files, options = {}) {
   const localFileHeaders = [];
   const centralDirHeaders = [];
   let offset = 0;
 
-  const now = new Date();
+  const now = options.date instanceof Date && !Number.isNaN(options.date.getTime()) ? options.date : new Date();
   const dosTime = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xffff;
   const dosDate = (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xffff;
 
   for (const file of files) {
-    const normalizedPath = file.path.replace(/\\/g, '/').replace(/^\/+/, '');
+    const normalizedPath = sanitizeEntryPath(String(file.path ?? '').replace(/^[\\/]+/, ''));
+    if (!normalizedPath) {
+      throw new Error(`Ruta inválida para una entrada ZIP (absoluta o con '..'): ${file.path}`);
+    }
     const nameBuf = Buffer.from(normalizedPath, 'utf8');
     const rawData = Buffer.isBuffer(file.content)
       ? file.content
@@ -109,10 +162,14 @@ export function createZipBuffer(files) {
  * @param {string | Buffer} inputPathOrBuffer
  * @returns {Array<{ name: string, path: string, size: number, data: Buffer, text: string }>}
  */
-export function readZipEntries(inputPathOrBuffer) {
+export function readZipEntries(inputPathOrBuffer, { limits = {} } = {}) {
+  const lim = { ...ZIP_LIMITS, ...limits };
   const buf = Buffer.isBuffer(inputPathOrBuffer)
     ? inputPathOrBuffer
     : fs.readFileSync(inputPathOrBuffer);
+  if (buf.length < 22) {
+    throw new Error('Archivo ZIP inválido: demasiado pequeño.');
+  }
 
   // Locate End of Central Directory (EOCD) signature 0x06054b50 from end
   let eocdOffset = -1;
@@ -131,8 +188,13 @@ export function readZipEntries(inputPathOrBuffer) {
   const totalEntries = buf.readUInt16LE(eocdOffset + 10);
   const centralDirOffset = buf.readUInt32LE(eocdOffset + 16);
 
+  if (totalEntries > lim.maxEntries) {
+    throw new Error(`ZIP rechazado: ${totalEntries} entradas superan el límite de ${lim.maxEntries}.`);
+  }
+
   const entries = [];
   let ptr = centralDirOffset;
+  let totalBytes = 0;
 
   for (let i = 0; i < totalEntries; i++) {
     if (ptr + 46 > buf.length || buf.readUInt32LE(ptr) !== 0x02014b50) {
@@ -153,8 +215,18 @@ export function readZipEntries(inputPathOrBuffer) {
     // Skip directories
     if (relativePath.endsWith('/')) continue;
 
+    const safePath = sanitizeEntryPath(relativePath);
+    if (safePath === null) {
+      throw new Error(`ZIP rechazado: entrada con ruta insegura (zip-slip): ${relativePath}`);
+    }
+
+    // Zip-bomb guards based on the declared sizes (enforced again on real output below)
+    if (uncompressedSize > lim.maxEntryBytes) {
+      throw new Error(`ZIP rechazado: la entrada ${safePath} declara ${uncompressedSize} bytes (límite ${lim.maxEntryBytes}).`);
+    }
+
     // Read local file header to find start of data
-    if (buf.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
+    if (localHeaderOffset + 30 > buf.length || buf.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
       throw new Error(`Local File Header inválido en offset ${localHeaderOffset}`);
     }
     const localNameLen = buf.readUInt16LE(localHeaderOffset + 26);
@@ -162,29 +234,57 @@ export function readZipEntries(inputPathOrBuffer) {
     const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
     const compressedSlice = buf.subarray(dataStart, dataStart + compressedSize);
 
+    const remaining = lim.maxTotalBytes - totalBytes;
+    const maxOut = Math.max(0, Math.min(lim.maxEntryBytes, remaining));
     let data;
     if (method === 0) {
+      if (compressedSlice.length > maxOut) {
+        throw new Error(`ZIP rechazado: el contenido descomprimido supera el límite (${lim.maxTotalBytes} bytes en total).`);
+      }
       data = Buffer.from(compressedSlice);
     } else if (method === 8) {
-      data = zlib.inflateRawSync(compressedSlice);
+      try {
+        // maxOutputLength stops a lying central directory from inflating gigabytes into memory
+        data = zlib.inflateRawSync(compressedSlice, { maxOutputLength: Math.max(1, maxOut) });
+      } catch (err) {
+        if (err && (err.code === 'ERR_BUFFER_TOO_LARGE' || /maxOutputLength|buffer/i.test(err.message))) {
+          throw new Error(`ZIP rechazado (posible zip-bomb): ${safePath} supera el límite de descompresión.`);
+        }
+        throw new Error(`Error al descomprimir ${safePath}: ${err.message}`);
+      }
     } else {
-      throw new Error(`Método de compresión ZIP no soportado (${method}) en archivo ${relativePath}`);
+      throw new Error(`Método de compresión ZIP no soportado (${method}) en archivo ${safePath}`);
     }
 
-    let text = '';
-    try {
-      text = data.toString('utf8');
-    } catch {
-      text = '[Binary content]';
+    if (data.length > 1024 * 1024 && compressedSlice.length > 0 && data.length / compressedSlice.length > lim.maxRatio) {
+      throw new Error(
+        `ZIP rechazado (posible zip-bomb): ratio de compresión ${Math.round(data.length / compressedSlice.length)}:1 en ${safePath} (límite ${lim.maxRatio}:1).`
+      );
     }
+    totalBytes += data.length;
 
-    entries.push({
-      name: relativePath.split('/').pop(),
-      path: relativePath,
+    const binary = looksBinary(data);
+    let cachedText;
+    const entry = {
+      name: safePath.split('/').pop(),
+      path: safePath,
       size: uncompressedSize || data.length,
       data,
-      text
+      binary
+    };
+    // Lazy text decoding: binaries (jars, images) are never converted to a giant string.
+    Object.defineProperty(entry, 'text', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        if (cachedText === undefined) cachedText = binary ? '[Binary content]' : data.toString('utf8');
+        return cachedText;
+      },
+      set(v) {
+        cachedText = v;
+      }
     });
+    entries.push(entry);
   }
 
   return entries;
@@ -198,7 +298,31 @@ export function readZipEntries(inputPathOrBuffer) {
  * @param {string} targetFileOrPattern
  * @returns {{ success: boolean, found: boolean, file?: { name: string, path: string, size: number, content: string }, error?: string, totalFilesInBundle: number, availableFiles?: string[] }}
  */
-export function extractBundleFile(inputPathOrBuffer, targetFileOrPattern) {
+/**
+ * Masks every value of a Java .properties text (key=[REDACTED]); comments and blank lines are kept.
+ * Externalized parameters (parameters.prop) usually hold real hosts, users and tenant URLs.
+ */
+export function redactPropText(rawText) {
+  if (!rawText) return '';
+  return String(rawText)
+    .split(/\r?\n/)
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) return line;
+      const eqIdx = line.search(/[=:]/);
+      if (eqIdx === -1) return line;
+      return `${line.slice(0, eqIdx).trim()}=[REDACTED]`;
+    })
+    .join('\n');
+}
+
+/** True for .prop files whose values must be redacted (metainfo.prop and .propdef are metadata). */
+export function isSensitivePropPath(p) {
+  const lower = String(p || '').toLowerCase();
+  return lower.endsWith('.prop') && !lower.endsWith('metainfo.prop');
+}
+
+export function extractBundleFile(inputPathOrBuffer, targetFileOrPattern, { showPropValues = false } = {}) {
   let entries;
   try {
     if (typeof inputPathOrBuffer === 'string') {
@@ -255,11 +379,11 @@ export function extractBundleFile(inputPathOrBuffer, targetFileOrPattern) {
   }
 
   // 4. Regular expression matching (if user passed regex syntax like .*, \\., ^, $, [], etc.)
+  //    Evaluated in a time-limited sandbox so a catastrophic pattern cannot hang the MCP server.
   if (!match && /[\^$*+?()[\]{}|\\]/.test(raw)) {
-    try {
-      const rx = new RegExp(raw, 'i');
-      match = entries.find((e) => rx.test(e.name) || rx.test(e.path));
-    } catch {}
+    const candidates = entries.flatMap((e) => [e.name, e.path]);
+    const idx = safeRegexFindIndex(raw, candidates, { flags: 'i', timeoutMs: 1000 });
+    if (idx !== null && idx >= 0) match = entries[Math.floor(idx / 2)];
   }
 
   // 5. Basename fallback if directory didn't match (e.g. scenarioflows/zerocode/X.iflw -> X.iflw)
@@ -280,7 +404,8 @@ export function extractBundleFile(inputPathOrBuffer, targetFileOrPattern) {
         name: match.name,
         path: match.path,
         size: match.size,
-        content: match.text
+        content: !showPropValues && isSensitivePropPath(match.path) ? redactPropText(match.text) : match.text,
+        ...(!showPropValues && isSensitivePropPath(match.path) ? { redacted: true } : {})
       },
       totalFilesInBundle: entries.length
     };

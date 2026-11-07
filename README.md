@@ -46,7 +46,7 @@ node setup-skills.mjs --target /ruta/a/tu/proyecto --agent all --mcp
 
 # O instalar para un asistente o IDE específico:
 node setup-skills.mjs --target /ruta/a/tu/proyecto --agent antigravity  # Google Antigravity (.agents/)
-node setup-skills.mjs --target /ruta/a/tu/proyecto --agent claude --mcp # Claude Code / Desktop (.claude/ + .mcp.json)
+node setup-skills.mjs --target /ruta/a/tu/proyecto --agent claude --mcp # Claude Code (.claude/ + .mcp.json con ruta absoluta; Claude Desktop usa claude_desktop_config.json)
 node setup-skills.mjs --target /ruta/a/tu/proyecto --agent codex        # OpenAI Codex CLI / GPT Agents (AGENTS.md + .agents/)
 node setup-skills.mjs --target /ruta/a/tu/proyecto --agent cursor       # Cursor IDE (.cursor/rules/*.mdc + .cursor/mcp.json)
 node setup-skills.mjs --target /ruta/a/tu/proyecto --agent copilot      # GitHub Copilot VS Code (.github/copilot-instructions.md + .vscode/mcp.json)
@@ -62,6 +62,8 @@ El proyecto incluye [`mcp-server.mjs`](./mcp-server.mjs), un servidor **Model Co
 # Verificar el servidor MCP local
 node mcp-server.mjs --self-test
 ```
+
+Las herramientas MCP solo aceptan rutas dentro del workspace (`CPI_MCP_ROOT`, `CLAUDE_PROJECT_DIR` o cwd), del directorio temporal del sistema y de `CPI_MCP_ALLOWED_ROOTS`. Detalles en [`docs/CLI_REFERENCE.md`](./docs/CLI_REFERENCE.md).
 
 ---
 

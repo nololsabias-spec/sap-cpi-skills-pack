@@ -28,7 +28,8 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 
 ### `LL-003` — Error de Compilación en Groovy 2.4: `unable to resolve class groovy.xml.XmlSlurper`
 - **Síntoma en SAP CPI**: El script Groovy falla durante la compilación inicial (`startup failed: unable to resolve class groovy.xml.XmlSlurper`).
-- **Causa Raíz Técnica**: El runtime de SAP CPI utiliza **Groovy 2.4**, donde `XmlSlurper` y `XmlParser` pertenecen al paquete **`groovy.util.XmlSlurper`** y **`groovy.util.XmlParser`** (en Groovy 3+ se movieron a `groovy.xml.*`, pero en CPI Groovy 2.4 ese import no existe o causa conflicto de resolución).
+- **Nota (corregida en `LL-017`)**: desde el Script step 2.0, SAP CPI también ofrece **Groovy 4**, donde ocurre justo lo contrario. La versión no se infiere: se indica con `--groovy 2.4|4`.
+- **Causa Raíz Técnica**: El runtime Groovy 2.4 de SAP CPI, donde `XmlSlurper` y `XmlParser` pertenecen al paquete **`groovy.util.XmlSlurper`** y **`groovy.util.XmlParser`** (`groovy.xml.XmlSlurper` no existe en Groovy 2.4; Groovy 3 añadió `groovy.xml.*` manteniendo `groovy.util.*` como obsoleto, y Groovy 4 eliminó `groovy.util.Xml*`).
 - **Solución Codificada**:
   - Importar siempre `groovy.util.XmlSlurper` y `groovy.util.XmlParser`.
   - Se añadió la regla `GROOVY24_INVALID_XMLSLURPER_IMPORT` (`CRITICAL -30`) en `skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs`.
@@ -73,7 +74,7 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
   2. **Differ Semántico de Bundles iFlow (`diff-iflow-zip.mjs` / MCP `cpi_diff_bundles`)**: Compara semánticamente dos paquetes `.zip` ignorando el ruido gráfico de coordenadas BPMNDI (`BPMNDiagram`/`BPMNShape`), detectando modificaciones en `parameters.prop` (checklist de despliegue entre ambientes), recursos añadidos/modificados y delta de score de gobernanza con informe PDF comparativo.
   3. **Generador de Diseño Técnico en PDF de 8 Secciones (`extract-for-docs.mjs --pdf` / MCP `cpi_export_technical_doc`)**: Exporta el Documento de Diseño Técnico corporativo oficial con las 8 secciones obligatorias (Resumen Ejecutivo, Arquitectura BPMN 2.0, Contratos XSD/WSDL, Mappings, Scripts Groovy, Parámetros Externalizados, Canales Adaptadores y Manejo de Errores) en formato PDF nativo de alta resolución.
   4. **Generador de Clientes API Postman & OpenAPI (`export-api-client.mjs` / MCP `cpi_export_api_client`)**: Inspecciona automáticamente los canales receptores de entrada (HTTPS/SOAP/OData/AS2), infiere la estructura del cuerpo desde los esquemas XSD empaquetados y genera colecciones Postman v2.1 (con handshake automático para obtención de `x-csrf-token`) y especificaciones OpenAPI 3.0.3.
-  5. **Constructor de Paquetes OSGi de Value Mapping (`build-value-mapping.mjs` / MCP `cpi_build_value_mapping`)**: Construye archivos `.zip` de Value Mapping 100% compatibles con SAP Integration Suite a partir de esquemas JSON o tablas CSV, configurando `.project` con la naturaleza `com.sap.ide.ifl.nature.valuemapping`, `META-INF/MANIFEST.MF` plegado a 72 bytes con `SAP-BundleType: ValueMapping`, `metainfo.prop` y `value_mapping.xml`.
+  5. **Constructor de Paquetes OSGi de Value Mapping (`build-value-mapping.mjs` / MCP `cpi_build_value_mapping`)**: Construye archivos `.zip` de Value Mapping 100% compatibles con SAP Integration Suite a partir de esquemas JSON o tablas CSV, configurando `.project` con las naturalezas `com.sap.ide.ifl.valmap`, `com.sap.ide.ifl.project.support.project.nature` y `org.eclipse.jdt.core.javanature`, `META-INF/MANIFEST.MF` plegado a 72 bytes con `SAP-BundleType: ValueMapping`, `metainfo.prop` y `value_mapping.xml` (formato corregido en `LL-016`).
 
 ---
 
@@ -90,7 +91,7 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 ### `LL-008` — Flexibilidad de Parámetros CLI en Transformación y Simulación: Propiedades Camel Simple (`--prop`), Headers/Props Dinámicos en Simulador `.mmap` y Parsing Posicional en Validador XSLT
 - **Contexto**: Fase 2 de batería de pruebas integral en contextos aislados (Bot 2: Transformación y Scripting Groovy/XSLT).
 - **Aprendizajes y Correcciones Codificadas**:
-  1. **Soporte de Exchange Properties y Headers en `test-camel-regex.mjs`**: Se incorporaron los argumentos CLI `--prop`, `--property` y `--header` (con soporte para sintaxis `flag valor` y `flag=valor`), generando automáticamente expresiones Apache Camel Simple normalizadas (`${property.VariableName}` y `${header.VariableName}`) además de `--field`.
+  1. **Soporte de Exchange Properties y Headers en `test-camel-regex.mjs`**: Se incorporaron los argumentos CLI `--prop`, `--property` y `--header` (con soporte para sintaxis `flag valor` y `flag=valor`), generando automáticamente expresiones Apache Camel Simple normalizadas (`${exchangeProperty.VariableName}` y `${header.VariableName}`) además de `--field`.
   2. **Inyección Dinámica Multi-Formato en `simulate-mmap.mjs`**: Los argumentos `--headers` y `--properties` ahora aceptan tanto rutas a archivos `.json` existentes como cadenas JSON directas (ej. `'{"CamelHttpMethod":"POST"}'`) o listas de pares clave=valor (`CamelHttpMethod=POST,Content-Type=application/json`), facilitando la automatización en pipelines CI/CD y tests interactivos.
   3. **Parsing Agnóstico al Orden y Alias de Versión en `validate-xslt.mjs`**: Se flexibilizó el análisis de argumentos en CLI para aceptar la ruta del archivo XSLT en cualquier posición (antes o después de flags), soportando `--version=2.0` / `--version 2.0` como alias de `--engine` y gestionando metadatos de contexto como `--scenario`.
 
@@ -168,7 +169,96 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
   3. **Soporte Paramétrico Dual (`outZipPath` y `outputZipPath`)**: Se habilitó compatibilidad total para las dos convenciones de nomenclatura en argumentos MCP (`outputZipPath` y `outZipPath`), asegurando persistencia en disco y reporte consistente de rutas absolutas.
   4. **Matriz de Correlación E2E Multicontrato (`correlations`)**: Se enriqueció el retorno de `validateAndBuildMockSuiteZip` para incluir un desglose estructurado `correlations` con las claves verificadas (`orderId`, `customerId`, etc.), su valor sincronizado y la lista de contratos vinculados, verificando la ausencia total de advertencias en contratos consistentes y advirtiendo inmediatamente en caso de inconsistencia de claves.
 
+---
 
+### `LL-016` — Endurecimiento P0: seguridad de ZIP, privacidad de `.prop`, MCP fuera del cwd y formatos reales de `.project` / Value Mapping
+- **Síntoma**: (1) los scripts CLI no se ejecutaban como `main` en Windows ni con rutas con espacios o enlaces simbólicos; (2) el servidor MCP terminaba con `CONNECTION_CLOSED` al lanzarse desde un directorio distinto al del repo; (3) un `.zip` con entradas `../` podía escribir fuera del directorio de extracción, y un zip-bomb podía agotar la memoria; (4) los valores de `parameters.prop` aparecían en la salida del extractor, en el differ y en las colecciones Postman; (5) el MANIFEST reparado o clonado perdía las secciones `Name:` y corrompía cabeceras plegadas, y el renombrado por subcadena dañaba identificadores; (6) los `.project` y paquetes Value Mapping generados no coincidían con los que exporta SAP.
+- **Causa Raíz Técnica**: comparación ingenua de `import.meta.url` con `argv[1]`; rutas relativas al cwd en la configuración MCP; ausencia de validación de rutas y de límites al leer ZIP; impresión literal de `.prop`; reescritura del MANIFEST línea a línea sin unfold; plantillas de `.project` y `value_mapping.xml` no verificadas.
+- **Solución Codificada**:
+  - `shared/cli-utils.mjs` (`isMainModule`, `moduleDir`). `setup-skills.mjs` escribe ruta absoluta en `.mcp.json` (Claude Code también hereda `.mcp.json` de carpetas padre, donde `${CLAUDE_PROJECT_DIR}` apuntaría a la subcarpeta y causaría `CONNECTION_CLOSED`) y `${workspaceFolder}` en `.vscode/mcp.json` y fusiona JSONC con copia `.bak`.
+  - `shared/zip-utils.mjs`: `sanitizeEntryPath`, `resolveInside`, `ZIP_LIMITS` y redacción `[REDACTED]` de `.prop` (salvo `metainfo.prop`), con opt-in `showPropValues` / `--resolve-params`.
+  - `mcp-server.mjs`: toda ruta de usuario pasa por `resolveUserPath`, restringida a las raíces permitidas: `CPI_MCP_ROOT` (o `CLAUDE_PROJECT_DIR` / cwd), el directorio temporal del sistema y `CPI_MCP_ALLOWED_ROOTS` (lista separada por el delimitador de rutas del SO). `CPI_MCP_UNSAFE_PATHS=1` desactiva la restricción.
+  - `shared/safe-regex.mjs`: las regex de usuario (extractor y `test-camel-regex`) se evalúan en sandbox con timeout (anti-ReDoS).
+  - `shared/manifest-utils.mjs`: unfold → transformar → refold a 72 bytes, conservando las secciones `Name:`. El clonador renombra solo identificadores completos.
+  - `.project` real: buildCommand `org.eclipse.jdt.core.javabuilder` y naturalezas `org.eclipse.jdt.core.javanature`, `com.sap.ide.ifl.project.support.project.nature` y `com.sap.ide.ifl.bsn` (iFlow / Script Collection) o `com.sap.ide.ifl.valmap` (Value Mapping).
+  - Value Mapping: `<vm version="2.0"><group id="<hex32>"><entry><agency/><schema/><value/></entry>…</group></vm>` (`isDefault="true"` opcional) y MANIFEST con `Import-Package: com.sap.xi.mapping.camel.valmap` y `Bundle-Activator: com.sap.xi.mapping.camel.valmap.ValueMappingActivator`.
+  - Timeouts: `httpRequestTimeout` solo en el `messageFlow` HTTP; el resto de adaptadores se reporta. Se eliminó la reescritura automática de XmlSlurper/XmlParser durante la remediación.
+  - Basic Auth (`IFLW-008`) por canal, con las claves reales de cada adaptador y exención `proxyType=sapcc`.
+- **Archivos**: `shared/*.mjs`, `mcp-server.mjs`, `setup-skills.mjs`, `inspect-iflow-zip.mjs`, `diff-iflow-zip.mjs`, `export-api-client.mjs`, `clone-iflow-bundle.mjs`, `build-cpi-package.mjs`, `build-value-mapping.mjs`, `test-camel-regex.mjs`.
 
+---
 
+### `LL-017` — Groovy 2.4 vs Groovy 4 (Script step 2.0) y Camel Simple `${exchangeProperty.X}`
+- **Síntoma**: falsos CRITICAL/HIGH sobre `groovy.util.XmlSlurper` o `groovy.xml.XmlSlurper` según la API `Message` importada, y presets de regex con `${property.X}`.
+- **Causa Raíz Técnica**: la versión de Groovy (2.4 o 4) es una propiedad del paso Script del iFlow, no de la API `Message` v1/v2, así que no puede deducirse del código. Groovy 2.4 no tiene `groovy.xml.XmlSlurper` y Groovy 4 ya no tiene `groovy.util.XmlSlurper`. En Camel 3 (runtime de CPI) se eliminó `${property.X}` en favor de `${exchangeProperty.X}`. `${in.body}` está deprecado pero funciona; se recomienda `${body}`.
+- **Solución Codificada**: `validate-groovy.mjs` acepta `--groovy 2.4|4` (y `groovyVersion` en las herramientas MCP `cpi_validate_groovy` / `cpi_audit_groovy`) con las reglas `GROOVY24_INVALID_XMLSLURPER_IMPORT`, `GROOVY4_REMOVED_GROOVY_UTIL_XML`, `GROOVY4_CAMEL_IMPORT` y `GROOVY4_DATE_EXTENSIONS`. Sin versión, solo emite `GROOVY_VERSION_DEPENDENT_XML_API` (MEDIUM). La plantilla `xml-slurper` genera `groovy.xml.XmlSlurper` para Groovy 4 (por defecto con `--api v2`) y `groovy.util.XmlSlurper` para Groovy 2.4. Los presets y la SKILL de regex usan `${exchangeProperty.X}`.
+- **Archivos**: `validate-groovy.mjs`, `mcp-server.mjs`, `regex-presets.md`, `sap-cpi-regex-studio/SKILL.md`, `sap-cpi-architect/SKILL.md`, `docs/VALIDATION_RULES.md`.
 
+---
+
+### `LL-018` — Ubicación de `value_mapping.xml` y cabeceras del bundle Value Mapping
+- **Síntoma**: había dudas sobre si `value_mapping.xml` va en la raíz del bundle o en una subcarpeta (p. ej. `src/main/resources/`), y sobre las cabeceras mínimas del MANIFEST.
+- **Causa Raíz Técnica**: el ejemplo oficial de SAP (`TestValueMap.zip`, adjunto a la guía "Accessing valueMaps from a script" del SAP Business Accelerator Hub) contiene solo 3 entradas: `value_mapping.xml` **en la raíz**, `META-INF/MANIFEST.MF` y `.project`. Su MANIFEST declara `SAP-BundleType: ValueMapping`, `SAP-NodeType: IFLMAP`, `Bundle-Activator: com.sap.xi.mapping.camel.valmap.ValueMappingActivator`, `Import-Package: com.sap.xi.mapping.camel.valmap` y `Bundle-SymbolicName: <Nombre>; singleton:=true`. Ese ejemplo (antiguo) usa la naturaleza `com.sap.ide.ifl.bsn` en `.project`; las exportaciones más recientes usan `com.sap.ide.ifl.valmap`. La importación la determina `SAP-BundleType`, no la naturaleza. `metainfo.prop` es opcional.
+- **Solución Codificada**: `build-value-mapping.mjs` mantiene `value_mapping.xml` en la raíz y ahora emite `Bundle-SymbolicName: <Nombre>; singleton:=true`. Por convención, el Value Mapping se crea en el mismo paquete de integración que el iFlow que lo usa. Aun así, en runtime los pares agencia/identificador son globales al tenant: deben ser únicos entre todos los Value Mappings desplegados (si se duplican, falla `ValueMappingActivator.start()`).
+- **Archivos**: `build-value-mapping.mjs`, `sap-cpi-architect/SKILL.md`.
+
+---
+
+### `LL-019` — Contrato MCP: `required`, errores JSON-RPC y raíz fija del sandbox
+- **Síntoma**: 13 herramientas aceptaban `{}` (p. ej. `cpi_inspect_zip {}` auditaba el demo en silencio). JSON malformado, `null` o un batch se descartaban sin respuesta. Con el cliente arrancado desde `$HOME` o `C:\`, el "workspace" era todo el disco. `extractDir` escribía `parameters.prop` en claro.
+- **Causa Raíz Técnica**: el servidor no aplicaba `inputSchema.required` ni los tipos, no implementaba los códigos JSON-RPC 2.0 (`-32700`, `-32600`, `-32601`, `-32602`) y tomaba el cwd como raíz cuando no había `CPI_MCP_ROOT`.
+- **Solución Codificada**: `validateToolArguments` (campos obligatorios y tipos, con `-32602`), `handleJsonRpcPayload` (batches, `-32700`/`-32600`), negociación de `protocolVersion` (`SUPPORTED_PROTOCOL_VERSIONS`) y errores JSON-RPC para tool/resource/prompt desconocidos. `setup-skills.mjs --mcp` escribe `env.CPI_MCP_ROOT` en `.mcp.json`. La extracción vía MCP redacta los `.prop` (`redactExtractedProps`).
+- **Archivos**: `mcp-server.mjs`, `setup-skills.mjs`, `inspect-iflow-zip.mjs`.
+
+---
+
+### `LL-020` — Las regex de CPI son Java, no JavaScript, y Camel Simple distingue mayúsculas
+- **Síntoma**: el sandbox rechazaba regex Java válidas (`(?i)`, `a++`, `\Q..\E`, `\p{L}`). `^(a|aa)+$` solo se marcaba como ReDoS con entradas largas. No se avisaba de `${property.X}`, `${In.Body}` ni `${in.body}`.
+- **Causa Raíz Técnica**: el router y los Content Modifier de CPI usan `java.util.regex`. Los flags inline, los cuantificadores posesivos, `\Q..\E` y las clases Unicode deben traducirse antes de evaluarse en V8. La alternancia solapada dentro de un cuantificador es ReDoS aunque no haya cuantificadores anidados. En Camel 3 `${property.X}` no existe y `${in.body}` está obsoleto.
+- **Solución Codificada**: `shared/java-regex.mjs` con `translateJavaRegex`, `findOverlappingAlternation` (análisis estático) y `checkCamelSimpleField`, usados por `test-camel-regex.mjs`.
+- **Archivos**: `shared/java-regex.mjs`, `test-camel-regex.mjs`, `sap-cpi-regex-studio/SKILL.md`.
+
+---
+
+### `LL-021` — Diff de bundles por hash y remediación de timeouts por `sourceRef` o `targetRef`
+- **Síntoma**: un cambio de igual longitud (timeout 1000→2000) salía como "0 modificados" y el PDF decía "idénticos". No se listaban los pasos añadidos o eliminados. Los canales enlazados solo por `targetRef` no recibían el timeout.
+- **Causa Raíz Técnica**: la comparación usaba el tamaño de la entrada. Un canal receptor de un Request-Reply puede referenciar la tarea como `sourceRef` o como `targetRef`.
+- **Solución Codificada**: `diff-iflow-zip.mjs` compara por hash de contenido y añade `extractIflowSteps` (pasos añadidos/eliminados, parámetros eliminados y versión del manifest también en consola/PDF). La remediación y la auditoría resuelven el canal por ambos atributos. El DEMO del architect pone el timeout en el canal.
+- **Archivos**: `diff-iflow-zip.mjs`, `inspect-iflow-zip.mjs`, `build-cpi-package.mjs`.
+
+---
+
+### `LL-022` — Architect: CSV de Value Mapping, `urlPath` del sender HTTPS y escapado de `.prop`
+- **Síntoma**: el CSV con comillas o con `;` daba stack trace y los duplicados pasaban sin aviso. `export-api-client` ignoraba `urlPath` (salía `/cpi/inbound`) y aceptaba una Script Collection. `build-cpi-package` escribía el zip aunque fallara y no escapaba saltos de línea en `parameters.prop`/`.propdef`.
+- **Causa Raíz Técnica**: el sender HTTPS guarda su ruta en `urlPath`; SOAP/IDoc/ProcessDirect usan `address`. Los `.prop` son `java.util.Properties`: `\`, `=`, `:` y los saltos de línea deben escaparse.
+- **Solución Codificada**: `detectCsvDelimiter` y `parseCsvRows` (RFC 4180, avisos de duplicados agencia/valor), `classifyMessageFlow` y rechazo de bundles que no son iFlow, `escapePropKey`/`escapePropValue`/`escapeXmlText` y "nada se escribe si hay errores". El clonador actualiza las referencias a scripts renombrados.
+- **Archivos**: `build-value-mapping.mjs`, `export-api-client.mjs`, `build-cpi-package.mjs`, `clone-iflow-bundle.mjs`.
+
+---
+
+### `LL-023` — XSD con parser real e inferencia saneada
+- **Síntoma**: `validate-xsd` daba por válidos tipos sin resolver, etiquetas desemparejadas y elementos duplicados. `--infer` generaba XSD inválidos con claves JSON no NCName, `--root` con espacios o `--ns` con `&`. Los arrays mixtos usaban solo el primer elemento. BOM, vacío o inexistente daban stack trace. Una raíz array o `{}` daba un XSD vacío con rc=0.
+- **Causa Raíz Técnica**: una regex no puede validar la buena formación ni resolver QNames. Un nombre de elemento XML debe ser NCName.
+- **Solución Codificada**: `shared/xml-lite.mjs` (`parseXmlLite`, `namespacesInScope`, `findUndeclaredPrefixes`, `isNCName`, `stripBom`). `validate-xsd.mjs` resuelve tipos contra `XSD_BUILTIN_TYPES` y los tipos propios, y detecta duplicados. `toNCName` + `inferXsdWithReport` sanean nombres y devuelven avisos. Se fusionan tipos entre muestras y elementos de arrays, y las entradas inválidas dan error con exit 1.
+- **Archivos**: `shared/xml-lite.mjs`, `validate-xsd.mjs`, `sap-cpi-xsd-studio/SKILL.md`.
+
+---
+
+### `LL-024` — Simulador y constructor `.mmap`: escapado, rutas exactas y `--target-xsd`
+- **Síntoma**: el simulador producía `&amp;amp;`, resolvía una XPath con descendientes y no validaba la salida con `--target-xsd`. `build-mmap` ignoraba un `--map` mal formado (rc=0, 0 bricks) y una ruta Windows en `--source-xsd` rompía el split por `:`.
+- **Solución Codificada**: los valores se extraen ya desescapados y se escapan una sola vez. La XPath se resuelve como ruta absoluta hijo a hijo (`extractValuesFromXml`/`Json`). `validateXmlInstanceAgainstXsd` valida la salida. `splitXsdSpec` respeta `C:\…` y `parseMappingArg` da error (exit 2) ante mapeos inválidos o flags desconocidos.
+- **Archivos**: `simulate-mmap.mjs`, `build-mmap.mjs`, `validate-xsd.mjs`.
+
+---
+
+### `LL-025` — Mock suite: XML real, `--strict` y ZIP reproducible
+- **Síntoma**: `<a><b>x</a>` pasaba la validación. Un desajuste de correlación daba `valid:true` y rc=0. `customer_id` (JSON) frente a `CustomerId` (XML) no correlacionaba. El ZIP cambiaba en cada ejecución. La SKILL prometía semilla, CSV e IDoc que el script no implementa.
+- **Solución Codificada**: buena formación con `parseXmlLite`. Claves canónicas (`canonicalKeyValue`, `extractBusinessKeys`: sin mayúsculas ni `_-.`, atributos y hojas). `--strict` convierte desajustes en errores. Fecha fija (`REPRODUCIBLE_DATE`, `SOURCE_DATE_EPOCH`) salvo `--timestamp`, y nada se escribe si hay errores. La SKILL separa lo que hace el agente de lo que verifica el script.
+- **Archivos**: `pack-mock-suite.mjs`, `sap-cpi-mock-data-generator/SKILL.md`, `mcp-server.mjs`.
+
+---
+
+### `LL-026` — XSLT con parser, literales Groovy enmascarados y contrato CLI uniforme
+- **Síntoma**: el validador XSLT (solo regex) no detectaba XML mal formado ni prefijos sin declarar, ni construcciones 2.0 en hojas 1.0, y rechazaba comillas simples. El validador Groovy marcaba patrones dentro de literales String. Las flags puestas antes del archivo se tomaban como ruta y un `.zip` corrupto daba stack trace. `--validate-doc` no detectaba secciones vacías. `Bundle-SymbolicName` incluía `; singleton:=true`. 16 CLIs salían con exit 0 sin argumentos.
+- **Solución Codificada**: `validate-xslt.mjs` reescrito sobre `parseXmlLite` (motor `--engine 1.0|2.0|3.0`, construcciones 2.0/3.0 con línea, variables sin declarar o duplicadas, llaves en texto respetando CDATA/`xsl:text`/`expand-text`, UTF-16). `stripStringLiterals` en `validate-groovy.mjs` (las reglas estructurales leen el código sin literales). `validateGeneratedDocumentation` comprueba el contenido de cada sección. `parseManifestContent` separa `symbolicName` y `symbolicNameDirectives`. Contrato CLI: sin argumentos o con flag desconocido → exit 2 y uso en stderr.
+- **Archivos**: `validate-xslt.mjs`, `validate-groovy.mjs`, `audit-groovy.mjs`, `extract-for-docs.mjs`, `inspect-iflow-zip.mjs`, todos los `scripts/*.mjs`.

@@ -10,9 +10,11 @@
  *   node clone-iflow-bundle.mjs --source <source.zip> --target-name <New_iFlow_Name> --out <output.zip> [--replace <old=new> ...] [--xpath <oldXpath=newXpath>]
  *   node clone-iflow-bundle.mjs --update-sc <source-sc.zip> --scripts-dir <dir> --out <output-sc.zip>
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readZipEntries, createZipBuffer } from '../../../shared/zip-utils.mjs';
+import { refoldManifest, getManifestHeader } from '../../../shared/manifest-utils.mjs';
 import { lintGroovyScript } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
 import { buildDemoBundleZipBuffer, inspectBundle } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
 import { validateXsdForSapCpi } from '../../sap-cpi-xsd-studio/scripts/validate-xsd.mjs';
@@ -63,7 +65,9 @@ export function cloneIflowBundleZip(sourceZipPathOrBuf, options = {}) {
   const entries = readZipEntries(sourceZipPathOrBuf);
   const rootPrefix = detectRootFolderPrefix(entries);
   const manifestEntry = entries.find((e) => e.path.endsWith('META-INF/MANIFEST.MF'));
-  const symbolicMatch = manifestEntry?.text?.match(/Bundle-SymbolicName:\s*([^\s;\r\n]+)/);
+  // Read the UNFOLDED header: a long SymbolicName is split across 72-byte continuation lines.
+  const symbolicHeader = manifestEntry ? getManifestHeader(manifestEntry.text, 'Bundle-SymbolicName') : null;
+  const symbolicMatch = symbolicHeader ? symbolicHeader.match(/^([^\s;]+)/) : null;
   const iflwEntry = entries.find((e) => e.path.toLowerCase().endsWith('.iflw'));
 
   const oldName =
@@ -74,6 +78,10 @@ export function cloneIflowBundleZip(sourceZipPathOrBuf, options = {}) {
   const targetName = explicitTargetName || oldName;
   if (!targetName) {
     throw new Error('Debe especificar `targetName` para clonar el bundle del iFlow.');
+  }
+  // CPI artifact ids: letters, digits, "_", "-" and "." only (no spaces, no path separators).
+  if (explicitTargetName && !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(explicitTargetName)) {
+    throw new Error(`Nombre de destino no válido: "${explicitTargetName}". Usa solo letras, dígitos, "_", "-" o "." (sin espacios).`);
   }
 
   const entryMap = new Map();
@@ -95,7 +103,15 @@ export function cloneIflowBundleZip(sourceZipPathOrBuf, options = {}) {
     ) {
       let text = entry.text;
       if (targetName !== oldName) {
-        text = text.split(oldName).join(targetName);
+        // Whole-identifier replacement: "Order" must not corrupt "OrderItem_Mapping" or "PurchaseOrder".
+        const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const idRx = new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, 'g');
+        if (newPath === 'META-INF/MANIFEST.MF') {
+          // Unfold first (the name may be split across 72-byte continuation lines), then refold.
+          text = refoldManifest(text, (line) => line.replace(idRx, targetName));
+        } else {
+          text = text.replace(idRx, targetName);
+        }
       }
 
       if (newPath.endsWith('.iflw')) {
@@ -152,6 +168,12 @@ export function updateScriptCollectionBundleZip(sourceScZipPathOrBuf, newScripts
   const entries = readZipEntries(sourceScZipPathOrBuf);
   const rootPrefix = detectRootFolderPrefix(entries);
   const existingMap = new Map();
+  // Only a Script Collection may be updated this way (BUG-14): an iFlow would get a stray script folder.
+  const scManifest = entries.find((e) => e.path.endsWith('META-INF/MANIFEST.MF'));
+  const bundleType = scManifest ? getManifestHeader(scManifest.text, 'SAP-BundleType') : null;
+  if (!bundleType || !/^ScriptCollection$/i.test(bundleType.trim())) {
+    throw new Error(`El bundle de origen no es una Script Collection (SAP-BundleType: ${bundleType ? bundleType.trim() : 'ausente'}).`);
+  }
 
   for (const entry of entries) {
     const cleanPath = stripRootFolderPrefix(entry.path, rootPrefix);
@@ -181,15 +203,17 @@ export function updateScriptCollectionBundleZip(sourceScZipPathOrBuf, newScripts
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log('Uso 1 (Clonar iFlow):');
     console.log('  node clone-iflow-bundle.mjs --source <origen.zip> --target-name <Nuevo_iFlow> --out <destino.zip> [--replace Viejo=Nuevo] [--xpath //viejo=//nuevo]');
     console.log('\nUso 2 (Actualizar Script Collection):');
     console.log('  node clone-iflow-bundle.mjs --update-sc <sc_origen.zip> --scripts-dir <carpeta_groovy> --out <sc_destino.zip> [--strict]');
-    process.exit(0);
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   try {
@@ -234,6 +258,8 @@ if (isMain) {
       const scriptsDir = path.resolve(args[dirIdx + 1]);
       const outPath = path.resolve(args[outIdx + 1]);
 
+      if (!fs.existsSync(scPath)) throw new Error(`No existe la Script Collection de origen: ${args[scIdx + 1]}`);
+      if (!fs.existsSync(scriptsDir) || !fs.statSync(scriptsDir).isDirectory()) throw new Error(`--scripts-dir no es una carpeta: ${args[dirIdx + 1]}`);
       const files = fs.readdirSync(scriptsDir).filter((f) => f.endsWith('.groovy') || f.endsWith('.gsh'));
       const newScripts = files.map((f) => ({
         fileName: f,
@@ -254,8 +280,8 @@ if (isMain) {
       const nameIdx = args.indexOf('--target-name');
       const outIdx = args.indexOf('--out');
 
-      if (srcIdx === -1 || outIdx === -1) {
-        throw new Error('Faltan argumentos obligatorios: --source y --out.');
+      if (srcIdx === -1 || outIdx === -1 || nameIdx === -1 || !args[nameIdx + 1] || args[nameIdx + 1].startsWith('--')) {
+        throw new Error('Faltan argumentos obligatorios: --source, --target-name y --out.');
       }
 
       const sourcePath = path.resolve(args[srcIdx + 1]);
@@ -278,6 +304,9 @@ if (isMain) {
           }
         } else if (args[i] === '--add-resource' && args[i + 1]) {
           const resFile = path.resolve(args[i + 1]);
+          if (!fs.existsSync(resFile) || !fs.statSync(resFile).isFile()) {
+            throw new Error(`--add-resource: no existe el archivo ${args[i + 1]}`);
+          }
           additionalResources.push({
             fileName: path.basename(resFile),
             content: fs.readFileSync(resFile)

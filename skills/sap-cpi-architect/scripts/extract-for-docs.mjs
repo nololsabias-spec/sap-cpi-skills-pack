@@ -8,6 +8,7 @@
  *   node extract-for-docs.mjs <iflow.zip | --demo> [--json]
  *   node extract-for-docs.mjs --validate-doc <documentation.md>
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { inspectBundle, buildDemoBundleZipBuffer } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
@@ -24,18 +25,41 @@ export const MANDATORY_DOC_SECTIONS = [
   { num: 8, title: 'Recomendaciones de Modernización', pattern: /^##\s+8\.\s*Recomendaciones\s+de\s+Modernizaci[oó]n/im }
 ];
 
+/**
+ * Checks that the 8 mandatory sections exist AND that each one has real content
+ * (at least one non-empty line that is not a heading, a rule or a placeholder like "TBD" / "...").
+ */
 export function validateGeneratedDocumentation(markdownText) {
+  const md = String(markdownText || '');
+  const lines = md.split(/\r?\n/);
   const missingSections = [];
+  const emptySections = [];
+  const found = [];
   for (const sec of MANDATORY_DOC_SECTIONS) {
-    if (!sec.pattern.test(markdownText || '')) {
-      missingSections.push(`## ${sec.num}. ${sec.title}`);
-    }
+    const idx = lines.findIndex((l) => sec.pattern.test(l));
+    if (idx === -1) missingSections.push(`## ${sec.num}. ${sec.title}`);
+    else found.push({ sec, idx });
   }
+  const headingRe = /^#{1,2}\s/;
+  for (const { sec, idx } of found) {
+    let end = lines.length;
+    for (let i = idx + 1; i < lines.length; i++) {
+      if (headingRe.test(lines[i])) { end = i; break; }
+    }
+    const body = lines
+      .slice(idx + 1, end)
+      .map((l) => l.trim())
+      .filter((l) => l && !/^#{3,6}\s/.test(l) && !/^(-{3,}|\*{3,}|_{3,})$/.test(l) && !/^(tbd|todo|pendiente|n\/a|\.\.\.|…|-)$/i.test(l.replace(/^[-*>\s]+/, '')));
+    if (body.length === 0) emptySections.push(`## ${sec.num}. ${sec.title}`);
+  }
+  const presentCount = MANDATORY_DOC_SECTIONS.length - missingSections.length;
   return {
-    valid: missingSections.length === 0,
+    valid: missingSections.length === 0 && emptySections.length === 0,
     totalRequired: MANDATORY_DOC_SECTIONS.length,
-    presentCount: MANDATORY_DOC_SECTIONS.length - missingSections.length,
-    missingSections
+    presentCount,
+    filledCount: presentCount - emptySections.length,
+    missingSections,
+    emptySections
   };
 }
 
@@ -197,17 +221,23 @@ export function buildTechnicalDocPdfSpec(report, markdownText = null) {
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log('Uso 1 (Extracción & Contexto): node extract-for-docs.mjs <iflow.zip | --demo> [--pdf <doc.pdf>] [--markdown <doc.md>] [--json]');
     console.log('Uso 2 (Validar Markdown):     node extract-for-docs.mjs --validate-doc <documento.md>');
-    process.exit(0);
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   if (args.includes('--validate-doc')) {
     const idx = args.indexOf('--validate-doc');
+    if (!args[idx + 1] || args[idx + 1].startsWith('--')) {
+      console.error('Error: --validate-doc requiere la ruta del documento Markdown.');
+      process.exit(2);
+    }
     const docPath = path.resolve(args[idx + 1]);
     if (!fs.existsSync(docPath)) {
       console.error(`Archivo no encontrado: ${docPath}`);
@@ -216,10 +246,16 @@ if (isMain) {
     const md = fs.readFileSync(docPath, 'utf8');
     const check = validateGeneratedDocumentation(md);
     console.log(`=== VALIDACIÓN DE DOCUMENTACIÓN TÉCNICA (8 SECCIONES) ===`);
-    console.log(`Estado: ${check.valid ? 'COMPLETO (8/8 secciones presentes)' : `INCOMPLETO (${check.presentCount}/8 secciones)`}`);
+    console.log(`Estado: ${check.valid ? 'COMPLETO (8/8 secciones presentes y con contenido)' : `INCOMPLETO (${check.presentCount}/8 secciones, ${check.filledCount} con contenido)`}`);
     if (!check.valid) {
-      console.log('Secciones faltantes:');
-      check.missingSections.forEach((s) => console.log(`  - ${s}`));
+      if (check.missingSections.length) {
+        console.log('Secciones faltantes:');
+        check.missingSections.forEach((s) => console.log(`  - ${s}`));
+      }
+      if (check.emptySections.length) {
+        console.log('Secciones vacías (solo cabecera o marcador TBD):');
+        check.emptySections.forEach((s) => console.log(`  - ${s}`));
+      }
       process.exit(1);
     }
     process.exit(0);

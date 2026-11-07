@@ -3,10 +3,11 @@
  * Suite de Auto-Verificación de las 8 Skills y Scripts de SAP CPI
  * Ejecuta las pruebas deterministas de cada módulo y verifica que todas las validaciones pasen al 100%.
  */
+import { moduleDir } from './shared/cli-utils.mjs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const ROOT_DIR = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const ROOT_DIR = moduleDir(import.meta.url);
 
 const CHECKS = [
   {

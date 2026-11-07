@@ -15,6 +15,7 @@
  * Usage:
  *   node validate-groovy.mjs <file.groovy> [--strict] [--json]
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readZipEntries } from '../../../shared/zip-utils.mjs';
@@ -37,6 +38,43 @@ export function stripComments(code) {
   return code
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
     .replace(/(?<!:)\/\/.*$/gm, '');
+}
+
+/**
+ * Masks the content of Groovy string literals ('...', "...", '''...''', """...""") with `x` while keeping
+ * the quotes, newlines and character offsets, so structural rules (XmlParser, static def,
+ * JsonSlurper...) do not fire on text such as "new XmlParser()" inside a log message.
+ */
+export function stripStringLiterals(code) {
+  let out = '';
+  let i = 0;
+  while (i < code.length) {
+    const ch = code[i];
+    if (ch === '"' || ch === "'") {
+      const triple = code.startsWith(ch.repeat(3), i);
+      const q = triple ? ch.repeat(3) : ch;
+      out += q;
+      i += q.length;
+      while (i < code.length && !code.startsWith(q, i)) {
+        if (code[i] === '\\' && i + 1 < code.length) {
+          out += 'xx';
+          i += 2;
+          continue;
+        }
+        if (!triple && code[i] === '\n') break; // unterminated single-line literal: stop at EOL
+        out += code[i] === '\n' || code[i] === '\r' ? code[i] : 'x';
+        i++;
+      }
+      if (code.startsWith(q, i)) {
+        out += q;
+        i += q.length;
+      }
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
 }
 
 function hasMultipleTopLevelSetBodyArgs(code) {
@@ -76,18 +114,33 @@ function hasMultipleTopLevelSetBodyArgs(code) {
   return null;
 }
 
-export function lintGroovyScript(code, fileName = 'Script.groovy') {
+/** Normalizes a user-supplied Groovy runtime version to '2.4' | '4' | null (unknown). */
+export function normalizeGroovyVersion(v) {
+  const s = String(v ?? '').trim().toLowerCase().replace(/^groovy\s*/, '');
+  if (!s) return null;
+  if (s === '2' || s.startsWith('2.')) return '2.4';
+  if (s === '4' || s.startsWith('4.')) return '4';
+  return null;
+}
+
+export function lintGroovyScript(code, fileName = 'Script.groovy', options = {}) {
   const findings = [];
   const cleanCode = stripComments(code);
   const lines = cleanCode.split(/\r?\n/);
+  // Same offsets as cleanCode, but with string literal contents blanked (structural rules only).
+  const codeNoStr = stripStringLiterals(cleanCode);
+  const linesNoStr = codeNoStr.split(/\r?\n/);
 
   const addFinding = (severity, dimension, ruleId, title, description, remediation, line) => {
     findings.push({ severity, dimension, ruleId, title, description, remediation, line: line || null });
   };
 
   const findLineNumber = (regex) => {
-    for (let i = 0; i < lines.length; i++) {
-      if (regex.test(lines[i])) return i + 1;
+    // Prefer a hit in real code; fall back to string contents for rules that look at literals.
+    for (const src of [linesNoStr, lines]) {
+      for (let i = 0; i < src.length; i++) {
+        if (regex.test(src[i])) return i + 1;
+      }
     }
     return null;
   };
@@ -191,56 +244,90 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
       );
     }
 
-    const isGroovy4V2 = /import\s+com\.sap\.it\.script\.v2\.api\.Message\b/.test(cleanCode);
-    if (!isGroovy4V2 && (fullImport === 'groovy.xml.XmlSlurper' || fullImport === 'groovy.xml.XmlParser')) {
-      addFinding(
-        'CRITICAL',
-        'Upgrade Readiness & Imports',
-        'GROOVY24_INVALID_XMLSLURPER_IMPORT',
-        `Error de compilación en Groovy 2.4: unable to resolve class ${fullImport}`,
-        `En el motor Groovy 2.4 de SAP CPI (Script v1 con \`com.sap.gateway.ip.core.customdev.util.Message\`), \`${fullImport}\` no existe y falla al compilar con \`unable to resolve class ${fullImport}\`.`,
-        'Usa `import groovy.util.XmlSlurper` en scripts Groovy 2.4 (Script v1).',
-        lineNo
-      );
-    } else if (isGroovy4V2 && (fullImport === 'groovy.util.XmlSlurper' || fullImport === 'groovy.util.XmlParser')) {
-      addFinding(
-        'HIGH',
-        'Upgrade Readiness & Imports',
-        'DEPRECATED_GROOVY_UTIL_XML',
-        `Paquete eliminado en Groovy 4 (${fullImport})`,
-        'En scripts Groovy 4 (`com.sap.it.script.v2.api.Message`), `groovy.util.Xml*` fue movido a `groovy.xml.*`.',
-        'Usa `import groovy.xml.XmlSlurper` cuando emplees la API Script v2 (Groovy 4).',
-        lineNo
-      );
-    }
   }
 
-  // Check inline groovy.xml.XmlSlurper in Groovy 2.4 scripts (when not caught by import line)
-  const isGroovy4V2Global = /import\s+com\.sap\.it\.script\.v2\.api\.Message\b/.test(cleanCode);
-  if (
-    !isGroovy4V2Global &&
-    /\bgroovy\.xml\.XmlSlurper\b/.test(cleanCode) &&
-    !findings.some((f) => f.ruleId === 'GROOVY24_INVALID_XMLSLURPER_IMPORT')
-  ) {
+  // 2b. Groovy runtime-version-dependent APIs.
+  // The Groovy version is chosen in the Script step (Groovy 2.4 vs Groovy 4) and CANNOT be
+  // inferred from the Message import (Script API v1/v2). Only report hard compile errors when
+  // the caller states the version (options.groovyVersion / CLI --groovy 2.4|4).
+  //   Groovy 2.4: groovy.xml.XmlSlurper / XmlParser do not exist (moved there in Groovy 3).
+  //   Groovy 4:   groovy.util.XmlSlurper / XmlParser / XmlNodePrinter / slurpersupport.GPathResult removed.
+  const gv = normalizeGroovyVersion(options.groovyVersion);
+  const g24XmlRe = /\bgroovy\.xml\.(XmlSlurper|XmlParser|slurpersupport\.GPathResult)\b/;
+  const g4XmlRe = /\bgroovy\.util\.(XmlSlurper|XmlParser|XmlNodePrinter|slurpersupport\.GPathResult)\b/;
+  const g24Hit = cleanCode.match(g24XmlRe);
+  const g4Hit = cleanCode.match(g4XmlRe);
+  if (gv === '2.4' && g24Hit) {
     addFinding(
       'CRITICAL',
       'Upgrade Readiness & Imports',
       'GROOVY24_INVALID_XMLSLURPER_IMPORT',
-      'Error de compilación en Groovy 2.4: unable to resolve class groovy.xml.XmlSlurper',
-      'En el motor Groovy 2.4 de SAP CPI (`com.sap.gateway.ip.core.customdev.util.Message`), `groovy.xml.XmlSlurper` no existe y falla al compilar.',
-      'Usa `import groovy.util.XmlSlurper` y `new XmlSlurper(false, false)`.',
-      findLineNumber(/\bgroovy\.xml\.XmlSlurper\b/)
+      `Error de compilación en Groovy 2.4: unable to resolve class ${g24Hit[0]}`,
+      `En el runtime Groovy 2.4 de SAP CPI, \`${g24Hit[0]}\` no existe (el paquete groovy.xml.* para estas clases llegó en Groovy 3).`,
+      'Usa `import groovy.util.XmlSlurper` (Groovy 2.4) o cambia la versión del paso Script a Groovy 4.',
+      findLineNumber(g24XmlRe)
     );
+  } else if (gv === '4' && g4Hit) {
+    addFinding(
+      'CRITICAL',
+      'Upgrade Readiness & Imports',
+      'GROOVY4_REMOVED_GROOVY_UTIL_XML',
+      `Error de compilación en Groovy 4: unable to resolve class ${g4Hit[0]}`,
+      `En Groovy 4, \`${g4Hit[0]}\` fue eliminado (deprecado en Groovy 3, movido a \`groovy.xml.*\`).`,
+      `Usa \`import ${g4Hit[0].replace('groovy.util.', 'groovy.xml.')}\`.`,
+      findLineNumber(g4XmlRe)
+    );
+  } else if (!gv && (g24Hit || g4Hit)) {
+    const hit = (g24Hit || g4Hit)[0];
+    addFinding(
+      'MEDIUM',
+      'Upgrade Readiness & Imports',
+      'GROOVY_VERSION_DEPENDENT_XML_API',
+      `API XML dependiente de la versión de Groovy (${hit})`,
+      g24Hit
+        ? `\`${hit}\` solo compila en Groovy 3+/4: falla con "unable to resolve class" si el paso Script usa Groovy 2.4.`
+        : `\`${hit}\` solo compila en Groovy 2.4/3: falla con "unable to resolve class" si el paso Script usa Groovy 4.`,
+      'Indica la versión del paso Script (`--groovy 2.4|4` / opción groovyVersion) para validarlo con certeza. La versión de la API Message (v1/v2) no determina la versión de Groovy.',
+      findLineNumber(g24Hit ? g24XmlRe : g4XmlRe)
+    );
+  }
+
+  if (gv === '4') {
+    const camelRe = /^\s*import\s+(?:static\s+)?org\.apache\.camel\./m;
+    if (camelRe.test(cleanCode) && !findings.some((f) => f.ruleId === 'INTERNAL_CAMEL_IMPORT')) {
+      addFinding(
+        'HIGH',
+        'Upgrade Readiness & Imports',
+        'GROOVY4_CAMEL_IMPORT',
+        'Import directo de Apache Camel en un script Groovy 4',
+        'Los scripts Groovy 4 se ejecutan sobre un runtime Camel distinto; las clases org.apache.camel.* no forman parte de la API pública y pueden no resolverse.',
+        'Usa exclusivamente la interfaz `Message` y `ITApiFactory`.',
+        findLineNumber(/^\s*import\s+(?:static\s+)?org\.apache\.camel\./)
+      );
+    }
+    // Date#format(pattern[, tz]) / Date.parse(pattern, text); String.format(...) is excluded.
+    const dateFmtRe = /(?<!\bString)\.format\s*\(\s*['"][^'"%]*['"]\s*(?:,\s*TimeZone\b[^)]*)?\)|\bDate\.parse\s*\(/;
+    if (/\bDate\b/.test(codeNoStr) && dateFmtRe.test(codeNoStr)) {
+      addFinding(
+        'MEDIUM',
+        'Upgrade Readiness & Imports',
+        'GROOVY4_DATE_EXTENSIONS',
+        'Date.format()/Date.parse() de la GDK en Groovy 4',
+        'En Groovy 4 las extensiones de fecha de la GDK (Date.format/parse) viven en el módulo opcional groovy-dateutil y pueden no estar disponibles.',
+        'Usa `java.time` (DateTimeFormatter.ofPattern(...).withZone(ZoneId.of("UTC"))).',
+        findLineNumber(/\.format\s*\(|\bDate\.parse\s*\(/)
+      );
+    }
   }
 
   // 3. Reader.getText(charset) MissingMethodException (CRITICAL -30)
   // In Java/Groovy, Reader/BufferedReader/StringReader is already a character stream and has NO getText(String charset) overload!
-  const usesReader = /\b(?:Reader|BufferedReader|StringReader)\b/.test(cleanCode);
-  const usesInputStream = /\bInputStream\b/.test(cleanCode);
+  const usesReader = /\b(?:Reader|BufferedReader|StringReader)\b/.test(codeNoStr);
+  const usesInputStream = /\bInputStream\b/.test(codeNoStr);
   if (
-    (usesReader && !usesInputStream && /\.getText\s*\(\s*[^)\s]+\s*\)/.test(cleanCode)) ||
-    /\b(?:reader|bodyReader|stringReader|bufferedReader)\s*(?:\?\.|\.)getText\s*\(\s*[^)\s]+\s*\)/i.test(cleanCode) ||
-    /\.getBody\s*\(\s*(?:java\.io\.)?Reader(?:\.class)?\s*\)\s*(?:\?\.|\.)getText\s*\(\s*[^)\s]+\s*\)/.test(cleanCode)
+    (usesReader && !usesInputStream && /\.getText\s*\(\s*[^)\s]+\s*\)/.test(codeNoStr)) ||
+    /\b(?:reader|bodyReader|stringReader|bufferedReader)\s*(?:\?\.|\.)getText\s*\(\s*[^)\s]+\s*\)/i.test(codeNoStr) ||
+    /\.getBody\s*\(\s*(?:java\.io\.)?Reader(?:\.class)?\s*\)\s*(?:\?\.|\.)getText\s*\(\s*[^)\s]+\s*\)/.test(codeNoStr)
   ) {
     addFinding(
       'CRITICAL',
@@ -254,7 +341,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 4. Dynamic code evaluation Metaspace OOM (GroovyShell / Eval.me) (CRITICAL -30)
-  if (/\bGroovyShell\s*\(/.test(cleanCode) || /\bEval\.(?:me|x|xy|xyz)\s*\(/.test(cleanCode)) {
+  if (/\bGroovyShell\s*\(/.test(codeNoStr) || /\bEval\.(?:me|x|xy|xyz)\s*\(/.test(codeNoStr)) {
     addFinding(
       'CRITICAL',
       'Rendimiento y Heap Memory',
@@ -267,7 +354,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 3. Static state memory leak (CRITICAL -30) & Mutable @Field state (HIGH -15)
-  if (/\bstatic\s+(?:def|Map|List|HashMap|ArrayList|Set|Object|String)\b/.test(cleanCode)) {
+  if (/\bstatic\s+(?:def|Map|List|HashMap|ArrayList|Set|Object|String)\b/.test(codeNoStr)) {
     addFinding(
       'CRITICAL',
       'Rendimiento y Heap Memory',
@@ -295,7 +382,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 4. Heap OOM: message.getBody(String) or XmlParser (CRITICAL -30)
-  if (/\.getBody\s*\(\s*(?:java\.lang\.)?String(?:\.class)?\s*\)/.test(cleanCode)) {
+  if (/\.getBody\s*\(\s*(?:java\.lang\.)?String(?:\.class)?\s*\)/.test(codeNoStr)) {
     addFinding(
       'CRITICAL',
       'Rendimiento y Heap Memory',
@@ -307,7 +394,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
     );
   }
 
-  if (/\bXmlParser\s*\(/.test(cleanCode) || /\bimport\s+groovy\.(?:xml|util)\.XmlParser\b/.test(cleanCode)) {
+  if (/\bXmlParser\s*\(/.test(codeNoStr) || /\bimport\s+groovy\.(?:xml|util)\.XmlParser\b/.test(cleanCode)) {
     addFinding(
       'CRITICAL',
       'Rendimiento y Heap Memory',
@@ -320,7 +407,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 5. XXE Protection (CRITICAL -30)
-  if (/\bXmlSlurper\b/.test(cleanCode) || /\bDocumentBuilderFactory\b/.test(cleanCode) || /\bSAXParserFactory\b/.test(cleanCode)) {
+  if (/\bXmlSlurper\b/.test(codeNoStr) || /\bDocumentBuilderFactory\b/.test(codeNoStr) || /\bSAXParserFactory\b/.test(codeNoStr)) {
     const hasDisallowDoctype = /http:\/\/apache\.org\/xml\/features\/disallow-doctype-decl/.test(cleanCode);
     if (!hasDisallowDoctype) {
       addFinding(
@@ -336,7 +423,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 6. JsonSlurper vs JsonSlurperClassic (HIGH -15)
-  if (/\bnew\s+(?:groovy\.json\.)?JsonSlurper\s*\(/.test(cleanCode)) {
+  if (/\bnew\s+(?:groovy\.json\.)?JsonSlurper\s*\(/.test(codeNoStr)) {
     addFinding(
       'HIGH',
       'Rendimiento y Heap Memory',
@@ -349,13 +436,13 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 7. Unclosed Reader / InputStream (HIGH -15)
-  const usesReaderOrStream = /\.getBody\s*\(\s*(?:java\.io\.)?(?:Reader|InputStream)(?:\.class)?\s*\)/.test(cleanCode);
+  const usesReaderOrStream = /\.getBody\s*\(\s*(?:java\.io\.)?(?:Reader|InputStream)(?:\.class)?\s*\)/.test(codeNoStr);
   if (usesReaderOrStream) {
     const closesResource =
-      /\.withReader\b/.test(cleanCode) ||
-      /\.withCloseable\b/.test(cleanCode) ||
-      /\.withStream\b/.test(cleanCode) ||
-      /\bfinally\s*\{[\s\S]*?\.close\s*\(\s*\)/.test(cleanCode);
+      /\.withReader\b/.test(codeNoStr) ||
+      /\.withCloseable\b/.test(codeNoStr) ||
+      /\.withStream\b/.test(codeNoStr) ||
+      /\bfinally\s*\{[\s\S]*?\.close\s*\(\s*\)/.test(codeNoStr);
     if (!closesResource) {
       addFinding(
         'HIGH',
@@ -371,9 +458,9 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
 
   // 8. Timezone Governance (HIGH -15)
   if (
-    /\bTimeZone\.getDefault\s*\(/.test(cleanCode) ||
-    /\bnew\s+Date\s*\(\s*\)\.format\s*\(/.test(cleanCode) ||
-    (/\bnew\s+SimpleDateFormat\s*\(/.test(cleanCode) && !/\.setTimeZone\s*\(/.test(cleanCode))
+    /\bTimeZone\.getDefault\s*\(/.test(codeNoStr) ||
+    /\bnew\s+Date\s*\(\s*\)\.format\s*\(/.test(codeNoStr) ||
+    (/\bnew\s+SimpleDateFormat\s*\(/.test(codeNoStr) && !/\.setTimeZone\s*\(/.test(codeNoStr))
   ) {
     addFinding(
       'HIGH',
@@ -389,8 +476,11 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   // 9. Empty catch block or missing CPI-ERR prefix (HIGH -15)
   const catchRegex = /\bcatch\s*\([^)]+\)\s*\{([\s\S]*?)\}/g;
   let cMatch;
-  while ((cMatch = catchRegex.exec(cleanCode)) !== null) {
-    const catchBody = cMatch[1].trim();
+  while ((cMatch = catchRegex.exec(codeNoStr)) !== null) {
+    // Structure is matched on codeNoStr (a "}" inside a literal cannot close the block); the body
+    // text is read back from cleanCode at the same offsets so the CPI-ERR: literal is visible.
+    const bodyStart = cMatch.index + cMatch[0].length - 1 - cMatch[1].length;
+    const catchBody = cleanCode.slice(bodyStart, bodyStart + cMatch[1].length).trim();
     const lineNo = cleanCode.slice(0, cMatch.index).split(/\r?\n/).length;
     if (!catchBody) {
       addFinding(
@@ -431,7 +521,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
 
   // 11. Unconditional MPL Attachment creation (MEDIUM -5)
   // Recognizes explicit debug/enable flags, catch blocks, and dedicated Exception Subprocess / Error Handler scripts (CamelExceptionCaught / SAP_ErrorModelStepID / SAP_MessageProcessingLogCustomStatus)
-  if (/\.addAttachmentAsString\s*\(/.test(cleanCode)) {
+  if (/\.addAttachmentAsString\s*\(/.test(codeNoStr)) {
     const hasConditionOrCatch =
       /\bif\s*\([^)]*(?:LogAttachments|debug|trace|log|enable|attach|payload|audit)/i.test(cleanCode) ||
       /\b(?:CamelExceptionCaught|SAP_ErrorModelStepID|SAP_MessageProcessingLogCustomStatus|ExceptionMessage)\b/.test(cleanCode) ||
@@ -480,7 +570,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
   }
 
   // 12. Static MessageLogFactory call (MEDIUM -5)
-  if (/\bMessageLogFactory\.getMessageLog\b/.test(cleanCode)) {
+  if (/\bMessageLogFactory\.getMessageLog\b/.test(codeNoStr)) {
     addFinding(
       'MEDIUM',
       'Observabilidad & MPL',
@@ -588,6 +678,10 @@ export function generateCanonicalGroovyTemplate(pattern = 'json-streaming', opti
   const messageImport = apiVersion === 'v2'
     ? 'import com.sap.it.script.v2.api.Message'
     : 'import com.sap.gateway.ip.core.customdev.util.Message';
+  // Groovy runtime of the Script step. Generation default: Groovy 4 for API v2, Groovy 2.4 for API v1
+  // (an explicit choice for the generated code, NOT an inference about an existing script).
+  const groovyVersion = normalizeGroovyVersion(options.groovyVersion) || (apiVersion === 'v2' ? '4' : '2.4');
+  const xmlSlurperImport = groovyVersion === '4' ? 'import groovy.xml.XmlSlurper' : 'import groovy.util.XmlSlurper';
 
   let code = '';
   switch (pattern) {
@@ -602,7 +696,7 @@ export function generateCanonicalGroovyTemplate(pattern = 'json-streaming', opti
 // 4. Observabilidad: addCustomHeaderProperty condicional en Message Processing Log.
 // ============================================================================
 ${messageImport}
-import groovy.util.XmlSlurper
+${xmlSlurperImport}
 import groovy.transform.Field
 import java.io.Reader
 import java.time.ZoneId
@@ -641,7 +735,7 @@ Message processData(Message message) {
 }
 `
         : `${messageImport}
-import groovy.util.XmlSlurper
+${xmlSlurperImport}
 import groovy.transform.Field
 import java.io.Reader
 import java.time.ZoneId
@@ -1013,10 +1107,11 @@ Message processData(Message message) {
       break;
   }
 
-  const lint = lintGroovyScript(code, scriptName);
+  const lint = lintGroovyScript(code, scriptName, { groovyVersion });
   return {
     pattern,
     apiVersion,
+    groovyVersion,
     scriptName,
     customComments,
     score: lint.score,
@@ -1027,13 +1122,15 @@ Message processData(Message message) {
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso 1 (Validar):  node validate-groovy.mjs <archivo.groovy | carpeta | paquete.zip> [--strict] [--json]');
-    console.log('Uso 2 (Template): node validate-groovy.mjs --template <json-streaming|xml-slurper|mpl-custom-headers|oauth-token-inject|dynamic-routing-header|base64-attachment> [--api v1|v2] [--json]');
-    process.exit(0);
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
+    console.log('Uso 1 (Validar):  node validate-groovy.mjs <archivo.groovy | carpeta | paquete.zip> [--groovy 2.4|4] [--strict] [--json]');
+    console.log('Uso 2 (Template): node validate-groovy.mjs --template <json-streaming|xml-slurper|mpl-custom-headers|oauth-token-inject|dynamic-routing-header|base64-attachment> [--api v1|v2] [--groovy 2.4|4] [--json]');
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   if (args.includes('--template')) {
@@ -1045,14 +1142,25 @@ if (isMain) {
     }
     const apiIdx = args.indexOf('--api');
     const apiVersion = apiIdx !== -1 ? args[apiIdx + 1] : 'v1';
+    if (!['v1', 'v2'].includes(apiVersion)) {
+      console.error(`Error: --api debe ser v1 o v2 (recibido "${apiVersion ?? ''}").`);
+      process.exit(2);
+    }
+    const gTplIdx = args.indexOf('--groovy');
+    if (gTplIdx !== -1 && !normalizeGroovyVersion(args[gTplIdx + 1])) {
+      console.error(`Error: --groovy debe ser 2.4 o 4 (recibido "${args[gTplIdx + 1] ?? ''}").`);
+      process.exit(2);
+    }
     const jsonFlag = args.includes('--json');
     const rawFlag = args.includes('--raw');
     const commentsFlag = args.includes('--comments');
     const outIdx = args.indexOf('--out');
     const outPath = outIdx !== -1 && args[outIdx + 1] ? path.resolve(args[outIdx + 1]) : null;
 
+    const gIdx = args.indexOf('--groovy');
     const templateRes = generateCanonicalGroovyTemplate(pattern, {
       apiVersion,
+      groovyVersion: gIdx !== -1 ? args[gIdx + 1] : undefined,
       customComments: commentsFlag
     });
 
@@ -1073,9 +1181,21 @@ if (isMain) {
     process.exit(templateRes.passed ? 0 : 1);
   }
 
-  const targetPath = path.resolve(args[0]);
+  const groovyArgIdx = args.indexOf('--groovy');
+  // The target is the first positional argument, wherever it appears (`--json f.groovy` works too).
+  const positional = args.filter((a, i) => !a.startsWith('--') && !(groovyArgIdx !== -1 && i === groovyArgIdx + 1));
+  if (positional.length === 0) {
+    console.error('Error: falta la ruta del archivo .groovy, carpeta o paquete .zip a validar.');
+    process.exit(2);
+  }
+  const targetPath = path.resolve(positional[0]);
   const jsonFlag = args.includes('--json');
   const strictFlag = args.includes('--strict');
+  const lintOptions = { groovyVersion: groovyArgIdx !== -1 ? args[groovyArgIdx + 1] : undefined };
+  if (groovyArgIdx !== -1 && !normalizeGroovyVersion(lintOptions.groovyVersion)) {
+    console.error('Error: --groovy debe ser 2.4 o 4');
+    process.exit(1);
+  }
 
   if (!fs.existsSync(targetPath)) {
     console.error(`Archivo o carpeta no encontrado: ${targetPath}`);
@@ -1094,7 +1214,13 @@ if (isMain) {
       }
     }
   } else if (targetPath.toLowerCase().endsWith('.zip')) {
-    const zipEntries = readZipEntries(targetPath);
+    let zipEntries;
+    try {
+      zipEntries = readZipEntries(targetPath);
+    } catch (err) {
+      console.error(`Error: no se pudo leer ${path.basename(targetPath)} como ZIP (${err.message}). Exporta de nuevo el paquete desde SAP CPI.`);
+      process.exit(1);
+    }
     for (const ze of zipEntries) {
       const pLower = ze.path.toLowerCase();
       if (pLower.endsWith('.groovy') || pLower.endsWith('.gsh')) {
@@ -1111,7 +1237,7 @@ if (isMain) {
   }
 
   if (scriptsToValidate.length === 1 && !stat.isDirectory() && !targetPath.toLowerCase().endsWith('.zip')) {
-    const result = lintGroovyScript(scriptsToValidate[0].code, scriptsToValidate[0].name);
+    const result = lintGroovyScript(scriptsToValidate[0].code, scriptsToValidate[0].name, lintOptions);
 
     if (jsonFlag) {
       console.log(JSON.stringify(result, null, 2));
@@ -1135,7 +1261,7 @@ if (isMain) {
       process.exit(1);
     }
   } else {
-    const results = scriptsToValidate.map((s) => lintGroovyScript(s.code, s.name));
+    const results = scriptsToValidate.map((s) => lintGroovyScript(s.code, s.name, lintOptions));
     const avgScore = Math.round(results.reduce((acc, r) => acc + r.score, 0) / results.length);
     const allPassed = results.every((r) => r.passed && (!strictFlag || r.score === 100));
 

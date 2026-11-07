@@ -8,6 +8,10 @@
  *   node test-camel-regex.mjs --pattern "^...$" [--component "Router"|"Content Modifier"] [--field "${header.CamelHttpPath}"] [--match "v1|v2"] [--no-match "v3|v4"] [--json]
  *   node test-camel-regex.mjs --demo
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
+import { safeRegexExecAll } from '../../../shared/safe-regex.mjs';
+import { translateJavaRegex, findOverlappingAlternation, checkCamelSimpleField } from '../../../shared/java-regex.mjs';
+export { translateJavaRegex, findOverlappingAlternation, checkCamelSimpleField };
 import path from 'node:path';
 
 export function validateAndTestCamelRegex({
@@ -15,7 +19,8 @@ export function validateAndTestCamelRegex({
   componentType = 'Router',
   sourceField = '${header.CamelHttpPath}',
   matchCases = [],
-  noMatchCases = []
+  noMatchCases = [],
+  timeoutMs = 1500
 }) {
   const errors = [];
   const warnings = [];
@@ -25,9 +30,19 @@ export function validateAndTestCamelRegex({
   }
 
   const cleanPattern = pattern.trim();
+  // Java syntax ((?i), a++, \Q..\E, \p{Alpha}, \A/\z...) -> ECMAScript before sandboxing.
+  const java = translateJavaRegex(cleanPattern);
+  warnings.push(...java.warnings);
+  for (const u of java.unsupported) errors.push(`Construcción Java no evaluable en el sandbox JavaScript: ${u}. Prueba este caso en el tenant (Simulación de iFlow).`);
 
-  // 1. Anchoring check (^ and $)
-  if (!cleanPattern.startsWith('^') || !cleanPattern.endsWith('$')) {
+  // 0. Camel 3 Simple field checks (${property.X} removed, ${in.body} deprecated, case-sensitive names)
+  const fieldCheck = checkCamelSimpleField(sourceField);
+  errors.push(...fieldCheck.errors);
+  warnings.push(...fieldCheck.warnings);
+
+  // 1. Anchoring check (^ and $), on the translated source so (?i)^...$ and \A...\z count as anchored
+  const endAnchored = (java.source.endsWith('$') && !java.source.endsWith('\\$')) || java.source.endsWith('(?=\\n?$)');
+  if (!java.source.startsWith('^') || !endAnchored) {
     errors.push(`Anclaje incompleto en \`${cleanPattern}\`: Todo patrón de SAP CPI debe iniciar con \`^\` y finalizar con \`$\` para evitar coincidencias parciales accidentales.`);
   }
 
@@ -35,6 +50,12 @@ export function validateAndTestCamelRegex({
   // Detects nested quantifiers like (a+)+, (.*)+, ([a-z]+)*, (\d+)+
   if (/\([^()]*[+*][^()]*\)[+*]/.test(cleanPattern)) {
     errors.push(`Riesgo de Catastrophic Backtracking (ReDoS) detectado en \`${cleanPattern}\`: cuantificadores anidados no acotados pueden bloquear los hilos worker de SAP CPI al 100% de CPU.`);
+  } else {
+    // Quantified alternation whose branches overlap: (a|aa)+, (\w|\d)*, (x|x?)+ -> exponential backtracking on the JVM.
+    const overlap = findOverlappingAlternation(java.source);
+    if (overlap.length) {
+      errors.push(`Riesgo de Catastrophic Backtracking (ReDoS) en \`${overlap[0]}\`: alternativas solapadas dentro de un grupo cuantificado. Haz las alternativas mutuamente excluyentes (p. ej. \`a+\` en lugar de \`(a|aa)+\`).`);
+    }
   }
 
   // 3. Unnecessary escaped forward slashes \/
@@ -42,12 +63,14 @@ export function validateAndTestCamelRegex({
     warnings.push('En Java Pattern y Apache Camel Simple no es necesario escapar las barras normales `/`. Escribe `/` directamente en lugar de `\\/`.');
   }
 
-  // 4. Compile RegExp
-  let reg = null;
-  try {
-    reg = new RegExp(cleanPattern);
-  } catch (err) {
-    errors.push(`Error de sintaxis en la expresión regular: ${err.message}`);
+  // 4. Compile + evaluate in a time-limited worker sandbox: a catastrophic pattern can no longer
+  //    freeze the CLI or the single-threaded MCP server.
+  const sandbox = safeRegexExecAll(java.source, [...matchCases, ...noMatchCases], { timeoutMs, flags: java.flags });
+  const reg = sandbox.ok;
+  if (!sandbox.ok) {
+    if (sandbox.syntaxError) errors.push(`Error de sintaxis en la expresión regular: ${sandbox.error}`);
+    else if (sandbox.timedOut) errors.push(`ReDoS confirmado en ejecución: ${sandbox.error}`);
+    else errors.push(sandbox.error);
   }
 
   // 5. Build Camel Simple Expression
@@ -55,18 +78,20 @@ export function validateAndTestCamelRegex({
   let camelSimple = '';
   if (isContentMod) {
     const innerExpr = sourceField.replace(/^\$\{/, '').replace(/\}$/, '');
-    camelSimple = `\${${innerExpr}.replaceAll('${cleanPattern}', '$1')}\n// O en tabla Regular Expression de Content Modifier:\n// Pattern: ${cleanPattern} | Replacement: $1`;
+    camelSimple = `\${${innerExpr}.replaceAll('${cleanPattern}', '$1')}`;
   } else {
     camelSimple = `${sourceField} regex '${cleanPattern}'`;
+  }
+  if (cleanPattern.includes("'")) {
+    warnings.push("El patrón contiene comillas simples ('): dentro de Camel Simple duplícalas ('') o usa la clase [\\x27] para no romper la expresión.");
   }
 
   // 6. Run Sandbox Evaluations
   const evaluations = [];
   if (reg) {
+    let idx = 0;
     for (const val of matchCases) {
-      const execRes = reg.exec(val);
-      const isMatch = Boolean(execRes);
-      const groups = execRes ? Array.from(execRes).slice(1) : [];
+      const { match: isMatch, groups } = sandbox.results[idx++];
       const passedExpectation = isMatch === true;
       if (!passedExpectation) {
         errors.push(`Caso de prueba MATCH fallido: el valor "${val}" debía hacer MATCH con \`${cleanPattern}\`, pero evaluó a NO_MATCH.`);
@@ -75,9 +100,7 @@ export function validateAndTestCamelRegex({
     }
 
     for (const val of noMatchCases) {
-      const execRes = reg.exec(val);
-      const isMatch = Boolean(execRes);
-      const groups = execRes ? Array.from(execRes).slice(1) : [];
+      const { match: isMatch, groups } = sandbox.results[idx++];
       const passedExpectation = isMatch === false;
       if (!passedExpectation) {
         errors.push(`Inconsistencia en caso NO_MATCH: el valor "${val}" debía fallar contra \`${cleanPattern}\`, pero hizo MATCH.`);
@@ -89,6 +112,8 @@ export function validateAndTestCamelRegex({
   return {
     valid: errors.length === 0,
     pattern: cleanPattern,
+    jsPattern: java.source,
+    jsFlags: java.flags,
     componentType,
     sourceField,
     camelSimple,
@@ -99,13 +124,15 @@ export function validateAndTestCamelRegex({
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log('Uso: node test-camel-regex.mjs --pattern "^...$" [--component "Router"|"Content Modifier"] [--field "${header.X}"] [--match "a|b"] [--no-match "c|d"] [--json]');
     console.log('     node test-camel-regex.mjs --demo');
-    process.exit(0);
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   const getArg = (flag, def = '') => {
@@ -127,7 +154,7 @@ if (isMain) {
     const prop = getArg('--prop') || getArg('--property');
     const hdr = getArg('--header');
     if (prop) {
-      sourceField = prop.startsWith('${') ? prop : `\${property.${prop}}`;
+      sourceField = prop.startsWith('${') ? prop : `\${exchangeProperty.${prop}}`; // ${property.X} was removed in Camel 3 (CPI runtime 3.14)
     } else if (hdr) {
       sourceField = hdr.startsWith('${') ? hdr : `\${header.${hdr}}`;
     } else {

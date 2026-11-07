@@ -24,13 +24,13 @@ Cada vez que se active uno de los disparadores anteriores, ejecuta estos 5 pasos
 
 ### Paso 3: Codificar la regla en los Scripts CLI Deterministas
 - Si el hallazgo puede detectarse, prevenirse o autocorregirse mediante código, actualiza el script CLI correspondiente en `sap-cpi-skills-pack` (o en `.agents/skills/` si trabajas en modo standalone):
-  - Errores de compilación/runtime Groovy 2.4 -> `skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs`
+  - Errores de compilación/runtime Groovy 2.4 / Groovy 4 -> `skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs`
   - Auditoría de paquetes `.zip`, `.iflw`, `.mmap`, `.xsd` y autorremediación -> `skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs`
   - Empaquetado OSGi `MANIFEST.MF`, `.project` y generación de `.iflw` -> `skills/sap-cpi-architect/scripts/build-cpi-package.mjs` y `clone-iflow-bundle.mjs`
   - Inferencia/validación XSD -> `skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs`
   - Validación XSLT 1.0/2.0 -> `skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs`
-  - Expresiones Regulares / Camel Simple -> `skills/sap-cpi-regex-studio/scripts/test-cpi-regex.mjs`
-  - Suites de datos Mock E2E -> `skills/sap-cpi-mock-data-generator/scripts/validate-mock-suite.mjs`
+  - Expresiones Regulares / Camel Simple -> `skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs`
+  - Suites de datos Mock E2E -> `skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs`
 
 ### Paso 4: Actualizar `SKILL.md`, Referencias y `docs/LESSONS_LEARNED.md`
 - Incorpora la regla o patrón arquitectónico en la `SKILL.md` correspondiente (y en sus archivos `references/` si aplica).

@@ -16,6 +16,7 @@
  *     [--header /TargetRoot/h=CamelHttpMethod] [--property /TargetRoot/p=PropName] \
  *     --out <MappingName.mmap>
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -55,6 +56,29 @@ function buildHeaderOrPropArgXml(fnName, keyName) {
  * @param {Array<{target: string, source?: string, constant?: string, header?: string, property?: string}>} spec.mappings
  * @returns {string}
  */
+/**
+ * Splits "<file.xsd>:<Root>" on the LAST colon so Windows paths (C:\\dir\\a.xsd:Root) keep their drive letter.
+ * @returns {[string, string|undefined]}
+ */
+export function splitXsdSpec(spec) {
+  const s = String(spec || '');
+  const i = s.lastIndexOf(':');
+  // "C:\\a.xsd" (colon right after a drive letter) has no root part.
+  if (i === -1 || (i === 1 && /^[A-Za-z]$/.test(s[0]))) return [s, undefined];
+  return [s.slice(0, i), s.slice(i + 1) || undefined];
+}
+
+/** Parses "/Target/path=value". Returns null when malformed (no "=", empty sides, relative target). */
+export function parseMappingArg(arg) {
+  if (typeof arg !== 'string') return null;
+  const eq = arg.indexOf('=');
+  if (eq <= 0) return null;
+  const target = arg.slice(0, eq).trim();
+  const value = arg.slice(eq + 1);
+  if (!target.startsWith('/') || target.length < 2 || value === '') return null;
+  return { target, value };
+}
+
 export function generateMmapXml(spec) {
   const sourceXsd = path.basename(spec.sourceXsd || 'Source.xsd');
   const sourceRoot = spec.sourceRoot || 'root';
@@ -182,21 +206,41 @@ export function validateMmapForSapCpi(mmapContent) {
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log('Uso 1 (Demo):       node build-mmap.mjs --demo [--json]');
     console.log('Uso 2 (Validar):    node build-mmap.mjs --validate <archivo.mmap> [--json]');
     console.log('Uso 3 (Generar):    node build-mmap.mjs --source-xsd <Origen.xsd:Root> --target-xsd <Destino.xsd:Root> [--map /Dest/a=/Orig/b] [--const /Dest/c=VAL] [--header /Dest/h=Hdr] [--property /Dest/p=Prop] --out <Mapeo.mmap>');
-    process.exit(0);
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   const jsonFlag = args.includes('--json');
+  const fail = (msg) => {
+    globalThis.console.error(`[ERROR] ${msg}`);
+    process.exit(2);
+  };
+  const VALUE_FLAGS = ['--validate', '--source-xsd', '--target-xsd', '--map', '--const', '--header', '--property', '--out'];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (VALUE_FLAGS.includes(a)) {
+      if (args[i + 1] === undefined || args[i + 1].startsWith('--')) fail(`${a} requiere un valor.`);
+      i++;
+    } else if (!['--json', '--demo'].includes(a)) {
+      fail(`Argumento desconocido: ${a}. Usa --help.`);
+    }
+  }
 
   if (args.includes('--validate')) {
     const valIdx = args.indexOf('--validate');
     const filePath = path.resolve(args[valIdx + 1]);
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      globalThis.console.error(`[ERROR] --validate: no existe el archivo ${args[valIdx + 1]}`);
+      process.exit(1);
+    }
     const content = fs.readFileSync(filePath, 'utf8');
     const res = validateMmapForSapCpi(content);
     if (jsonFlag) {
@@ -238,28 +282,26 @@ if (isMain) {
     return idx !== -1 && args[idx + 1] ? args[idx + 1] : null;
   };
 
-  const srcSpec = getOpt('--source-xsd') || 'Source.xsd:root';
-  const tgtSpec = getOpt('--target-xsd') || 'Target.xsd:root';
-  const [sourceXsd, sourceRoot = 'root'] = srcSpec.split(':');
-  const [targetXsd, targetRoot = 'root'] = tgtSpec.split(':');
+  const srcSpec = getOpt('--source-xsd');
+  const tgtSpec = getOpt('--target-xsd');
+  if (!srcSpec || !tgtSpec) fail('Faltan --source-xsd <Origen.xsd:Root> y/o --target-xsd <Destino.xsd:Root>.');
+  const [sourceXsd, sourceRoot] = splitXsdSpec(srcSpec);
+  const [targetXsd, targetRoot] = splitXsdSpec(tgtSpec);
+  if (!sourceRoot || !targetRoot) fail('Indica el elemento raíz tras ":" (p. ej. Origen.xsd:Order).');
   const outPath = getOpt('--out');
 
   const mappings = [];
+  const KIND = { '--map': 'source', '--const': 'constant', '--header': 'header', '--property': 'property' };
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--map' && args[i + 1]) {
-      const eq = args[i + 1].indexOf('=');
-      if (eq !== -1) mappings.push({ target: args[i + 1].slice(0, eq), source: args[i + 1].slice(eq + 1) });
-    } else if (args[i] === '--const' && args[i + 1]) {
-      const eq = args[i + 1].indexOf('=');
-      if (eq !== -1) mappings.push({ target: args[i + 1].slice(0, eq), constant: args[i + 1].slice(eq + 1) });
-    } else if (args[i] === '--header' && args[i + 1]) {
-      const eq = args[i + 1].indexOf('=');
-      if (eq !== -1) mappings.push({ target: args[i + 1].slice(0, eq), header: args[i + 1].slice(eq + 1) });
-    } else if (args[i] === '--property' && args[i + 1]) {
-      const eq = args[i + 1].indexOf('=');
-      if (eq !== -1) mappings.push({ target: args[i + 1].slice(0, eq), property: args[i + 1].slice(eq + 1) });
-    }
+    const kind = KIND[args[i]];
+    if (!kind) continue;
+    const m = parseMappingArg(args[i + 1]);
+    if (!m) fail(`${args[i]} mal formado: "${args[i + 1]}". Formato: /Destino/campo=${kind === 'source' ? '/Origen/campo' : 'VALOR'}`);
+    if (kind === 'source' && !m.value.startsWith('/')) fail(`${args[i]}: la ruta de origen debe ser absoluta (/Root/...): "${m.value}"`);
+    mappings.push({ target: m.target, [kind]: m.value });
+    i++;
   }
+  if (!mappings.length) fail('No hay ninguna correspondencia (--map/--const/--header/--property): el .mmap quedaría vacío.');
 
   const mmapXml = generateMmapXml({ sourceXsd, sourceRoot, targetXsd, targetRoot, mappings });
   const validation = validateMmapForSapCpi(mmapXml);

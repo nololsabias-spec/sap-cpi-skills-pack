@@ -14,7 +14,7 @@ Designs, validates, and tests regular expressions and Apache Camel Simple predic
 
 ### Step 0: Interactive Discovery & Clarification Gate (Ask Before Assuming)
 Before designing the regular expression, check if the user's request leaves any boundary condition ambiguous. **Ask concise clarifying questions when needed**:
-1. **Target SAP CPI Step & Source Variable**: Is the regex for a **Router / Filter** condition (`${property.x} regex '...'`) or for a **Content Modifier** value extraction/replacement (`replaceAll`)? What is the exact Header or Property name?
+1. **Target SAP CPI Step & Source Variable**: Is the regex for a **Router / Filter** condition (`${exchangeProperty.x} regex '...'`) or for a **Content Modifier** value extraction/replacement (`replaceAll`)? What is the exact Header or Property name?
 2. **Exact String Format & Edge Cases**: Ask for 2–3 real examples of strings that **must match** and strings that **must be rejected** (e.g., optional prefixes, allowed country codes, fixed vs variable digit length, case sensitivity).
 3. **Replacement / Extraction Output**: If used in a Content Modifier, what exact substring or reformatted output (`$1`, `$2`) should be produced?
 
@@ -25,12 +25,13 @@ Before designing the regular expression, check if the user's request leaves any 
 2. **Presets Reference**: Check [regex-presets.md](./references/regex-presets.md) for the 5 canonical SAP CPI patterns (`CamelHttpPath`, group extraction, SAP `KUNNR`, `RFC 5322` corporate email, `UUID v4`).
 
 ### Step 2: Author the Pattern Following SAP CPI Ground Truth Rules
+0. **Camel 3 Simple syntax**: reference Exchange Properties as `${exchangeProperty.Name}` — `${property.Name}` was removed in Camel 3 (current CPI runtime). Prefer `${body}` over the deprecated `${in.body}` (`${In.Body}` fails).
 1. **Mandatory Anchoring (`^...$`)**: Every pattern MUST start with `^` and end with `$`. Never emit floating sub-patterns like `(\d+)` without modeling the full string structure (e.g., `^[A-Z]+-\d{4}-(\d+)-[A-Z]{2}$`).
 2. **Anti-ReDoS (Catastrophic Backtracking Mitigation)**: Never nest unbounded quantifiers such as `(.*)+` or `([a-zA-Z0-9]+)+` that can freeze CPI worker threads at 100% CPU.
 3. **Standard Single-Escape Syntax for CPI UI**: Use standard Java/CPI escapes (`\d`, `\w`, `\.`) and **never** escape forward slashes (`/api/v1/...`, never `\/api\/v1\/...`).
 4. **Content Modifier Pre-Extraction, Timezones & `not in` Workaround (SAP Official Simple Guidelines)**:
-   - Never evaluate complex XPath or regex repeatedly across multiple Router branches. Instead, extract the XML value once in a preceding `Content Modifier` into a typed **Exchange Property** (`java.lang.String`), and evaluate `${property.FieldName} regex '^...$'` in the Router (reserving `${header.*}` only for protocol headers sent to external receivers).
-   - **Inclusion / Exclusion Lists (`in` / `not in`)**: Because `not in` is not natively supported in all SAP CPI Simple expression dropdowns, implement list exclusion/inclusion via anchored alternation regex: `${property.Region} regex '^(US|CA|MX)$'` or `${property.Region} not regex '^(US|CA|MX)$'`.
+   - Never evaluate complex XPath or regex repeatedly across multiple Router branches. Instead, extract the XML value once in a preceding `Content Modifier` into a typed **Exchange Property** (`java.lang.String`), and evaluate `${exchangeProperty.FieldName} regex '^...$'` in the Router (reserving `${header.*}` only for protocol headers sent to external receivers).
+   - **Inclusion / Exclusion Lists (`in` / `not in`)**: Because `not in` is not natively supported in all SAP CPI Simple expression dropdowns, implement list exclusion/inclusion via anchored alternation regex: `${exchangeProperty.Region} regex '^(US|CA|MX)$'` or `${exchangeProperty.Region} not regex '^(US|CA|MX)$'`.
    - **Timezone-Safe Timestamps Without Groovy**: Use `${date-with-timezone:now:UTC:yyyy-MM-dd'T'HH:mm:ss'Z'}` (or a regional IANA zone like `Europe/Madrid`) in Content Modifiers instead of `${date:now:...}` to guarantee deterministic timezone formatting.
    - When extracting from XML payloads with shifting or default namespaces in a Content Modifier, use explicit namespace mappings or fallback to `//*[local-name()='ElementName']`.
 
@@ -45,10 +46,16 @@ node ./scripts/test-camel-regex.mjs --pattern "^[A-Z]+-\d{4}-(\d+)-[A-Z]{2}$" --
 * **Verification Gate**: All `--match` strings must evaluate to `MATCH`, all `--no-match` strings must evaluate to `NO_MATCH`, and 0 structural/ReDoS errors may remain. Deliver the 4 structured blocks: `[REGEX_PATTERN]`, `[CAMEL_SIMPLE]`, `[EXPLANATION]`, and `[TEST_CASES]`.
 
 
+## Qué garantiza el script (LL-020)
+
+- Las regex de CPI son **Java** (`java.util.regex`). `test-camel-regex.mjs` las traduce antes de evaluarlas: flags inline `(?i)`, posesivos `a++`, `\Q..\E`, `\p{L}` (Unicode) y `\p{Alpha}` (POSIX ASCII). Lo que no tiene equivalente se reporta como no soportado, sin dar un veredicto falso.
+- ReDoS: además de los cuantificadores anidados, marca la **alternancia solapada** dentro de un grupo cuantificado (`^(a|aa)+$`) por análisis estático.
+- Camel Simple: `${property.X}` y `${In.Body}` son error; `${in.body}` es aviso. Usa `${exchangeProperty.X}` y `${body}`.
+
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 
 Siempre que el usuario reporte un fallo de evaluación en un Router/Filter/Content Modifier de SAP CPI (expresiones Camel Simple o Java Regex), tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:
 1. **Anonimizar (Zero Data Leakage)**: Extraer únicamente el patrón técnico genérico de Camel Simple / Java Pattern, sin guardar jamás datos de proyectos privados o clientes.
-2. **Codificar en el Script CLI**: Actualizar `./scripts/test-camel-regex.mjs` / `./scripts/test-cpi-regex.mjs` para cubrir el nuevo caso.
+2. **Codificar en el Script CLI**: Actualizar `./scripts/test-camel-regex.mjs` para cubrir el nuevo caso.
 3. **Actualizar Documentación y Lecciones**: Documentar la mejora en esta `SKILL.md`, en `docs/VALIDATION_RULES.md` y en `docs/LESSONS_LEARNED.md`.
 4. **Verificar y Sincronizar**: Ejecutar `node verify-all.mjs` y `node setup-skills.mjs` para propagar el aprendizaje a `.agents/` y `.claude/`.
