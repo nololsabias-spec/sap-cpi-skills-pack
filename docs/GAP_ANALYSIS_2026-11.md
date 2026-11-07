@@ -39,7 +39,7 @@
 
 ### 1.2 MCP `CONNECTION_CLOSED` — ✅
 - `setup-skills.mjs:110-113,206-214` escribe rutas relativas en la config MCP. Claude Code no documenta desde qué cwd resuelve una ruta relativa en `args`.
-- **Fix verificado** (Claude Code expande `${VAR}` y `${VAR:-default}` en `.mcp.json`): `"args": ["${CLAUDE_PROJECT_DIR:-.}/.agents/mcp-server.mjs"]`, o una ruta absoluta. Si se distribuye como plugin, `${CLAUDE_PLUGIN_ROOT}`. Hay que regenerar `sapsuite/.mcp.json`. El destino `sapsuite/.agents/mcp-server.mjs` existe y es idéntico al del repo.
+- **Fix verificado** (Claude Code expande `${VAR}` y `${VAR:-default}` en `.mcp.json`): `"args": ["${CLAUDE_PROJECT_DIR:-.}/.agents/mcp-server.mjs"]`, o una ruta absoluta (**aplicado: ruta absoluta**, porque `${CLAUDE_PROJECT_DIR}` falla cuando `.mcp.json` se hereda de una carpeta padre; ver `LL-016`). Si se distribuye como plugin, `${CLAUDE_PLUGIN_ROOT}`. Hay que regenerar el `.mcp.json` del workspace. El destino `<workspace>/.agents/mcp-server.mjs` existe y es idéntico al del repo.
 - Ojo: aunque se arregle la ruta, el bug del §1.1 hace que el servidor salga en silencio si la ruta absoluta tiene espacios. Hay que corregir los dos.
 
 ### 1.3 Seguridad — ✅ (todos reproducidos)
