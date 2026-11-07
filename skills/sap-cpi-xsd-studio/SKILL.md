@@ -83,6 +83,13 @@ node ./scripts/build-mmap.mjs --validate MM_Source_To_Target.mmap
 * If the user wants to inject the generated `.xsd` or `.mmap` directly into an existing iFlow `.zip`, use `clone-iflow-bundle.mjs --source <iFlow.zip> --add-resource <Schema.xsd> --add-resource <Mapping.mmap> --out <iFlow_Updated.zip>`.
 
 
+## Qué garantiza el script (LL-023, LL-024)
+
+- `validate-xsd.mjs` usa un parser XML real: detecta etiquetas desemparejadas, prefijos sin declarar, `type`/`base`/`ref` sin resolver y declaraciones duplicadas.
+- `--infer` sanea nombres a NCName (claves JSON, `--root`) y avisa de cada cambio, fusiona los tipos de todas las muestras y elementos de arrays, y falla con exit 1 ante una entrada vacía, inexistente o sin estructura (raíz array, `{}`). El BOM se ignora.
+- `build-mmap.mjs`: `--map` mal formado o flag desconocido → exit 2. Las rutas Windows en `--source-xsd`/`--target-xsd` funcionan.
+- `simulate-mmap.mjs` escapa una sola vez, resuelve XPath absolutas hijo a hijo y, con `--target-xsd`, valida la salida.
+
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 
 Siempre que el usuario reporte un fallo de validación en Message Mapping o XML Validator 2.0 en SAP CPI o comparta esquemas `.xsd` de referencia, tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:

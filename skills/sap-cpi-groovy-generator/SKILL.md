@@ -81,6 +81,12 @@ node ./scripts/validate-groovy.mjs --template xml-slurper --api v2 --groovy 4 --
 * **Verification Requirement**: The script must achieve a **100/100 score** with **0 Critical/High/Medium violations** before presenting the final code to the user. If `validate-groovy.mjs` reports any violation (e.g., an unused import, missing `disallow-doctype-decl`, or unclosed `Reader`), fix the Groovy code and re-run `validate-groovy.mjs` until it passes cleanly.
 
 
+## Qué garantiza el script (LL-026)
+
+- `validate-groovy.mjs` ignora patrones dentro de literales String (`stripStringLiterals`) y reporta la línea del código real.
+- `--template` con `--groovy` o `--api` inválidos → exit 2 (no cae a 2.4/v1 en silencio). Las plantillas canónicas puntúan 100/100.
+- Un `.zip` corrupto da "no se pudo leer X como ZIP" con exit 1, sin stack trace.
+
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 
 Siempre que el usuario reporte un **error de compilación o runtime en SAP CPI** (ej. firmas de métodos en Groovy 2.4, imports incompatibles, manejo de `Reader`/`InputStream`), corrija un script o comparta una Script Collection de ejemplo, tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:

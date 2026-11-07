@@ -127,9 +127,30 @@ export function buildScriptCollectionManifest(scName) {
   return headers.map(wrapManifestLine72).join('\r\n') + '\r\n\r\n';
 }
 
+/** java.util.Properties escaping (LL-027): a raw newline would inject extra keys into the .prop file. */
+export function escapePropValue(v) {
+  return String(v ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t')
+    .replace(/^ /, '\\ ');
+}
+export function escapePropKey(k) {
+  return String(k ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t')
+    .replace(/([=: #!])/g, '\\$1');
+}
+export function escapeXmlText(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
 export function buildParametersProp(parameters = {}) {
   const keys = Object.keys(parameters).sort((a, b) => a.localeCompare(b));
-  return keys.map((k) => `${k}=${parameters[k] ?? ''}`).join('\n') + (keys.length ? '\n' : '');
+  return keys.map((k) => `${escapePropKey(k)}=${escapePropValue(parameters[k])}`).join('\n') + (keys.length ? '\n' : '');
 }
 
 export function buildParametersPropdef(parameters = {}) {
@@ -138,7 +159,7 @@ export function buildParametersPropdef(parameters = {}) {
     .map(
       (k) => `<parameter>
     <key/>
-    <name>${k}</name>
+    <name>${escapeXmlText(k)}</name>
     <type>xsd:string</type>
     <isRequired>false</isRequired>
     <constraint/>
@@ -162,6 +183,12 @@ export function validateAndBuildCpiBundles(spec, baseDir = process.cwd()) {
     }
     return '';
   };
+
+  for (const k of Object.keys(spec.parameters || {})) {
+    if (!/^[A-Za-z0-9_.-]+$/.test(k)) {
+      warnings.push(`Parámetro externalizado "${k.replace(/[\r\n]/g, ' ')}": usa solo letras, dígitos, "_", "." o "-" (se ha escapado para .prop/.propdef).`);
+    }
+  }
 
   const safeIflowName = sanitizeBundleName(spec.iflowName);
   const hasScripts = Array.isArray(spec.groovyScripts) && spec.groovyScripts.length > 0;
@@ -219,14 +246,32 @@ export function validateAndBuildCpiBundles(spec, baseDir = process.cwd()) {
     }
   }
 
+  // 2b. Script file names are sanitized for the Script Collection; the .iflw must reference the SAME name,
+  // otherwise CPI fails at deploy with "script not found" (BUG-09 / LL-027).
+  const scriptNameOf = (script) => script.fileName || (script.filePath ? path.basename(script.filePath) : 'Script.groovy');
+  const sanitizeScriptName = (n) => n.replace(/[^a-zA-Z0-9_.]/g, '_');
+  let iflwOut = iflwXml;
+  if (hasScripts) {
+    for (const script of spec.groovyScripts) {
+      const orig = scriptNameOf(script);
+      const safe = sanitizeScriptName(orig);
+      if (orig === safe) continue;
+      const esc = orig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const refRx = new RegExp(`(>|")((?:/?script/)?)${esc}(<|")`, 'g');
+      const before = iflwOut;
+      iflwOut = iflwOut.replace(refRx, (_, a, dir, b) => `${a}${dir}${safe}${b}`);
+      warnings.push(`Script "${orig}" renombrado a "${safe}" en la Script Collection${before !== iflwOut ? ' y en sus referencias del .iflw' : ''}.`);
+    }
+  }
+
   // 3. Build IntegrationFlow .zip Buffer
   const iflowFiles = [
     { path: '.project', content: buildProjectXml(safeIflowName) },
     { path: 'META-INF/MANIFEST.MF', content: buildIflowManifest(safeIflowName, safeScName) },
-    { path: 'metainfo.prop', content: `#Store metainfo properties\ndescription=${spec.businessDescription || ''}\n` },
+    { path: 'metainfo.prop', content: `#Store metainfo properties\ndescription=${escapePropValue(spec.businessDescription || '')}\n` },
     { path: 'src/main/resources/parameters.prop', content: buildParametersProp(spec.parameters || {}) },
     { path: 'src/main/resources/parameters.propdef', content: buildParametersPropdef(spec.parameters || {}) },
-    { path: `src/main/resources/scenarioflows/integrationflow/${safeIflowName}.iflw`, content: iflwXml }
+    { path: `src/main/resources/scenarioflows/integrationflow/${safeIflowName}.iflw`, content: iflwOut }
   ];
 
   // Optional embedded resources in the iFlow (.xsd, .mmap, .xsl/.xslt, .wsdl, embedded .groovy)
@@ -275,7 +320,7 @@ export function validateAndBuildCpiBundles(spec, baseDir = process.cwd()) {
       { path: 'metainfo.prop', content: `#Store metainfo properties\ndescription=Script Collection de ${safeIflowName}\n` }
     ];
     for (const script of spec.groovyScripts) {
-      const fName = (script.fileName || (script.filePath ? path.basename(script.filePath) : 'Script.groovy')).replace(/[^a-zA-Z0-9_.]/g, '_');
+      const fName = sanitizeScriptName(scriptNameOf(script));
       scFiles.push({ path: `src/main/resources/script/${fName}`, content: resolveContent(script) });
     }
     scriptCollectionZipBuffer = createZipBuffer(scFiles);
@@ -382,7 +427,9 @@ def Message processData(Message message) {
     <bpmn2:messageFlow id="MessageFlow_Out" name="OData_S4" sourceRef="ServiceTask_OData" targetRef="Participant_Receiver">
       <bpmn2:extensionElements>
         <ifl:property key="MessageProtocol" value="HTTPS"/>
+        <ifl:property key="ComponentType" value="HTTP"/>
         <ifl:property key="address" value="{{S4_ODATA_URL}}"/>
+        <ifl:property key="httpRequestTimeout" value="60000"/>
       </bpmn2:extensionElements>
     </bpmn2:messageFlow>
   </bpmn2:collaboration>
@@ -391,7 +438,6 @@ def Message processData(Message message) {
     <bpmn2:serviceTask id="ServiceTask_OData" name="Call S4HANA OData">
       <bpmn2:extensionElements>
         <ifl:property key="activityType" value="ExternalCall"/>
-        <ifl:property key="timeout" value="60000"/>
       </bpmn2:extensionElements>
     </bpmn2:serviceTask>
     <bpmn2:callActivity id="CallActivity_Groovy" name="Transform Order Response">
@@ -419,8 +465,10 @@ const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log('Uso: node build-cpi-package.mjs <spec.json | --demo> [--out-dir <carpeta>] [--json]');
-    process.exit(0);
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   const jsonFlag = args.includes('--json');
@@ -440,12 +488,18 @@ if (isMain) {
       process.exit(1);
     }
     specBaseDir = path.dirname(filePath);
-    spec = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    try {
+      spec = JSON.parse(fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, ''));
+    } catch (e) {
+      console.error(`JSON inválido en ${path.basename(filePath)}: ${e.message}`);
+      process.exit(1);
+    }
   }
 
   const result = validateAndBuildCpiBundles(spec, specBaseDir);
 
-  if (outDir) {
+  // Never leave an importable-looking .zip on disk when validation failed.
+  if (outDir && result.valid) {
     const targetDir = path.resolve(outDir);
     fs.mkdirSync(targetDir, { recursive: true });
     fs.writeFileSync(path.join(targetDir, result.artifacts.iflowFileName), result.artifacts.iflowZipBuffer);
@@ -487,8 +541,10 @@ if (isMain) {
     result.scriptAudits.forEach((sa) => {
       console.log(`  - Groovy Audit [${sa.fileName}]: ${sa.score}/100 (${sa.passed ? 'OK' : 'OBSERVACIONES'})`);
     });
-    if (outDir) {
+    if (outDir && result.valid) {
       console.log(`\nPaquetes ZIP escritos en: ${path.resolve(outDir)}`);
+    } else if (outDir) {
+      console.log('\nNo se ha escrito ningún ZIP (corrige los errores).');
     }
     if (result.errors.length > 0) {
       console.log('\nErrores Críticos:');

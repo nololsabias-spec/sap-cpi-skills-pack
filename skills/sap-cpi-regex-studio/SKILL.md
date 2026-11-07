@@ -46,6 +46,12 @@ node ./scripts/test-camel-regex.mjs --pattern "^[A-Z]+-\d{4}-(\d+)-[A-Z]{2}$" --
 * **Verification Gate**: All `--match` strings must evaluate to `MATCH`, all `--no-match` strings must evaluate to `NO_MATCH`, and 0 structural/ReDoS errors may remain. Deliver the 4 structured blocks: `[REGEX_PATTERN]`, `[CAMEL_SIMPLE]`, `[EXPLANATION]`, and `[TEST_CASES]`.
 
 
+## Qué garantiza el script (LL-020)
+
+- Las regex de CPI son **Java** (`java.util.regex`). `test-camel-regex.mjs` las traduce antes de evaluarlas: flags inline `(?i)`, posesivos `a++`, `\Q..\E`, `\p{L}` (Unicode) y `\p{Alpha}` (POSIX ASCII). Lo que no tiene equivalente se reporta como no soportado, sin dar un veredicto falso.
+- ReDoS: además de los cuantificadores anidados, marca la **alternancia solapada** dentro de un grupo cuantificado (`^(a|aa)+$`) por análisis estático.
+- Camel Simple: `${property.X}` y `${In.Body}` son error; `${in.body}` es aviso. Usa `${exchangeProperty.X}` y `${body}`.
+
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 
 Siempre que el usuario reporte un fallo de evaluación en un Router/Filter/Content Modifier de SAP CPI (expresiones Camel Simple o Java Regex), tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:

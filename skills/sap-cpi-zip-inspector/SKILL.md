@@ -86,6 +86,14 @@ If `inspect-iflow-zip.mjs` detects Groovy scripts in `src/main/resources/script/
        - Una vez que el usuario confirme qué cambios desea aplicar, ejecuta `inspect-iflow-zip.mjs <paquete.zip> --remediate <cambios_elegidos> --out <Paquete_Corregido.zip>` (sin tocar nunca los valores privados de `.prop`) y entrégale el `.zip` resultante validado.
 
 
+## Qué garantiza el script (LL-019, LL-021, LL-026)
+
+- `diff-iflow-zip.mjs` compara por **hash de contenido**, no por tamaño: un cambio de igual longitud (timeout 1000→2000) se reporta. Lista pasos añadidos/eliminados, parámetros eliminados y la versión del manifest en consola, `--json` y PDF.
+- La remediación `--fix timeouts` encuentra el canal receptor tanto por `sourceRef` como por `targetRef`, y es idempotente.
+- `parseManifestContent` devuelve `symbolicName` sin directivas y `symbolicNameDirectives` (p. ej. `['singleton:=true']`).
+- La consola muestra también Basic Auth/CSRF (`IFLW-008`), splitters y routers. Vía MCP, `extractDir` escribe los `.prop` redactados.
+- `cpi_get_iflow_endpoints` (MCP) devuelve los endpoints sender/receiver sin valores de `parameters.prop`.
+
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 
 Siempre que el usuario reporte un fallo al subir o ejecutar un `.zip` en SAP CPI o comparta paquetes de referencia para inspección, tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:

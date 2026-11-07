@@ -44,7 +44,8 @@ export function extractParametersMap(report, { resolveParams = false } = {}) {
 export function parseParticipants(iflwXml) {
   const senders = new Set();
   const receivers = new Set();
-  if (!iflwXml) return { senders, receivers };
+  const all = new Set();
+  if (!iflwXml) return { senders, receivers, all };
   const pRegex = /<bpmn2:participant\b([^>]*)\/?>/gi;
   let pm;
   while ((pm = pRegex.exec(iflwXml)) !== null) {
@@ -53,20 +54,55 @@ export function parseParticipants(iflwXml) {
     const type = (raw.match(/\bifl:type="([^"]+)"/) || [])[1] || '';
     const name = (raw.match(/\bname="([^"]+)"/) || [])[1] || '';
     if (!id) continue;
+    all.add(id);
     if (/Sender/i.test(type) || /Sender/i.test(name) || /Sender/i.test(id)) {
       senders.add(id);
     } else if (/Receiv?er/i.test(type) || /Receiv?er/i.test(name) || /Receiv?er/i.test(id)) {
       receivers.add(id);
     }
   }
-  return { senders, receivers };
+  // Flow nodes (events, tasks, gateways...) of the integration process: used for topology-based direction.
+  const nodes = new Set();
+  const nRegex = /<bpmn2:(\w+)\b[^>]*\bid="([^"]+)"/g;
+  let nm;
+  while ((nm = nRegex.exec(iflwXml)) !== null) {
+    if (!/^(participant|messageFlow|collaboration|process|sequenceFlow|definitions)$/i.test(nm[1])) nodes.add(nm[2]);
+  }
+  return { senders, receivers, all, nodes };
+}
+
+/**
+ * Direction of a messageFlow from the BPMN topology (LL-026): a flow that starts at a participant and ends
+ * in a flow node (StartEvent) is a SENDER channel; a flow that starts at a flow node (ServiceTask/EndEvent)
+ * and ends at a participant is a RECEIVER channel. Explicit markers (direction property, EndpointSender /
+ * EndpointRecevier participants) win; naming heuristics are only the last resort.
+ */
+export function classifyMessageFlow(attrs, body, participants) {
+  const { senders, receivers, all, nodes = new Set() } = participants;
+  const sourceRef = (attrs.match(/\bsourceRef="([^"]+)"/) || [])[1] || '';
+  const targetRef = (attrs.match(/\btargetRef="([^"]+)"/) || [])[1] || '';
+  const dir = (body.match(/<ifl:property[^>]*key="direction"[^>]*value="([^"]*)"/i) || body.match(/<key>direction<\/key>\s*<value>([^<]*)<\/value>/i) || [])[1];
+  if (/^Sender$/i.test(dir || '')) return 'inbound';
+  if (/^Receiver$/i.test(dir || '')) return 'outbound';
+  if (senders.has(sourceRef)) return 'inbound';
+  if (receivers.has(targetRef)) return 'outbound';
+  const srcIsParticipant = all.has(sourceRef);
+  const tgtIsParticipant = all.has(targetRef);
+  if (srcIsParticipant && !tgtIsParticipant) return 'inbound';
+  if (tgtIsParticipant && !srcIsParticipant) return 'outbound';
+  // Undeclared participant: whichever end is a process flow node decides.
+  if (nodes.has(targetRef) && !nodes.has(sourceRef)) return 'inbound';
+  if (nodes.has(sourceRef) && !nodes.has(targetRef)) return 'outbound';
+  if (/Receiv?er/i.test(targetRef)) return 'outbound';
+  if (/Sender/i.test(sourceRef)) return 'inbound';
+  return 'unknown';
 }
 
 export function extractInboundEndpointsFromIflw(iflwXml, propMap = {}, options = {}) {
   const { allowFallback = true } = options;
   const endpoints = [];
   if (iflwXml) {
-    const { senders, receivers } = parseParticipants(iflwXml);
+    const participants = parseParticipants(iflwXml);
     // Find sender messageFlows (from Participant_Sender to StartEvent)
     const mfRegex = /<bpmn2:messageFlow\b([^>]*)>([\s\S]*?)<\/bpmn2:messageFlow>/gi;
     let m;
@@ -74,26 +110,7 @@ export function extractInboundEndpointsFromIflw(iflwXml, propMap = {}, options =
     while ((m = mfRegex.exec(iflwXml)) !== null) {
       const attrs = m[1];
       const body = m[2];
-      const sourceRefMatch = attrs.match(/\bsourceRef="([^"]+)"/);
-      const sourceRef = sourceRefMatch ? sourceRefMatch[1] : '';
-      const targetRefMatch = attrs.match(/\btargetRef="([^"]+)"/);
-      const targetRef = targetRefMatch ? targetRefMatch[1] : '';
-
-      // Check if sourceRef is an EndpointSender participant or Sender
-      const isSender =
-        senders.has(sourceRef) ||
-        /Sender/i.test(sourceRef) ||
-        body.includes('ifl:type="EndpointSender"') ||
-        body.includes('<ifl:property key="direction" value="Sender"/>');
-
-      const isReceiver =
-        receivers.has(targetRef) ||
-        /Receiver/i.test(targetRef) ||
-        body.includes('ifl:type="EndpointReceiver"') ||
-        body.includes('ifl:type="EndpointRecevier"') ||
-        body.includes('<ifl:property key="direction" value="Receiver"/>');
-
-      if ((isSender || /HTTPS|SOAP|REST|OData/i.test(body)) && !isReceiver) {
+      if (classifyMessageFlow(attrs, body, participants) === 'inbound') {
         const getProp = (key) => {
           const match =
             body.match(new RegExp(`<ifl:property[^>]*key="${key}"[^>]*value="([^"]*)"`, 'i')) ||
@@ -101,7 +118,8 @@ export function extractInboundEndpointsFromIflw(iflwXml, propMap = {}, options =
           return match ? match[1] : '';
         };
 
-        const rawAddress = getProp('address') || getProp('url') || '/cpi/inbound';
+        // HTTPS sender stores its path in "urlPath"; SOAP/IDoc/ProcessDirect senders use "address" (BUG-15).
+        const rawAddress = getProp('urlPath') || getProp('address') || getProp('url') || '/cpi/inbound';
         let address = rawAddress;
         // Resolve externalized parameter if defined like {{ParamName}}
         const extMatch = rawAddress.match(/^\{\{([^}]+)\}\}$/);
@@ -147,7 +165,7 @@ export function extractInboundEndpointsFromIflw(iflwXml, propMap = {}, options =
 export function extractOutboundEndpointsFromIflw(iflwXml, propMap = {}) {
   const endpoints = [];
   if (iflwXml) {
-    const { receivers } = parseParticipants(iflwXml);
+    const participants = parseParticipants(iflwXml);
     const mfRegex = /<bpmn2:messageFlow\b([^>]*)>([\s\S]*?)<\/bpmn2:messageFlow>/gi;
     let m;
     while ((m = mfRegex.exec(iflwXml)) !== null) {
@@ -156,14 +174,7 @@ export function extractOutboundEndpointsFromIflw(iflwXml, propMap = {}) {
       const targetRefMatch = attrs.match(/\btargetRef="([^"]+)"/);
       const targetRef = targetRefMatch ? targetRefMatch[1] : '';
 
-      const isReceiver =
-        receivers.has(targetRef) ||
-        /Receiver/i.test(targetRef) ||
-        body.includes('ifl:type="EndpointReceiver"') ||
-        body.includes('ifl:type="EndpointRecevier"') ||
-        body.includes('<ifl:property key="direction" value="Receiver"/>');
-
-      if (isReceiver) {
+      if (classifyMessageFlow(attrs, body, participants) === 'outbound') {
         const getProp = (key) => {
           const match =
             body.match(new RegExp(`<ifl:property[^>]*key="${key}"[^>]*value="([^"]*)"`, 'i')) ||
@@ -573,10 +584,23 @@ export function generateOpenApiSpec(report, options = {}) {
   };
 }
 
+export const EXPORT_FORMATS = ['postman', 'openapi', 'both'];
+
 export function exportApiClientContracts(bundlePathOrBuf, options = {}) {
   const { format = 'both', outDir = null, baseUrl = null, authType = 'basic', resolveParams = false } = options;
+  if (!EXPORT_FORMATS.includes(format)) {
+    throw new Error(`Formato no soportado: "${format}". Usa uno de: ${EXPORT_FORMATS.join(', ')}.`);
+  }
   const report = inspectBundle(bundlePathOrBuf, null, { showPropValues: true });
+  // Only Integration Flows expose inbound endpoints (BUG-17): Script Collections / Value Mappings are rejected.
+  if (!report.catalog?.iflwFiles?.length) {
+    throw new Error('El bundle no contiene ningún Integration Flow (.iflw): es una Script Collection, Value Mapping u otro artefacto sin endpoints de entrada.');
+  }
   const propMap = extractParametersMap(report, { resolveParams });
+  const inbound = extractInboundEndpointsFromIflw(report.catalog.iflwFiles[0].text || '', propMap, { allowFallback: false });
+  if (inbound.length === 0) {
+    throw new Error('El iFlow no tiene ningún canal sender (entrante): no hay endpoint que exportar a Postman/OpenAPI.');
+  }
 
   const postman = format === 'postman' || format === 'both' ? generatePostmanCollection(report, { baseUrl, authType, propMap }) : null;
   const openapi = format === 'openapi' || format === 'both' ? generateOpenApiSpec(report, { baseUrl, propMap }) : null;
@@ -614,10 +638,12 @@ const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log('Uso 1 (Demo): node export-api-client.mjs --demo [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--resolve-params] [--json]');
     console.log('Uso 2 (iFlow): node export-api-client.mjs <iflow.zip> [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--resolve-params] [--json]');
     console.log('Uso 3 (Endpoints): node export-api-client.mjs <iflow.zip|--demo> --endpoints [--resolve-params] [--json]');
-    process.exit(0);
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   const jsonFlag = args.includes('--json');
@@ -643,7 +669,7 @@ if (isMain) {
         );
       }
     }
-    process.exit(0);
+    process.exit(res.valid ? 0 : 1);
   }
 
   const getOpt = (flag, def) => {
@@ -655,7 +681,13 @@ if (isMain) {
   const outDir = getOpt('--out-dir', null);
   const baseUrl = getOpt('--base-url', null);
 
-  const res = exportApiClientContracts(target, { format, outDir, baseUrl, resolveParams: args.includes('--resolve-params') });
+  let res;
+  try {
+    res = exportApiClientContracts(target, { format, outDir, baseUrl, resolveParams: args.includes('--resolve-params') });
+  } catch (e) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
 
   if (jsonFlag) {
     console.log(JSON.stringify(res, null, 2));

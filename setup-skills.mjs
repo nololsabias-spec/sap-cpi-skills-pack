@@ -257,9 +257,11 @@ if (enableMcpConfigs) {
   // project root -> MODULE_NOT_FOUND -> "CONNECTION_CLOSED". Always emit absolute/variable paths.
   const targetProjectPosix = targetProject.split(path.sep).join('/');
   const mcpScriptAbsPath = `${targetProjectPosix}/${mcpScriptRelPath}`;
+  // CPI_MCP_ROOT pins the path sandbox to this workspace even if the client starts the server from $HOME or C:\.
   const stdMcpEntry = {
     command: 'node',
-    args: [mcpScriptAbsPath]
+    args: [mcpScriptAbsPath],
+    env: { CPI_MCP_ROOT: targetProjectPosix }
   };
   // Absolute path on purpose: Claude Code also loads .mcp.json from PARENT folders, and then
   // CLAUDE_PROJECT_DIR points to the sub-folder the session was opened in, so
@@ -267,13 +269,15 @@ if (enableMcpConfigs) {
   // Re-run setup-skills.mjs if the workspace is moved.
   const claudeMcpEntry = {
     command: 'node',
-    args: [targetProjectPosix + '/' + mcpScriptRelPath]
+    args: [targetProjectPosix + '/' + mcpScriptRelPath],
+    env: { CPI_MCP_ROOT: targetProjectPosix }
   };
   // VS Code documents ${workspaceFolder} in .vscode/mcp.json.
   const vscodeMcpEntry = {
     type: 'stdio',
     command: 'node',
-    args: ['${workspaceFolder}/' + mcpScriptRelPath]
+    args: ['${workspaceFolder}/' + mcpScriptRelPath],
+    env: { CPI_MCP_ROOT: '${workspaceFolder}' }
   };
 
   if (['claude', 'both', 'all'].includes(agentType) || args.includes('--mcp')) {

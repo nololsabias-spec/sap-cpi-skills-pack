@@ -206,7 +206,7 @@ Para facilitar las pruebas de integración por parte del equipo de front-end, QA
 node skills/sap-cpi-architect/scripts/export-api-client.mjs \
   ./IF_SyncPedidosB2B_S4HANA.zip \
   --out-dir ./dist/api_clients \
-  --base-url https://tenant-iflmap.hcisbp.eu10.hana.ondemand.com
+  --base-url https://my-tenant.cpi.example.test
 ```
 Generará:
 - `IF_SyncPedidosB2B_S4HANA.postman_collection.json` con pre-request scripts para obtención transparente de token CSRF (`x-csrf-token`).

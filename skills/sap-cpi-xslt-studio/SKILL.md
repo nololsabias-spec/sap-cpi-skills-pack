@@ -57,6 +57,13 @@ node ./scripts/validate-xslt.mjs <path-to-mapping.xslt> [--engine 2.0|1.0] [--js
 * **Verification Gate**: Fix any reported anti-hallucination error, engine mismatch, or missing namespace/parameter declaration before delivering the final `.xslt` file.
 
 
+## Qué garantiza el script (LL-026)
+
+- `validate-xslt.mjs` parsea la hoja (XML mal formado = error, comillas simples válidas, UTF-16 soportado) y exige raíz `xsl:stylesheet`/`xsl:transform` con `version`.
+- `--engine 1.0|2.0|3.0` (o `--version`): en 1.0 marca elementos, atributos y funciones XPath 2.0 (`if/then/else`, `for`, `xs:*()`, `#all`…), cada uno una vez y con línea; en 2.0 marca los elementos solo 3.0; `json-to-xml()` exige 3.0. Un motor no soportado → exit 2.
+- Prefijos sin declarar (elementos y XPath), `$var` sin declarar y param/variable duplicados son errores. `<xsl:param name="exchange"/>` debe ser de nivel superior.
+- La regla de llaves en texto (`XSLT-CURLY-TEXT`) ignora CDATA, `xsl:text`, `{{ }}` y `expand-text` de 3.0.
+
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 
 Siempre que el usuario reporte un error de transformación XSLT 1.0 (Xalan) o 2.0/3.0 (Saxon-HE) en SAP CPI, tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:

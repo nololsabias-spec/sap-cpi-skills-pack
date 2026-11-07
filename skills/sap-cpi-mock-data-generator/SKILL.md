@@ -11,6 +11,13 @@ description: >-
 
 Generates syntactically valid, realistic SAP BTP / ERP mock test payloads (JSON and XML) across one or multiple integration contracts, verifies E2E foreign-key correlation across contracts, and packages the test suite into an organized `.zip` archive with `README_SUITE.txt`.
 
+> **Division of work (read this first).** The *agent* writes the payloads (Steps 1–2). The script `pack-mock-suite.mjs` does **not** generate data: it only **validates and packages** what the agent wrote. It checks:
+> - JSON syntax (`JSON.parse`) and XML well-formedness (real parser, not a regex). Only `json` and `xml` formats are accepted; `csv` or any other format is an error.
+> - Correlation of business keys between contracts, example by example (keys are matched case-insensitively and ignoring `_`, `-`, `.`; XML attributes and leaf elements count; `"1001"` and `1001` are equal).
+> - Duplicate contract names and contracts with a different number of examples.
+>
+> It does **not** check the content rules of Step 1 (`count` 1–10, IDoc `EDI_DC40` control record, OData `$batch` changesets, NIF/CIF formats, statuses). Those are the agent's responsibility: review them yourself before packaging and tell the user they were not machine-verified.
+
 ## Workflow Steps
 
 ### Step 0: Interactive Discovery & Clarification Gate (Ask Before Assuming)
@@ -45,12 +52,22 @@ Format the generated output using:
 Run `pack-mock-suite.mjs` on your generated batch file (or JSON suite file):
 
 ```bash
-node ./scripts/pack-mock-suite.mjs <input-batch.txt-or-suite.json> [--out cpi_mock_suite.zip] [--extract-dir ./mock-output] [--correlateKey customerId]
+node ./scripts/pack-mock-suite.mjs <input-batch.txt-or-suite.json> [--out cpi_mock_suite.zip] [--extract-dir ./mock-output] [--correlateKey customerId] [--strict] [--timestamp] [--json]
 ```
+
+| Flag | Effect |
+|---|---|
+| `--correlateKey <k>` (alias `--correlate-key`) | Business key(s) to compare across contracts (comma list: `orderId,customerId`). |
+| `--strict` | Correlation mismatches and different example counts become **errors** (default: warnings). Use it in CI and whenever the user needs real E2E data. |
+| `--timestamp` | Writes the generation date into `README_SUITE.txt` and `mock-suite-index.json`. Without it the ZIP is **byte-for-byte reproducible** (fixed entry dates; `SOURCE_DATE_EPOCH` is honoured). |
+| `--json` | Machine-readable result (`valid`, `errors`, `warnings`, `correlationMismatches`, `sizeBytes`, `written`). |
+| `--demo` | Runs the built-in two-contract example. |
+
+Exit codes: `0` valid and written, `1` invalid input or validation errors (**no ZIP or folder is written**), `2` unknown flag or missing flag value. MCP: `cpi_pack_mock_suite` accepts the same `strict` and `timestamp` options.
 
 * Validator & packager script: [pack-mock-suite.mjs](./scripts/pack-mock-suite.mjs)
 * Correlation reference: [correlation-rules.md](./references/correlation-rules.md)
-* **Verification Gate**: Every generated JSON/XML sample must pass syntax validation (`valid: true`), correlation keys must match across contracts, and the `.zip` archive (with `README_SUITE.txt`) is written to disk.
+* **Verification Gate**: Every generated JSON/XML sample must pass syntax validation (`valid: true`), correlation keys must match across contracts (run with `--strict` so a mismatch fails), and the `.zip` archive (with `README_SUITE.txt` and `mock-suite-index.json`) is written to disk. If the script reports warnings without `--strict`, fix them or explain them to the user; never present a suite with correlation mismatches as E2E-ready.
 
 
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)

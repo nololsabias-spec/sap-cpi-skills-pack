@@ -121,3 +121,27 @@ Aplicadas por `export-api-client.mjs`:
 3. **Parámetros Externalizados en Endpoints (privacidad por defecto)**: Si el canal declara una dirección externalizada `{{param}}`, se conserva como variable `{{param}}` en Postman/OpenAPI. Los valores de `src/main/resources/parameters.prop` solo se leen con `--resolve-params` (opt-in explícito; `resolveParams: true` en MCP).
 4. **Esquemas Duales XML y JSON en OpenAPI**: Infiere y publica ejemplos sintéticos tanto en `application/xml` como en `application/json` a partir de los contratos XSD empaquetados en el iFlow.
 
+
+---
+
+## 8. Reglas de Robustez y Contrato (LL-019 a LL-026)
+
+| Código | Severidad | Regla | Descripción Técnica |
+| :--- | :--- | :--- | :--- |
+| `MCP-001` | `HIGH` | **Argumentos validados contra `inputSchema`** | Toda llamada `tools/call` comprueba `required` y los tipos declarados. Si falta un campo o el tipo es incorrecto, responde un error JSON-RPC `-32602` y no ejecuta la herramienta (nunca cae al demo). |
+| `MCP-002` | `MEDIUM` | **Errores JSON-RPC 2.0** | JSON malformado → `-32700`; petición inválida o `null` → `-32600`; método, tool, resource o prompt desconocido → `-32601`/`-32602`. Los batches reciben un array de respuestas. `protocolVersion` se negocia contra `SUPPORTED_PROTOCOL_VERSIONS`. |
+| `MCP-003` | `HIGH` | **Raíz fija del sandbox** | `setup-skills.mjs --mcp` escribe `env.CPI_MCP_ROOT` en `.mcp.json` para que el sandbox no dependa del cwd del cliente. La extracción vía MCP (`extractDir`) redacta los `.prop`. |
+| `REGEX-001` | `HIGH` | **Dialecto Java** | Las regex se traducen de `java.util.regex` antes de evaluarlas (`(?i)` y demás flags inline, `a++`/`a*+`, `\Q..\E`, `\p{L}`, `\p{Alpha}`…). Lo que no tiene equivalente se reporta como error, sin evaluarlo mal. |
+| `REGEX-002` | `HIGH` | **ReDoS por alternancia solapada** | `findOverlappingAlternation` marca grupos cuantificados cuyas alternativas se solapan (`^(a|aa)+$`, `(\d|\d\d)*`) sin necesidad de casos de prueba largos. |
+| `CAMEL-001` | `HIGH` | **Camel Simple en CPI (Camel 3)** | Error: `${property.X}` (usa `${exchangeProperty.X}`) y `${In.Body}` (Simple distingue mayúsculas). Aviso: `${in.body}` (obsoleto, eliminado en Camel 4; usa `${body}`). |
+| `DIFF-001` | `HIGH` | **Diff por contenido** | `diff-iflow-zip` compara entradas por hash, no por tamaño, y lista pasos añadidos/eliminados, parámetros eliminados y la versión del manifest en consola, JSON y PDF. |
+| `XSD-001` | `CRITICAL` | **XSD bien formado y tipos resueltos** | Parser XML real: etiquetas desemparejadas, prefijos sin declarar, `type`/`base`/`ref` que no resuelven a un tipo XSD integrado o propio, declaraciones globales duplicadas y elementos hermanos con el mismo nombre y tipos distintos o anónimos (*Element Declarations Consistent*) son errores. |
+| `XSD-002` | `HIGH` | **Nombres NCName en la inferencia** | `--infer` convierte claves JSON, `--root` y prefijos a NCName válidos (`toNCName`) y avisa de cada cambio. `--ns` se escapa. Entradas vacías, inexistentes, con BOM, raíz array o `{}` dan error con exit 1, nunca un XSD vacío. |
+| `MMAP-001` | `MEDIUM` | **Mapeos y rutas del `.mmap`** | `--map` mal formado o flag desconocido → exit 2. `--source-xsd`/`--target-xsd` aceptan rutas Windows (`C:\…`). El simulador escapa una sola vez, resuelve XPath absolutas hijo a hijo y valida la salida contra `--target-xsd`. |
+| `MOCK-001` | `HIGH` | **Mock suite estricta y reproducible** | XML validado con parser real. Las claves se correlacionan sin distinguir mayúsculas ni `_-.`. Con `--strict` los desajustes son errores. Sin `--timestamp` el ZIP es idéntico byte a byte. Si hay errores no se escribe nada. |
+| `XSLT-001` | `CRITICAL` | **XSLT bien formado y prefijos declarados** | Parser XML real. La raíz debe ser `xsl:stylesheet`/`xsl:transform` con el namespace XSL y `version`. Los prefijos usados en elementos y en XPath deben estar declarados (se ignoran literales y ejes). |
+| `XSLT-002` | `HIGH` | **Construcciones por motor (`--engine 1.0/2.0/3.0`)** | En 1.0: elementos 2.0/3.0, `as`, `#all`, funciones XPath 2.0, `if/then/else`, `for`, `some/every`, `instance of`, `xs:*()`, `*:name`, `to/except/intersect` (cada uno una vez y con línea). En 2.0: elementos solo 3.0. `json-to-xml()` y otras funciones 3.0 exigen 3.0. |
+| `XSLT-003` | `HIGH` | **Variables y parámetros** | `$var` sin declarar (teniendo en cuenta `for`/`let`/`some`/`every`) y `xsl:param`/`xsl:variable` duplicados en el mismo ámbito son errores. `<xsl:param name="exchange"/>` debe ser de nivel superior. |
+| `GROOVY-LIT-001` | `MEDIUM` | **Literales ignorados** | Las reglas estructurales de `validate-groovy` se evalúan sobre el código con los literales String enmascarados (`stripStringLiterals`), así que un patrón prohibido dentro de un texto no se marca. |
+| `DOC-001` | `MEDIUM` | **Secciones con contenido** | `--validate-doc` exige las 8 secciones con contenido real: una sección vacía o con TBD, todo, pendiente o n/a es un error (exit 1). |
+| `CLI-001` | `LOW` | **Contrato CLI uniforme** | `--help` → exit 0. Sin argumentos, o con flag desconocido o sin valor → exit 2 y uso en stderr. Entrada inválida → exit 1 con mensaje, nunca stack trace. Importar el módulo no imprime nada. |

@@ -170,6 +170,13 @@ node ./scripts/export-api-client.mjs <iflow.zip | --demo> --endpoints [--json]
 
 
 
+## Qué garantiza el script (LL-021, LL-022)
+
+- `build-cpi-package.mjs` no escribe ningún zip si hay errores, escapa `parameters.prop`/`.propdef` como `java.util.Properties` (`\\`, `=`, `:` y saltos de línea) y escapa el texto XML. El DEMO lleva el timeout en el canal (`messageFlow`), no en la tarea.
+- `build-value-mapping.mjs` lee CSV RFC 4180 (comillas, `,` o `;` detectado automáticamente) y avisa de pares agencia/valor duplicados en lugar de fallar con stack trace.
+- `export-api-client.mjs` toma la ruta del sender HTTPS de `urlPath` (SOAP/IDoc/ProcessDirect usan `address`) y rechaza bundles que no son un iFlow (p. ej. una Script Collection).
+- `clone-iflow-bundle.mjs` actualiza las referencias del `.iflw` cuando renombra scripts de una Script Collection.
+
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 
 Siempre que el usuario reporte un **error de subida o ejecución en SAP CPI**, corrija un artefacto generado o comparta un paquete `.zip` de referencia, tras resolver su tarea inmediata debes aplicar automáticamente el ciclo de auto-mejora:

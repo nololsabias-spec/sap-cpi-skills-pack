@@ -76,14 +76,15 @@ export function crc32(buf) {
 /**
  * Creates a ZIP Buffer from an array of { path: string, content: string | Buffer }
  * @param {Array<{ path: string, content: string | Buffer }>} files
+ * @param {{ date?: Date }} [options] fixed entry mtime (for reproducible / golden-test archives)
  * @returns {Buffer}
  */
-export function createZipBuffer(files) {
+export function createZipBuffer(files, options = {}) {
   const localFileHeaders = [];
   const centralDirHeaders = [];
   let offset = 0;
 
-  const now = new Date();
+  const now = options.date instanceof Date && !Number.isNaN(options.date.getTime()) ? options.date : new Date();
   const dosTime = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xffff;
   const dosDate = (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xffff;
 

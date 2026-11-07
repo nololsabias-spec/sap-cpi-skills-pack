@@ -70,11 +70,62 @@ export function buildValueMappingManifest(name) {
   return headers.map(wrapManifestLine72).join('\r\n') + '\r\n\r\n';
 }
 
-export function parseCsvValueMapping(csvText) {
-  const lines = csvText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (lines.length < 2) throw new Error('El archivo CSV debe tener al menos una fila de cabecera y una fila de datos.');
+/** Detects the delimiter of the header line (Excel in es/de/fr locales exports ";"). */
+export function detectCsvDelimiter(headerLine) {
+  const counts = [',', ';', '\t', '|'].map((d) => [d, headerLine.split(d).length - 1]);
+  counts.sort((a, b) => b[1] - a[1]);
+  return counts[0][1] > 0 ? counts[0][0] : ',';
+}
 
-  const headerNorm = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
+/** RFC 4180 CSV parser: quoted fields, "" escapes, delimiters/newlines inside quotes, BOM. */
+export function parseCsvRows(csvText, delimiter) {
+  const text = String(csvText ?? '').replace(/^\uFEFF/, '');
+  const firstLine = text.split(/\r?\n/, 1)[0] || '';
+  const d = delimiter || detectCsvDelimiter(firstLine);
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  let quotedOnce = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else inQuotes = false;
+      } else field += c;
+      continue;
+    }
+    if (c === '"' && field.trim() === '') {
+      inQuotes = true;
+      quotedOnce = true;
+      field = '';
+    } else if (c === d) {
+      row.push(quotedOnce ? field : field.trim());
+      field = '';
+      quotedOnce = false;
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(quotedOnce ? field : field.trim());
+      if (row.some((x) => x !== '')) rows.push(row);
+      row = [];
+      field = '';
+      quotedOnce = false;
+    } else field += c;
+  }
+  if (inQuotes) throw new Error('CSV mal formado: comillas sin cerrar.');
+  row.push(quotedOnce ? field : field.trim());
+  if (row.some((x) => x !== '')) rows.push(row);
+  return { rows, delimiter: d };
+}
+
+export function parseCsvValueMapping(csvText) {
+  const { rows } = parseCsvRows(csvText);
+  if (rows.length < 2) throw new Error('El archivo CSV debe tener al menos una fila de cabecera y una fila de datos.');
+
+  const headerNorm = rows[0].map((h) => h.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
   const colSrcVal = headerNorm.findIndex((h) => ['sourcevalue', 'srcvalue', 'sourceval', 'srcval', 'valsrc', 'source', 'val1'].includes(h));
   const colTgtVal = headerNorm.findIndex((h) => ['targetvalue', 'tgtvalue', 'targetval', 'tgtval', 'valtgt', 'target', 'val2'].includes(h));
   const colSrcAgency = headerNorm.findIndex((h) => ['sourceagency', 'srcagency', 'agencysrc', 'agency1'].includes(h));
@@ -88,8 +139,8 @@ export function parseCsvValueMapping(csvText) {
 
   const groupsMap = new Map();
 
-  for (let i = 1; i < lines.length; i++) {
-    const parts = lines[i].split(',').map((p) => p.trim());
+  for (let i = 1; i < rows.length; i++) {
+    const parts = rows[i];
     const srcAgency = colSrcAgency !== -1 ? parts[colSrcAgency] : 'SourceSystem';
     const srcSchema = colSrcSchema !== -1 ? parts[colSrcSchema] : 'Code';
     const tgtAgency = colTgtAgency !== -1 ? parts[colTgtAgency] : 'TargetSystem';
@@ -107,7 +158,7 @@ export function parseCsvValueMapping(csvText) {
         entries: []
       });
     }
-    groupsMap.get(groupKey).entries.push({ sourceValue: srcVal, targetValue: tgtVal });
+    groupsMap.get(groupKey).entries.push({ sourceValue: srcVal, targetValue: tgtVal, line: i + 1 });
   }
 
   return Array.from(groupsMap.values());
@@ -172,7 +223,11 @@ export function validateAndBuildValueMappingBundle(spec) {
   if (Array.isArray(spec.groups)) {
     groups = spec.groups;
   } else if (spec.csvContent) {
-    groups = parseCsvValueMapping(spec.csvContent);
+    try {
+      groups = parseCsvValueMapping(spec.csvContent);
+    } catch (e) {
+      errors.push(e.message);
+    }
   } else if (spec.entries) {
     groups = [
       {
@@ -185,8 +240,41 @@ export function validateAndBuildValueMappingBundle(spec) {
     ];
   }
 
-  if (groups.length === 0) {
+  if (groups.length === 0 && errors.length === 0) {
     errors.push('El Value Mapping debe contener al menos un grupo de correspondencias con entradas.');
+  }
+
+  // Uniqueness (LL-025): CPI resolves valueMapLookup by (agency, schema, value). Two different targets for
+  // the same source value are ambiguous and are rejected; exact duplicate rows are dropped with a warning;
+  // a target value reused by several sources breaks the reverse (bidirectional) lookup.
+  for (const g of groups) {
+    if (!Array.isArray(g.entries)) continue;
+    const label = `${g.sourceAgency}/${g.sourceSchema} -> ${g.targetAgency}/${g.targetSchema}`;
+    const seen = new Map();
+    const bySrcTarget = new Map();
+    const kept = [];
+    for (const e of g.entries) {
+      const at = e.line ? ` (línea ${e.line})` : '';
+      if (!e.sourceValue || !e.targetValue) {
+        errors.push(`Grupo ${label}: entrada con valor vacío${at} (origen="${e.sourceValue ?? ''}", destino="${e.targetValue ?? ''}").`);
+        continue;
+      }
+      if (seen.has(e.sourceValue)) {
+        if (seen.get(e.sourceValue) === e.targetValue) {
+          warnings.push(`Grupo ${label}: fila duplicada "${e.sourceValue}" -> "${e.targetValue}"${at}; se ignora.`);
+          continue;
+        }
+        errors.push(`Grupo ${label}: valor de origen "${e.sourceValue}" duplicado con destinos distintos ("${seen.get(e.sourceValue)}" y "${e.targetValue}")${at}.`);
+        continue;
+      }
+      seen.set(e.sourceValue, e.targetValue);
+      bySrcTarget.set(e.targetValue, [...(bySrcTarget.get(e.targetValue) || []), e.sourceValue]);
+      kept.push({ sourceValue: e.sourceValue, targetValue: e.targetValue });
+    }
+    for (const [t, srcs] of bySrcTarget) {
+      if (srcs.length > 1) warnings.push(`Grupo ${label}: el destino "${t}" lo comparten ${srcs.length} orígenes (${srcs.join(', ')}); la búsqueda inversa será ambigua.`);
+    }
+    g.entries = kept;
   }
 
   let totalEntriesCount = 0;
@@ -234,10 +322,12 @@ const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log('Uso 1 (Demo): node build-value-mapping.mjs --demo [--out <VM_Name.zip>] [--json]');
     console.log('Uso 2 (JSON): node build-value-mapping.mjs <tabla.json> [--name <VM_Name>] [--out <VM_Name.zip>] [--json]');
     console.log('Uso 3 (CSV):  node build-value-mapping.mjs <tabla.csv> --name <VM_Name> [--out <VM_Name.zip>] [--json]');
-    process.exit(0);
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   const jsonFlag = args.includes('--json');
@@ -278,7 +368,12 @@ if (isMain) {
     const customName = getOpt('--name', path.basename(inputPath, path.extname(inputPath)));
 
     if (inputPath.endsWith('.json')) {
-      spec = JSON.parse(content);
+      try {
+        spec = JSON.parse(content.replace(/^\uFEFF/, ''));
+      } catch (e) {
+        console.error(`JSON inválido en ${path.basename(inputPath)}: ${e.message}`);
+        process.exit(1);
+      }
       if (getOpt('--name')) spec.name = customName;
     } else if (inputPath.endsWith('.csv')) {
       spec = {
@@ -307,7 +402,8 @@ if (isMain) {
     console.log('=== SAP CPI OSGi VALUE MAPPING BUILDER ===');
     console.log(`Estado: ${result.valid ? 'APROBADO' : 'FALLO'}`);
     console.log(`Bundle: ${result.name} (${result.totalGroups} grupo(s), ${result.totalEntries} entradas mapeadas)`);
-    console.log(`Archivo generado: ${path.resolve(outPath)} (${result.sizeBytes} bytes)`);
+    if (result.valid && outPath) console.log(`Archivo generado: ${path.resolve(outPath)} (${result.sizeBytes} bytes)`);
+    else if (!result.valid) console.log('No se ha generado ningún archivo (corrige los errores).');
     if (result.warnings.length > 0) {
       result.warnings.forEach((w) => console.log(`  [WARN] ${w}`));
     }

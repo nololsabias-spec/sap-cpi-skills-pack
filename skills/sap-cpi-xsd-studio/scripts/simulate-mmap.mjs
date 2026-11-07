@@ -5,224 +5,175 @@
  * - Parses SAP CPI <xiObj> / <tr:XiTrafo> mapping definitions.
  * - Extracts brick rules: Source XPath (Src), Constants (const), Headers (getHeader), Properties (getProperty).
  * - Accepts input payloads in XML or JSON and simulated Exchange headers/properties.
- * - Generates the deterministic target XML document and optionally validates against the target XSD.
+ * - Generates the deterministic target XML document and, with a target XSD, validates THE OUTPUT against it
+ *   (structural check: element names, order, min/maxOccurs and built-in simple types).
+ *
+ * Path semantics (same as the Graphical Mapper): /Root/a/b walks direct children only; //b searches descendants;
+ * a final /@attr reads an attribute. A source node that occurs several times produces one target node per value.
+ * A source value that does not exist creates no target node (no empty <x></x>).
  *
  * Usage:
  *   node simulate-mmap.mjs --demo [--json]
- *   node simulate-mmap.mjs <mapping.mmap> --input <input.xml|input.json> [--headers <headers.json>] [--properties <props.json>] [--target-xsd <target.xsd>] [--out <output.xml>] [--json]
+ *   node simulate-mmap.mjs <mapping.mmap> --input <input.xml|input.json> [--headers <headers.json|{...}|K=V,...>] [--properties ...] [--target-xsd <target.xsd>] [--out <output.xml>] [--json]
  */
 import { isMainModule } from '../../../shared/cli-utils.mjs';
+import { parseXmlLite, escapeXml, stripBom, walkXml } from '../../../shared/xml-lite.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
-import { validateXsdForSapCpi } from './validate-xsd.mjs';
+import { validateXsdForSapCpi, validateXmlInstanceAgainstXsd } from './validate-xsd.mjs';
 import { generateMmapXml, validateMmapForSapCpi } from './build-mmap.mjs';
 
-function escapeXml(str) {
-  return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
+const localName = (s) => String(s).replace(/^[^:]+:/, '');
 
 /**
- * Extracts a value from an XML string given an XPath like /Root/Child/Field or //Field
+ * Resolve an XPath (/Root/a/b, //b, /Root/a/@id) against an XML document.
+ * @returns {string[]} every matching value (text is entity-decoded); [] when the path does not exist.
  */
+export function extractValuesFromXml(xmlStr, xpath) {
+  if (!xmlStr || !xpath) return [];
+  const parsed = typeof xmlStr === 'object' && xmlStr.root ? xmlStr : parseXmlLite(xmlStr);
+  if (!parsed.ok) return [];
+  const root = parsed.root;
+  const descendant = xpath.startsWith('//');
+  const segments = xpath.split('/').filter(Boolean);
+  if (segments.length === 0) return [];
+  const last = segments[segments.length - 1];
+  const attr = last.startsWith('@') ? localName(last.slice(1)) : null;
+  const steps = attr ? segments.slice(0, -1) : segments;
+
+  let context;
+  if (descendant) {
+    const first = localName(steps[0]);
+    context = [];
+    walkXml(root, (n) => { if (n.local === first) context.push(n); });
+    steps.shift();
+  } else {
+    if (!steps.length) return [];
+    if (root.local !== localName(steps[0])) return [];
+    context = [root];
+    steps.shift();
+  }
+  for (const seg of steps) {
+    const name = localName(seg);
+    context = context.flatMap((n) => n.children.filter((c) => c.local === name));
+    if (!context.length) return [];
+  }
+  if (attr) {
+    return context
+      .map((n) => {
+        const key = Object.keys(n.attrs).find((k) => localName(k) === attr && !k.startsWith('xmlns'));
+        return key !== undefined ? n.attrs[key] : undefined;
+      })
+      .filter((v) => v !== undefined);
+  }
+  return context.map((n) => n.text.trim());
+}
+
+/** Backwards-compatible single-value XML lookup ('' when missing). */
 export function extractValueFromXml(xmlStr, xpath) {
-  if (!xmlStr || !xpath) return '';
-  const cleanXml = xmlStr.replace(/<!--[\s\S]*?-->/g, '');
-  const segments = xpath.split('/').filter(Boolean);
-  if (segments.length === 0) return '';
-
-  let currentContext = cleanXml;
-  for (let i = 0; i < segments.length; i++) {
-    const tag = segments[i].replace(/^[^:]+:/, ''); // strip namespace prefix
-    // Match <tag ...>content</tag> or <tag/>
-    const regex = new RegExp(`<(?:[a-zA-Z0-9_]+:)?${tag}\\b[^>]*>(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([\\s\\S]*?))<\\/(?:[a-zA-Z0-9_]+:)?${tag}>`, 'i');
-    const match = currentContext.match(regex);
-    if (!match) {
-      // Fallback: check for leaf attribute e.g. @id
-      if (tag.startsWith('@')) {
-        const attrName = tag.slice(1);
-        const attrMatch = currentContext.match(new RegExp(`\\b${attrName}\\s*=\\s*["']([^"']*)["']`, 'i'));
-        return attrMatch ? attrMatch[1] : '';
-      }
-      return '';
-    }
-    const val = match[1] !== undefined ? match[1] : match[2];
-    if (i === segments.length - 1) {
-      return val.trim();
-    }
-    currentContext = val;
-  }
-  return '';
+  const v = extractValuesFromXml(xmlStr, xpath);
+  return v.length ? v[0] : '';
 }
 
-/**
- * Extracts a value from a JSON object given an XPath like /Root/Child/Field or /Child/Field
- */
-export function extractValueFromJson(jsonObj, xpath) {
-  if (!jsonObj || typeof jsonObj !== 'object' || !xpath) return '';
-  const segments = xpath.split('/').filter(Boolean);
-  if (segments.length === 0) return '';
-
-  // Try exact path from root
-  let curr = jsonObj;
-  let found = true;
+function walkJson(curr, segments) {
+  let nodes = [curr];
   for (const seg of segments) {
-    if (curr && typeof curr === 'object' && seg in curr) {
-      curr = curr[seg];
-    } else {
-      found = false;
-      break;
-    }
-  }
-  if (found && curr !== undefined && curr !== null) {
-    return typeof curr === 'object' ? JSON.stringify(curr) : String(curr);
-  }
-
-  // Try ignoring the top-level root tag in XPath (e.g. /OrderInput/orderId -> jsonObj.orderId)
-  if (segments.length > 1) {
-    curr = jsonObj;
-    found = true;
-    for (let i = 1; i < segments.length; i++) {
-      const seg = segments[i];
-      if (curr && typeof curr === 'object' && seg in curr) {
-        curr = curr[seg];
-      } else {
-        found = false;
-        break;
+    const next = [];
+    for (const n of nodes) {
+      const items = Array.isArray(n) ? n : [n];
+      for (const it of items) {
+        if (it && typeof it === 'object' && !Array.isArray(it) && Object.prototype.hasOwnProperty.call(it, seg)) next.push(it[seg]);
       }
     }
-    if (found && curr !== undefined && curr !== null) {
-      return typeof curr === 'object' ? JSON.stringify(curr) : String(curr);
-    }
+    if (!next.length) return null;
+    nodes = next;
   }
-
-  // Fallback: search by leaf property name anywhere in object
-  const leaf = segments[segments.length - 1];
-  const findDeep = (node) => {
-    if (!node || typeof node !== 'object') return null;
-    if (leaf in node && node[leaf] !== undefined && node[leaf] !== null) return node[leaf];
-    for (const k of Object.keys(node)) {
-      if (typeof node[k] === 'object') {
-        const res = findDeep(node[k]);
-        if (res !== null) return res;
-      }
-    }
-    return null;
-  };
-
-  const deepVal = findDeep(jsonObj);
-  return deepVal !== null ? (typeof deepVal === 'object' ? JSON.stringify(deepVal) : String(deepVal)) : '';
+  return nodes.flatMap((n) => (Array.isArray(n) ? n : [n])).filter((v) => v !== undefined && v !== null);
 }
 
 /**
- * Parses all Destination Bricks in the .mmap XML, correctly balancing nested <brick> elements
+ * Resolve an XPath against a JSON object (as converted by CPI's JSON-to-XML Converter). The first segment may be
+ * the XML root name (/OrderInput/orderId -> json.orderId). Arrays fan out into several values.
+ * @returns {{ values: string[], objectHit: boolean }}
+ */
+export function extractValuesFromJson(jsonObj, xpath) {
+  const none = { values: [], objectHit: false };
+  if (!jsonObj || typeof jsonObj !== 'object' || !xpath) return none;
+  const segments = xpath.split('/').filter(Boolean).map(localName);
+  if (segments.length === 0) return none;
+  let hit = walkJson(jsonObj, segments);
+  if (hit === null && segments.length > 1) hit = walkJson(jsonObj, segments.slice(1));
+  if (hit === null) return none;
+  const objectHit = hit.some((v) => typeof v === 'object');
+  return { values: hit.filter((v) => typeof v !== 'object').map(String), objectHit };
+}
+
+/** Backwards-compatible single-value JSON lookup ('' when missing). No "search by leaf name anywhere" fallback. */
+export function extractValueFromJson(jsonObj, xpath) {
+  const { values } = extractValuesFromJson(jsonObj, xpath);
+  return values.length ? values[0] : '';
+}
+
+function constValueOf(brick) {
+  // <bindings><param name="value"><value>...</value></param></bindings>
+  let out;
+  walkXml(brick, (n) => {
+    if (out === undefined && n.local === 'param' && n.attrs.name === 'value') {
+      const v = n.children.find((c) => c.local === 'value');
+      out = v ? v.text : '';
+    }
+  });
+  return out;
+}
+
+/**
+ * Parses all Destination Bricks in the .mmap XML. Values are entity-decoded (they are re-escaped once on output).
  */
 export function parseMmapBricks(mmapContent) {
+  const parsed = parseXmlLite(mmapContent);
+  if (!parsed.ok) throw new Error(`El .mmap no es XML bien formado: ${parsed.error}`);
   const bricks = [];
-  const startRegex = /<brick\b([^>]*\btype="Dst"[^>]*)>/gi;
-  let sm;
-
-  while ((sm = startRegex.exec(mmapContent)) !== null) {
-    const attrs = sm[1];
-    const bodyStartIndex = sm.index + sm[0].length;
-
-    // Find matching </brick> taking nested <brick> into account
-    let depth = 1;
-    let ptr = bodyStartIndex;
-    let body = '';
-
-    while (depth > 0 && ptr < mmapContent.length) {
-      const nextOpen = mmapContent.indexOf('<brick', ptr);
-      const nextClose = mmapContent.indexOf('</brick>', ptr);
-      if (nextClose === -1) break;
-
-      if (nextOpen !== -1 && nextOpen < nextClose) {
-        depth++;
-        ptr = nextOpen + 6;
-      } else {
-        depth--;
-        if (depth === 0) {
-          body = mmapContent.substring(bodyStartIndex, nextClose);
-          startRegex.lastIndex = nextClose + 8;
-        }
-        ptr = nextClose + 8;
-      }
-    }
-
-    const pathMatch = attrs.match(/\bpath="([^"]+)"/);
-    if (!pathMatch) continue;
-    const dstPath = pathMatch[1];
-
-    let rule = { target: dstPath, type: 'constant', value: '' };
-
-    // Check if source brick
-    const srcMatch =
-      body.match(/<brick\b[^>]*\btype="Src"[^>]*\bpath="([^"]+)"/i) ||
-      body.match(/<brick\b[^>]*\bpath="([^"]+)"[^>]*\btype="Src"/i);
-    if (srcMatch) {
-      rule = { target: dstPath, type: 'source', xpath: srcMatch[1] };
-    } else {
-      // Check for getHeader
-      const headerMatch = body.match(/<brick\b[^>]*\bfname="getHeader"[\s\S]*?<param\s+name="value">\s*<value>([^<]+)<\/value>/i);
-      if (headerMatch) {
-        rule = { target: dstPath, type: 'header', key: headerMatch[1].trim() };
-      } else {
-        // Check for getProperty
-        const propMatch = body.match(/<brick\b[^>]*\bfname="getProperty"[\s\S]*?<param\s+name="value">\s*<value>([^<]+)<\/value>/i);
-        if (propMatch) {
-          rule = { target: dstPath, type: 'property', key: propMatch[1].trim() };
-        } else {
-          // Check for Constant
-          const constMatch = body.match(/<param\s+name="value">\s*<value>([^<]*)<\/value>/i);
-          rule = { target: dstPath, type: 'constant', value: constMatch ? constMatch[1] : '' };
-        }
-      }
-    }
-    bricks.push(rule);
-  }
+  walkXml(parsed.root, (n) => {
+    if (n.local !== 'brick' || n.attrs.type !== 'Dst' || !n.attrs.path) return;
+    const target = n.attrs.path;
+    let src = null;
+    let fn = null;
+    walkXml(n, (c) => {
+      if (c === n || c.local !== 'brick') return;
+      if (!src && c.attrs.type === 'Src' && c.attrs.path) src = c;
+      if (!fn && c.attrs.type === 'Func' && (c.attrs.fname === 'getHeader' || c.attrs.fname === 'getProperty')) fn = c;
+    });
+    if (src) bricks.push({ target, type: 'source', xpath: src.attrs.path });
+    else if (fn) bricks.push({ target, type: fn.attrs.fname === 'getHeader' ? 'header' : 'property', key: (constValueOf(fn) || '').trim() });
+    else bricks.push({ target, type: 'constant', value: constValueOf(n) ?? '' });
+  });
   return bricks;
 }
 
 /**
- * Assembles a structured XML string from mapped key-value paths
+ * Assembles a structured XML string from mapped target paths. A leaf with several values is repeated.
  */
 function assembleXmlFromPaths(mappedEntries) {
-  const rootObj = {};
+  const rootObj = { children: new Map() };
 
   for (const entry of mappedEntries) {
     const parts = entry.path.split('/').filter(Boolean);
     if (parts.length === 0) continue;
-
     let node = rootObj;
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
-      if (i === parts.length - 1) {
-        // leaf
-        if (node[part] === undefined) {
-          node[part] = entry.value;
-        }
-      } else {
-        if (!node[part] || typeof node[part] !== 'object') {
-          node[part] = {};
-        }
-        node = node[part];
-      }
+    for (const part of parts) {
+      if (!node.children.has(part)) node.children.set(part, { children: new Map(), values: null });
+      node = node.children.get(part);
     }
+    if (entry.values && node.children.size === 0 && node.values === null) node.values = entry.values;
   }
 
   const renderTree = (node, indent = '') => {
     let xml = '';
-    for (const [key, val] of Object.entries(node)) {
-      if (val !== null && typeof val === 'object') {
-        xml += `${indent}<${key}>\n${renderTree(val, indent + '    ')}${indent}</${key}>\n`;
-      } else {
-        // If it was a synthetic container without children, don't emit "Constant"
-        const cleanVal = val === 'Constant' ? '' : val;
-        xml += `${indent}<${key}>${escapeXml(cleanVal)}</${key}>\n`;
+    for (const [key, child] of node.children.entries()) {
+      if (child.children.size > 0) {
+        xml += `${indent}<${key}>\n${renderTree(child, indent + '    ')}${indent}</${key}>\n`;
+      } else if (child.values) {
+        for (const v of child.values) xml += `${indent}<${key}>${escapeXml(v)}</${key}>\n`;
       }
     }
     return xml;
@@ -238,7 +189,7 @@ function assembleXmlFromPaths(mappedEntries) {
  * @param {string|object} params.inputPayload - XML or JSON sample
  * @param {object} [params.headers] - Exchange headers map
  * @param {object} [params.properties] - Exchange properties map
- * @param {string} [params.targetXsdContent] - Optional target XSD content for schema validation
+ * @param {string} [params.targetXsdContent] - Optional target XSD: the generated XML is validated against it
  * @returns {object}
  */
 export function simulateMessageMapping({
@@ -248,84 +199,166 @@ export function simulateMessageMapping({
   properties = {},
   targetXsdContent = null
 }) {
+  const failure = (error) => ({ success: false, error, totalRules: 0, outputXml: '', mappedFields: [], warnings: [] });
   const mmapValidation = validateMmapForSapCpi(mmapContent);
   if (!mmapValidation.valid) {
-    return {
-      success: false,
-      error: `El archivo .mmap contiene errores: ${mmapValidation.errors.join('; ')}`,
-      outputXml: '',
-      mappedFields: []
-    };
+    return failure(`El archivo .mmap contiene errores: ${mmapValidation.errors.join('; ')}`);
   }
 
-  const rules = parseMmapBricks(mmapContent);
+  let rules;
+  try {
+    rules = parseMmapBricks(stripBom(mmapContent));
+  } catch (e) {
+    return failure(e.message);
+  }
+  headers = headers || {};
+  properties = properties || {};
+  const warnings = [];
   const mappedFields = [];
   const entriesForTree = [];
 
   // Parse input payload
   let parsedJson = null;
-  let rawXml = null;
+  let parsedXml = null;
   if (typeof inputPayload === 'object' && inputPayload !== null) {
     parsedJson = inputPayload;
   } else if (typeof inputPayload === 'string') {
-    const trimmed = inputPayload.trim();
+    const trimmed = stripBom(inputPayload).trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
       try {
         parsedJson = JSON.parse(trimmed);
-      } catch {
-        parsedJson = null;
+      } catch (e) {
+        return failure(`El payload de entrada parece JSON pero no es válido: ${e.message}`);
       }
-    }
-    if (!parsedJson) {
-      rawXml = trimmed;
+    } else if (trimmed) {
+      parsedXml = parseXmlLite(trimmed);
+      if (!parsedXml.ok) return failure(`El payload de entrada no es XML bien formado: ${parsedXml.error}`);
     }
   }
+  if (!parsedJson && !parsedXml && rules.some((r) => r.type === 'source')) {
+    warnings.push('No hay payload de entrada: todos los campos con origen XPath quedan sin valor.');
+  }
+
+  // Container bricks (a target that is the parent of another target) only create the node.
+  const allTargets = rules.map((r) => r.target);
+  const isContainer = (t) => allTargets.some((o) => o !== t && o.startsWith(`${t}/`));
+  const seenTargets = new Set();
 
   for (const rule of rules) {
-    let resolvedValue = '';
+    if (seenTargets.has(rule.target)) {
+      warnings.push(`Destino duplicado ${rule.target}: se usa la primera regla y se ignora esta (${rule.type}).`);
+      continue;
+    }
+    seenTargets.add(rule.target);
+    let values = null; // null = no value -> node not created
     if (rule.type === 'source') {
-      if (rawXml) {
-        resolvedValue = extractValueFromXml(rawXml, rule.xpath);
+      if (parsedXml) {
+        const v = extractValuesFromXml(parsedXml, rule.xpath);
+        values = v.length ? v : null;
       } else if (parsedJson) {
-        resolvedValue = extractValueFromJson(parsedJson, rule.xpath);
+        const r = extractValuesFromJson(parsedJson, rule.xpath);
+        if (r.objectHit && !r.values.length && !isContainer(rule.target)) {
+          warnings.push(`${rule.target}: el origen ${rule.xpath} es un objeto/estructura, no un valor simple; mapea un campo hoja.`);
+        }
+        values = r.values.length ? r.values : null;
       }
+      if (values === null && !isContainer(rule.target)) warnings.push(`${rule.target}: el origen ${rule.xpath} no existe en el payload; no se crea el nodo destino.`);
+      if (values && values.length > 1) warnings.push(`${rule.target}: el origen ${rule.xpath} aparece ${values.length} veces; se generan ${values.length} nodos destino.`);
     } else if (rule.type === 'header') {
-      resolvedValue = headers[rule.key] !== undefined ? String(headers[rule.key]) : '';
+      if (headers[rule.key] !== undefined && headers[rule.key] !== null) values = [String(headers[rule.key])];
+      else warnings.push(`${rule.target}: la cabecera "${rule.key}" no está en --headers; no se crea el nodo destino.`);
     } else if (rule.type === 'property') {
-      resolvedValue = properties[rule.key] !== undefined ? String(properties[rule.key]) : '';
+      if (properties[rule.key] !== undefined && properties[rule.key] !== null) values = [String(properties[rule.key])];
+      else warnings.push(`${rule.target}: la propiedad "${rule.key}" no está en --properties; no se crea el nodo destino.`);
     } else {
-      resolvedValue = rule.value ?? '';
+      values = [rule.value ?? ''];
     }
 
+    const container = isContainer(rule.target);
     mappedFields.push({
       target: rule.target,
-      sourceType: rule.type,
+      sourceType: container ? 'container' : rule.type,
       sourceRef: rule.xpath || rule.key || rule.value || '',
-      resolvedValue
+      resolvedValue: container ? '' : values ? (values.length === 1 ? values[0] : values) : null
     });
-
-    entriesForTree.push({
-      path: rule.target,
-      value: resolvedValue
-    });
+    entriesForTree.push({ path: rule.target, values: container ? null : values });
   }
 
   const outputXml = assembleXmlFromPaths(entriesForTree);
 
   let xsdValidation = null;
+  let outputValidation = null;
   if (targetXsdContent) {
     xsdValidation = validateXsdForSapCpi(targetXsdContent);
+    outputValidation = validateXmlInstanceAgainstXsd(outputXml, targetXsdContent);
   }
 
   return {
-    success: true,
+    success: outputValidation ? outputValidation.valid : true,
+    error: outputValidation && !outputValidation.valid ? `La salida no valida contra el XSD destino: ${outputValidation.errors.join('; ')}` : undefined,
     totalRules: rules.length,
     sourceSchema: mmapValidation.sourceSchema,
     targetSchema: mmapValidation.targetSchema,
     mappedFields,
     outputXml,
-    xsdValidation
+    warnings,
+    xsdValidation,
+    outputValidation
   };
+}
+
+/** Parse --headers / --properties: inline JSON, a JSON file, or K=V pairs separated by "," or "|". Throws on bad input. */
+export function parseParamMap(val, flag = '--headers') {
+  if (val === null || val === undefined) return {};
+  const trimmed = String(val).trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      return JSON.parse(trimmed);
+    } catch (e) {
+      throw new Error(`${flag}: JSON inline no válido (${e.message}).`);
+    }
+  }
+  const resolved = path.resolve(trimmed);
+  if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+    try {
+      return JSON.parse(stripBom(fs.readFileSync(resolved, 'utf8')));
+    } catch (e) {
+      throw new Error(`${flag}: el archivo ${trimmed} no contiene JSON válido (${e.message}).`);
+    }
+  }
+  if (trimmed.includes('=')) {
+    const res = {};
+    trimmed.split(/[,|]/).forEach((kv) => {
+      const eq = kv.indexOf('=');
+      if (eq !== -1) {
+        const k = kv.slice(0, eq).trim();
+        if (k) res[k] = kv.slice(eq + 1).trim();
+      }
+    });
+    return res;
+  }
+  throw new Error(`${flag}: no existe el archivo "${trimmed}" (usa un .json, JSON inline {...} o pares K=V).`);
+}
+
+function printText(result, outPath) {
+  console.log(`Estado: ${result.success ? 'ÉXITO' : 'FALLO'} | Reglas evaluadas: ${result.totalRules ?? 0}`);
+  if (result.error) console.log(`  [ERROR] ${result.error}`);
+  result.mappedFields.forEach((f) => {
+    const v = Array.isArray(f.resolvedValue) ? JSON.stringify(f.resolvedValue) : f.resolvedValue === null ? '(sin valor)' : `"${f.resolvedValue}"`;
+    console.log(`  ${f.target} <= [${f.sourceType.toUpperCase()}] ${f.sourceRef} = ${v}`);
+  });
+  (result.warnings || []).forEach((w) => console.log(`  [WARN]  ${w}`));
+  if (result.outputValidation) {
+    console.log(`\nValidación de la salida contra el XSD destino: ${result.outputValidation.valid ? 'OK' : 'FALLO'}`);
+    result.outputValidation.errors.forEach((e) => console.log(`  [ERROR] ${e}`));
+  }
+  if (!result.outputXml) return;
+  if (outPath) {
+    console.log(`\nXML generado en: ${path.resolve(outPath)}`);
+  } else {
+    console.log('\n--- XML FINAL RESULTANTE ---');
+    console.log(result.outputXml);
+  }
 }
 
 // CLI Runner
@@ -333,9 +366,12 @@ const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log('Uso 1 (Demo): node simulate-mmap.mjs --demo [--json]');
-    console.log('Uso 2 (Simular): node simulate-mmap.mjs <Mapeo.mmap> --input <input.xml|input.json> [--headers <headers.json>] [--properties <props.json>] [--target-xsd <Target.xsd>] [--out <out.xml>] [--json]');
-    process.exit(0);
+    console.log('Uso 2 (Simular): node simulate-mmap.mjs <Mapeo.mmap> --input <input.xml|input.json> [--headers <headers.json|{...}|K=V>] [--properties <props.json|{...}|K=V>] [--target-xsd <Target.xsd>] [--out <out.xml>] [--json]');
+    console.log('  --target-xsd valida el propio XSD y además la salida generada contra él (estructura, orden, ocurrencias y tipos simples).');
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   const jsonFlag = args.includes('--json');
@@ -372,71 +408,50 @@ if (isMain) {
       console.log(JSON.stringify(simRes, null, 2));
     } else {
       console.log('=== SAP CPI GRAPHICAL MESSAGE MAPPING SIMULATOR (DEMO) ===');
-      console.log(`Reglas evaluadas: ${simRes.totalRules}`);
-      console.log('\n--- CAMPOS RESUELTOS ---');
-      simRes.mappedFields.forEach((f) => {
-        console.log(`  ${f.target} <= [${f.sourceType.toUpperCase()}] ${f.sourceRef} = "${f.resolvedValue}"`);
-      });
-      console.log('\n--- XML FINAL RESULTANTE ---');
-      console.log(simRes.outputXml);
+      printText(simRes, null);
     }
     process.exit(simRes.success ? 0 : 1);
   }
 
+  const fail = (msg, code = 1) => {
+    console.error(`Error: ${msg}`);
+    process.exit(code);
+  };
+
   const mmapPath = path.resolve(args[0]);
-  if (!fs.existsSync(mmapPath)) {
-    console.error(`Archivo .mmap no encontrado: ${mmapPath}`);
-    process.exit(1);
-  }
+  if (args[0].startsWith('--')) fail('el primer argumento debe ser el archivo .mmap (o --demo).', 2);
+  if (!fs.existsSync(mmapPath)) fail(`Archivo .mmap no encontrado: ${mmapPath}`);
   const mmapContent = fs.readFileSync(mmapPath, 'utf8');
 
   const getOpt = (flag) => {
     for (let i = 0; i < args.length; i++) {
-      if (args[i] === flag && args[i + 1] && !args[i + 1].startsWith('--')) return args[i + 1];
+      if (args[i] === flag) {
+        if (!args[i + 1] || args[i + 1].startsWith('--')) fail(`${flag} necesita un valor.`, 2);
+        return args[i + 1];
+      }
       if (args[i].startsWith(`${flag}=`)) return args[i].slice(flag.length + 1);
     }
     return null;
   };
 
-  const parseParamMap = (val) => {
-    if (!val) return {};
-    const trimmed = val.trim();
-    if (trimmed.startsWith('{')) {
-      try { return JSON.parse(trimmed); } catch { }
-    }
-    const resolved = path.resolve(trimmed);
-    if (fs.existsSync(resolved)) {
-      try { return JSON.parse(fs.readFileSync(resolved, 'utf8')); } catch { }
-    }
-    if (trimmed.includes('=')) {
-      const res = {};
-      trimmed.split(/[,|]/).forEach((kv) => {
-        const eq = kv.indexOf('=');
-        if (eq !== -1) {
-          const k = kv.slice(0, eq).trim();
-          const v = kv.slice(eq + 1).trim();
-          if (k) res[k] = v;
-        }
-      });
-      return res;
-    }
-    return {};
-  };
-
   const inputPath = getOpt('--input');
   if (!inputPath || !fs.existsSync(path.resolve(inputPath))) {
-    console.error('Debe especificar un archivo de entrada válido con `--input <input.xml|input.json>`.');
-    process.exit(1);
+    fail('Debe especificar un archivo de entrada válido con `--input <input.xml|input.json>`.');
   }
   const inputPayload = fs.readFileSync(path.resolve(inputPath), 'utf8');
 
-  const headers = parseParamMap(getOpt('--headers'));
-  const properties = parseParamMap(getOpt('--properties'));
+  let headers;
+  let properties;
+  try {
+    headers = parseParamMap(getOpt('--headers'), '--headers');
+    properties = parseParamMap(getOpt('--properties'), '--properties');
+  } catch (e) {
+    fail(e.message);
+  }
 
   const targetXsdPath = getOpt('--target-xsd');
-  const targetXsdContent = targetXsdPath && fs.existsSync(path.resolve(targetXsdPath))
-    ? fs.readFileSync(path.resolve(targetXsdPath), 'utf8')
-    : null;
+  if (targetXsdPath && !fs.existsSync(path.resolve(targetXsdPath))) fail(`--target-xsd: no existe el archivo ${targetXsdPath}`);
+  const targetXsdContent = targetXsdPath ? fs.readFileSync(path.resolve(targetXsdPath), 'utf8') : null;
 
   const outPath = getOpt('--out');
 
@@ -448,7 +463,7 @@ if (isMain) {
     targetXsdContent
   });
 
-  if (outPath && result.success) {
+  if (outPath && result.outputXml) {
     fs.mkdirSync(path.dirname(path.resolve(outPath)), { recursive: true });
     fs.writeFileSync(path.resolve(outPath), result.outputXml, 'utf8');
   }
@@ -457,16 +472,7 @@ if (isMain) {
     console.log(JSON.stringify(result, null, 2));
   } else {
     console.log('=== SAP CPI GRAPHICAL MESSAGE MAPPING SIMULATOR ===');
-    console.log(`Estado: ${result.success ? 'ÉXITO' : 'FALLO'} | Reglas evaluadas: ${result.totalRules}`);
-    result.mappedFields.forEach((f) => {
-      console.log(`  ${f.target} <= [${f.sourceType.toUpperCase()}] ${f.sourceRef} = "${f.resolvedValue}"`);
-    });
-    if (outPath) {
-      console.log(`\nXML generado en: ${path.resolve(outPath)}`);
-    } else {
-      console.log('\n--- XML FINAL RESULTANTE ---');
-      console.log(result.outputXml);
-    }
+    printText(result, outPath);
   }
   process.exit(result.success ? 0 : 1);
 }

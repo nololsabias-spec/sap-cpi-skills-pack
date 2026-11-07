@@ -70,7 +70,7 @@ La carpeta `shared/` y `mcp-server.mjs` se ubican al mismo nivel jerárquico que
 
 Gracias a este diseño híbrido:
 1. **Las Skills y Reglas (`.agents/skills`, `AGENTS.md`, `.cursor/rules`, `.github/copilot-instructions.md`)** proporcionan la metodología arquitectónica (los 3 pasos de diseño, el *Clarification Gate* previo y el protocolo de aprendizaje continuo).
-2. **El Servidor MCP Local (`mcp-server.mjs`)** permite que el IDE invoque las 11 herramientas de validación y empaquetado directamente por JSON-RPC 2.0 sobre `stdin`/`stdout` en local, sin abrir puertos de red y sin pedir confirmación de terminal en cada comando.
+2. **El Servidor MCP Local (`mcp-server.mjs`)** permite que el IDE invoque las 20 herramientas de validación y empaquetado directamente por JSON-RPC 2.0 sobre `stdin`/`stdout` en local, sin abrir puertos de red y sin pedir confirmación de terminal en cada comando. Valida los argumentos contra `inputSchema` (`-32602`), responde `-32700`/`-32600` ante JSON o peticiones inválidas y restringe las rutas a `CPI_MCP_ROOT`, que `setup-skills.mjs --mcp` escribe en `env` de cada `mcp.json` generado.
 
 ---
 

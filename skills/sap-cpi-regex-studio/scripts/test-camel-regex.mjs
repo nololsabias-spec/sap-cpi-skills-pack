@@ -10,6 +10,8 @@
  */
 import { isMainModule } from '../../../shared/cli-utils.mjs';
 import { safeRegexExecAll } from '../../../shared/safe-regex.mjs';
+import { translateJavaRegex, findOverlappingAlternation, checkCamelSimpleField } from '../../../shared/java-regex.mjs';
+export { translateJavaRegex, findOverlappingAlternation, checkCamelSimpleField };
 import path from 'node:path';
 
 export function validateAndTestCamelRegex({
@@ -28,9 +30,19 @@ export function validateAndTestCamelRegex({
   }
 
   const cleanPattern = pattern.trim();
+  // Java syntax ((?i), a++, \Q..\E, \p{Alpha}, \A/\z...) -> ECMAScript before sandboxing.
+  const java = translateJavaRegex(cleanPattern);
+  warnings.push(...java.warnings);
+  for (const u of java.unsupported) errors.push(`Construcción Java no evaluable en el sandbox JavaScript: ${u}. Prueba este caso en el tenant (Simulación de iFlow).`);
 
-  // 1. Anchoring check (^ and $)
-  if (!cleanPattern.startsWith('^') || !cleanPattern.endsWith('$')) {
+  // 0. Camel 3 Simple field checks (${property.X} removed, ${in.body} deprecated, case-sensitive names)
+  const fieldCheck = checkCamelSimpleField(sourceField);
+  errors.push(...fieldCheck.errors);
+  warnings.push(...fieldCheck.warnings);
+
+  // 1. Anchoring check (^ and $), on the translated source so (?i)^...$ and \A...\z count as anchored
+  const endAnchored = (java.source.endsWith('$') && !java.source.endsWith('\\$')) || java.source.endsWith('(?=\\n?$)');
+  if (!java.source.startsWith('^') || !endAnchored) {
     errors.push(`Anclaje incompleto en \`${cleanPattern}\`: Todo patrón de SAP CPI debe iniciar con \`^\` y finalizar con \`$\` para evitar coincidencias parciales accidentales.`);
   }
 
@@ -38,6 +50,12 @@ export function validateAndTestCamelRegex({
   // Detects nested quantifiers like (a+)+, (.*)+, ([a-z]+)*, (\d+)+
   if (/\([^()]*[+*][^()]*\)[+*]/.test(cleanPattern)) {
     errors.push(`Riesgo de Catastrophic Backtracking (ReDoS) detectado en \`${cleanPattern}\`: cuantificadores anidados no acotados pueden bloquear los hilos worker de SAP CPI al 100% de CPU.`);
+  } else {
+    // Quantified alternation whose branches overlap: (a|aa)+, (\w|\d)*, (x|x?)+ -> exponential backtracking on the JVM.
+    const overlap = findOverlappingAlternation(java.source);
+    if (overlap.length) {
+      errors.push(`Riesgo de Catastrophic Backtracking (ReDoS) en \`${overlap[0]}\`: alternativas solapadas dentro de un grupo cuantificado. Haz las alternativas mutuamente excluyentes (p. ej. \`a+\` en lugar de \`(a|aa)+\`).`);
+    }
   }
 
   // 3. Unnecessary escaped forward slashes \/
@@ -47,7 +65,7 @@ export function validateAndTestCamelRegex({
 
   // 4. Compile + evaluate in a time-limited worker sandbox: a catastrophic pattern can no longer
   //    freeze the CLI or the single-threaded MCP server.
-  const sandbox = safeRegexExecAll(cleanPattern, [...matchCases, ...noMatchCases], { timeoutMs });
+  const sandbox = safeRegexExecAll(java.source, [...matchCases, ...noMatchCases], { timeoutMs, flags: java.flags });
   const reg = sandbox.ok;
   if (!sandbox.ok) {
     if (sandbox.syntaxError) errors.push(`Error de sintaxis en la expresión regular: ${sandbox.error}`);
@@ -63,6 +81,9 @@ export function validateAndTestCamelRegex({
     camelSimple = `\${${innerExpr}.replaceAll('${cleanPattern}', '$1')}`;
   } else {
     camelSimple = `${sourceField} regex '${cleanPattern}'`;
+  }
+  if (cleanPattern.includes("'")) {
+    warnings.push("El patrón contiene comillas simples ('): dentro de Camel Simple duplícalas ('') o usa la clase [\\x27] para no romper la expresión.");
   }
 
   // 6. Run Sandbox Evaluations
@@ -91,6 +112,8 @@ export function validateAndTestCamelRegex({
   return {
     valid: errors.length === 0,
     pattern: cleanPattern,
+    jsPattern: java.source,
+    jsFlags: java.flags,
     componentType,
     sourceField,
     camelSimple,
@@ -105,9 +128,11 @@ const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log('Uso: node test-camel-regex.mjs --pattern "^...$" [--component "Router"|"Content Modifier"] [--field "${header.X}"] [--match "a|b"] [--no-match "c|d"] [--json]');
     console.log('     node test-camel-regex.mjs --demo');
-    process.exit(0);
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   const getArg = (flag, def = '') => {

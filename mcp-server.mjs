@@ -59,12 +59,25 @@ function realOrResolved(p) {
   }
 }
 
+/** True for the user's home folder or a filesystem/drive root: too broad to be a workspace. */
+function isTooBroadRoot(p) {
+  const r = realOrResolved(path.resolve(p));
+  const norm = (x) => (process.platform === 'win32' ? x.toLowerCase() : x).replace(/[\\/]+$/, '');
+  return norm(r) === norm(path.parse(r).root) || norm(r) === norm(realOrResolved(os.homedir()));
+}
+
 export function getAllowedRoots() {
-  const primary = process.env.CPI_MCP_ROOT || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const extra = (process.env.CPI_MCP_ALLOWED_ROOTS || '').split(path.delimiter).filter(Boolean);
   // Workspace the server was installed into (<workspace>/.agents/mcp-server.mjs) or the repo itself.
   // Needed because CLAUDE_PROJECT_DIR may point to a sub-folder when .mcp.json is inherited from a parent.
   const installRoot = ['.agents', '.claude'].includes(path.basename(SERVER_DIR)) ? path.dirname(SERVER_DIR) : SERVER_DIR;
+  // Strict mode: an explicit CPI_MCP_ROOT (written by setup-skills --mcp) is the only root, plus CPI_MCP_ALLOWED_ROOTS.
+  if (process.env.CPI_MCP_ROOT) {
+    return [...new Set([process.env.CPI_MCP_ROOT, ...extra].map(realOrResolved))];
+  }
+  let primary = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  // A server launched from the home folder or C:\ must not expose the whole disk (LL-019).
+  if (isTooBroadRoot(primary)) primary = installRoot;
   return [...new Set([primary, installRoot, os.tmpdir(), ...extra].map(realOrResolved))];
 }
 
@@ -300,6 +313,8 @@ export const MCP_TOOLS = [
         headers: { type: 'object', description: 'Mapa clave-valor de cabeceras simuladas (ej. {"SapSender": "CRM"}).' },
         properties: { type: 'object', description: 'Mapa clave-valor de propiedades Exchange simuladas.' },
         isJson: { type: 'boolean', description: 'Indica explícitamente si el payload origen es JSON.' },
+        targetXsdContent: { type: 'string', description: 'XSD destino opcional: la salida generada se valida contra él.' },
+        targetXsdPath: { type: 'string', description: 'Ruta al XSD destino (alternativa a targetXsdContent).' },
         outPath: { type: 'string', description: 'Ruta opcional donde guardar el XML de destino simulado.' }
       }
     }
@@ -388,6 +403,8 @@ export const MCP_TOOLS = [
         rawContent: { type: 'string', description: 'Contenido raw de la especificación (formato bloques === PAYLOAD o JSON).' },
         correlateData: { type: 'boolean', description: 'Indica si se valida la coherencia de claves entre contratos (default: true).' },
         correlationKeys: { type: 'array', items: { type: 'string' }, description: 'Claves de correlación (ej. ["orderId", "customerId"]).' },
+        strict: { type: 'boolean', description: 'Si es true, los desajustes de correlación y un número distinto de ejemplos entre contratos son errores (valid:false, sin ZIP).' },
+        timestamp: { type: 'boolean', description: 'Incluir la fecha actual en README/index/ZIP (por defecto la salida es reproducible byte a byte).' },
         outZipPath: { type: 'string', description: 'Ruta opcional donde guardar el archivo .zip de la suite.' },
         outputZipPath: { type: 'string', description: 'Ruta opcional donde guardar el archivo .zip de la suite (alias de outZipPath).' }
       }
@@ -442,7 +459,9 @@ export const MCP_TOOLS = [
 export function executeMcpTool(name, args = {}) {
   switch (name) {
     case 'cpi_inspect_zip': {
-      const report = inspectBundle(args.filePath && args.filePath !== '--demo' ? resolveUserPath(args.filePath) : '--demo', args.extractDir ? resolveUserPath(args.extractDir) : null);
+      const report = inspectBundle(args.filePath === '--demo' ? '--demo' : resolveUserPath(args.filePath), args.extractDir ? resolveUserPath(args.extractDir) : null, {
+        redactExtractedProps: true
+      });
       if (args.pdfPath) {
         const pdfSpec = buildAuditPdfSpec(report);
         const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
@@ -572,7 +591,8 @@ export function executeMcpTool(name, args = {}) {
         mmapContent,
         inputPayload,
         headers: args.headers,
-        properties: args.properties
+        properties: args.properties,
+        targetXsdContent: args.targetXsdContent || (args.targetXsdPath ? fs.readFileSync(resolveUserPath(args.targetXsdPath), 'utf8') : null)
       });
       if (args.outPath && sim.outputXml) {
         fs.mkdirSync(path.dirname(resolveUserPath(args.outPath)), { recursive: true });
@@ -667,7 +687,9 @@ export function executeMcpTool(name, args = {}) {
       }
       const res = validateAndBuildMockSuiteZip(payloads, {
         correlateData: args.correlateData !== false,
-        correlationKeys
+        correlationKeys,
+        strict: args.strict === true,
+        generatedAt: args.timestamp === true ? new Date() : null
       });
       const targetZip = args.outputZipPath || args.outZipPath;
       if (targetZip && res.zipBuffer) {
@@ -740,22 +762,79 @@ export function readMcpResource(uri) {
   throw new Error(`Recurso MCP no encontrado: ${uri}`);
 }
 
+export const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+
+/** JSON-RPC error carrying a code (-32602 invalid params, -32601 not found, ...). */
+export class JsonRpcError extends Error {
+  constructor(code, message, data) {
+    super(message);
+    this.code = code;
+    this.data = data;
+  }
+}
+
+const rpcError = (id, code, message, data) => ({ jsonrpc: '2.0', id: id ?? null, error: { code, message, ...(data ? { data } : {}) } });
+
+/** Checks tools/call arguments against the tool's inputSchema (required + primitive types). */
+export function validateToolArguments(toolName, args) {
+  const tool = MCP_TOOLS.find((t) => t.name === toolName);
+  if (!tool) throw new JsonRpcError(-32602, `Unknown tool: ${toolName}`);
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+    throw new JsonRpcError(-32602, `Invalid params: 'arguments' de ${toolName} debe ser un objeto.`);
+  }
+  const schema = tool.inputSchema || {};
+  const missing = (schema.required || []).filter((k) => args[k] === undefined || args[k] === null || args[k] === '');
+  if (missing.length) {
+    throw new JsonRpcError(-32602, `Invalid params: faltan campos obligatorios en ${toolName}: ${missing.join(', ')}`, { missing });
+  }
+  const typeOf = (v) => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v === 'number' && Number.isInteger(v) ? 'integer' : typeof v);
+  const wrong = [];
+  for (const [k, v] of Object.entries(args)) {
+    const want = schema.properties?.[k]?.type;
+    if (!want || v === undefined) continue;
+    const got = typeOf(v);
+    const ok = want === got || (want === 'number' && got === 'integer') || (Array.isArray(want) && want.includes(got));
+    if (!ok) wrong.push(`${k} (esperado ${want}, recibido ${got})`);
+  }
+  if (wrong.length) throw new JsonRpcError(-32602, `Invalid params en ${toolName}: ${wrong.join('; ')}`);
+}
+
+/**
+ * Entry point for one parsed JSON-RPC value. Handles batches (arrays) and invalid requests (-32600).
+ * Returns the response object/array, or null when nothing must be sent (notifications).
+ */
+export function handleJsonRpcPayload(payload) {
+  if (Array.isArray(payload)) {
+    if (payload.length === 0) return rpcError(null, -32600, 'Invalid Request: empty batch');
+    const out = payload.map((m) => handleJsonRpcMessage(m)).filter(Boolean);
+    return out.length ? out : null;
+  }
+  return handleJsonRpcMessage(payload);
+}
+
 export function handleJsonRpcMessage(msg) {
-  if (!msg || typeof msg !== 'object') return null;
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
+    return rpcError(null, -32600, 'Invalid Request: el mensaje debe ser un objeto JSON-RPC 2.0');
+  }
   const { id, method, params } = msg;
 
   // Notifications have no id and expect no response
-  if (id === undefined || id === null) {
+  if (id === undefined) {
     return null;
+  }
+  if (typeof method !== 'string' || (id !== null && typeof id !== 'string' && typeof id !== 'number')) {
+    return rpcError(id, -32600, 'Invalid Request: falta method o id inválido');
   }
 
   try {
     if (method === 'initialize') {
+      const requested = params?.protocolVersion;
       return {
         jsonrpc: '2.0',
         id,
         result: {
-          protocolVersion: params?.protocolVersion || '2024-11-05',
+          // Echo the client's version when supported; otherwise answer with our latest (MCP version negotiation).
+          protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(requested) ? requested : SUPPORTED_PROTOCOL_VERSIONS[0],
           capabilities: {
             tools: { listChanged: false },
             resources: { subscribe: false, listChanged: false },
@@ -779,8 +858,16 @@ export function handleJsonRpcMessage(msg) {
 
     if (method === 'tools/call') {
       const toolName = params?.name;
-      const toolArgs = params?.arguments || {};
-      const data = executeMcpTool(toolName, toolArgs);
+      const toolArgs = params?.arguments === undefined ? {} : params.arguments;
+      if (typeof toolName !== 'string') throw new JsonRpcError(-32602, "Invalid params: falta 'name'");
+      validateToolArguments(toolName, toolArgs);
+      let data;
+      try {
+        data = executeMcpTool(toolName, toolArgs);
+      } catch (err) {
+        // Tool execution failures are reported in-band (MCP spec), protocol errors as JSON-RPC errors.
+        return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `Error ejecutando ${toolName}: ${err.message}` }], isError: true } };
+      }
       return {
         jsonrpc: '2.0',
         id,
@@ -797,7 +884,13 @@ export function handleJsonRpcMessage(msg) {
 
     if (method === 'resources/read') {
       const uri = params?.uri;
-      const text = readMcpResource(uri);
+      if (typeof uri !== 'string') throw new JsonRpcError(-32602, "Invalid params: falta 'uri'");
+      let text;
+      try {
+        text = readMcpResource(uri);
+      } catch (err) {
+        throw new JsonRpcError(-32002, err.message, { uri });
+      }
       return {
         jsonrpc: '2.0',
         id,
@@ -822,6 +915,7 @@ export function handleJsonRpcMessage(msg) {
 
     if (method === 'prompts/get') {
       const promptName = params?.name;
+      if (!SKILL_IDS.includes(promptName)) throw new JsonRpcError(-32602, `Invalid params: prompt desconocido: ${promptName}`);
       const text = readMcpResource(`cpi://skills/${promptName}`);
       return {
         jsonrpc: '2.0',
@@ -839,14 +933,8 @@ export function handleJsonRpcMessage(msg) {
       error: { code: -32601, message: `Method not found: ${method}` }
     };
   } catch (err) {
-    return {
-      jsonrpc: '2.0',
-      id,
-      result: {
-        content: [{ type: 'text', text: `Error ejecutando ${method}: ${err.message}` }],
-        isError: true
-      }
-    };
+    if (err instanceof JsonRpcError) return rpcError(id, err.code, err.message, err.data);
+    return rpcError(id, -32603, `Internal error en ${method}: ${err.message}`);
   }
 }
 
@@ -899,6 +987,16 @@ if (isMain) {
     }
   };
 
+  const parseAndHandle = (text) => {
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch (err) {
+      return rpcError(null, -32700, `Parse error: ${err.message}`);
+    }
+    return handleJsonRpcPayload(payload);
+  };
+
   process.stdin.on('data', (chunk) => {
     buffer = Buffer.concat([buffer, chunk]);
 
@@ -911,24 +1009,14 @@ if (isMain) {
         if (buffer.length < headerByteLen + bodyByteLen) break;
         const bodyStr = buffer.subarray(headerByteLen, headerByteLen + bodyByteLen).toString('utf8');
         buffer = buffer.subarray(headerByteLen + bodyByteLen);
-        try {
-          const msg = JSON.parse(bodyStr);
-          sendResponse(handleJsonRpcMessage(msg));
-        } catch {
-          // ignore malformed frame
-        }
+        sendResponse(parseAndHandle(bodyStr));
       } else {
         const nlIdx = buffer.indexOf(0x0a); // '\n'
         if (nlIdx === -1) break;
         const lineStr = buffer.subarray(0, nlIdx).toString('utf8').trim();
         buffer = buffer.subarray(nlIdx + 1);
         if (!lineStr) continue;
-        try {
-          const msg = JSON.parse(lineStr);
-          sendResponse(handleJsonRpcMessage(msg));
-        } catch {
-          // ignore non-JSON line
-        }
+        sendResponse(parseAndHandle(lineStr));
       }
     }
   });

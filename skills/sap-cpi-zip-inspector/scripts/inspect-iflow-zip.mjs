@@ -34,7 +34,9 @@ export function parseManifestContent(manifestText) {
   }
 
   return {
-    symbolicName: result['Bundle-SymbolicName'] || 'Desconocido',
+    // OSGi directives ('; singleton:=true') are kept apart so reports show the bare identifier.
+    symbolicName: (result['Bundle-SymbolicName'] || '').split(';')[0].trim() || 'Desconocido',
+    symbolicNameDirectives: (result['Bundle-SymbolicName'] || '').split(';').slice(1).map((d) => d.trim()).filter(Boolean),
     version: result['Bundle-Version'] || '1.0.0',
     name: result['Bundle-Name'] || 'iFlow Bundle',
     bundleType: result['SAP-BundleType'] || 'IntegrationFlow',
@@ -241,15 +243,21 @@ export function analyzeIflwLocally(iflwXml) {
       /key\s*=\s*"activityType"\s+value\s*=\s*"ExternalCall"/i.test(inner) ||
       /<key>activityType<\/key>\s*<value>ExternalCall<\/value>/i.test(inner);
     if (isExternalCall) {
+      // The timeout is a property of the RECEIVER CHANNEL (messageFlow, linked by sourceRef or targetRef).
+      // A timeout written on the serviceTask itself is ignored by the CPI runtime (LL-024).
       const connectedFlows = (attrs.id && messageFlowsByRef.get(attrs.id)) || [];
-      const combinedXml = [inner, ...connectedFlows].join('\n');
-      const hasTimeout =
-        /key\s*=\s*"[^"]*timeout[^"]*"\s+value\s*=\s*"(?:[1-9]\d*|\{\{[^}]+\}\})"/i.test(combinedXml) ||
-        /<key>[^<]*timeout[^<]*<\/key>\s*<value>(?:[1-9]\d*|\{\{[^}]+\}\})<\/value>/i.test(combinedXml);
-      if (!hasTimeout) {
+      const timeoutRx = [
+        /key\s*=\s*"[^"]*timeout[^"]*"\s+value\s*=\s*"(?:[1-9]\d*|\{\{[^}]+\}\})"/i,
+        /<key>[^<]*timeout[^<]*<\/key>\s*<value>(?:[1-9]\d*|\{\{[^}]+\}\})<\/value>/i
+      ];
+      const hasTimeoutIn = (x) => timeoutRx.some((r) => r.test(x));
+      const channelXml = connectedFlows.join('\n');
+      if (!hasTimeoutIn(channelXml)) {
         syncTasksWithoutTimeout.push({
           id: attrs.id || 'ServiceTask',
-          name: attrs.name || attrs.id || 'ServiceTask'
+          name: attrs.name || attrs.id || 'ServiceTask',
+          ...(hasTimeoutIn(inner) ? { note: 'timeout definido en la tarea: CPI lo ignora, muévelo al canal receptor (messageFlow)' } : {}),
+          ...(connectedFlows.length === 0 ? { note: 'sin canal receptor (messageFlow) conectado' } : {})
         });
       }
     }
@@ -441,7 +449,9 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
     for (const entry of entries) {
       const destPath = resolveInside(targetRoot, entry.path); // zip-slip guard
       fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.writeFileSync(destPath, entry.data);
+      const isProp = entry.path.toLowerCase().endsWith('.prop');
+      // MCP passes redactExtractedProps so .prop values never reach disk in clear text through the agent.
+      fs.writeFileSync(destPath, isProp && options.redactExtractedProps ? redactPropText(entry.text ?? entry.data.toString('utf8')) : entry.data);
     }
   }
 
@@ -872,7 +882,13 @@ export function buildAuditPdfSpec(report) {
 /**
  * Aplica al paquete .zip únicamente las correcciones autorizadas por el usuario y genera un nuevo .zip
  */
+export const REMEDIATION_IDS = ['manifest', 'https', 'timeouts', 'streaming', 'csrf', 'all'];
+
 export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], outZipPath) {
+  const unknownFixes = selectedFixes.map((s) => String(s).trim().toLowerCase()).filter((s) => s && !REMEDIATION_IDS.includes(s));
+  if (unknownFixes.length) {
+    throw new Error(`Remediación desconocida: ${unknownFixes.join(', ')}. Valores válidos: ${REMEDIATION_IDS.join(', ')}.`);
+  }
   let entries = [];
   if (inputPathOrDemo === '--demo') {
     entries = readZipEntries(buildDemoBundleZipBuffer());
@@ -908,7 +924,10 @@ export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], out
     if ((applyAll || fixSet.has('manifest')) && relPath === 'META-INF/MANIFEST.MF') {
       // Keeps blank-line separated sections ("Name:" per-entry sections) intact (LL: manifest refold).
       contentBuf = Buffer.from(refoldManifest(entry.text || ''), 'utf8');
-      appliedChanges.push('manifest: Normalizada raíz META-INF/MANIFEST.MF y plegado a 72 bytes UTF-8');
+      // Only report the fix when it actually changed something (idempotent second pass = no changelog).
+      if (prefixToStrip || !contentBuf.equals(entry.data)) {
+        appliedChanges.push('manifest: Normalizada raíz META-INF/MANIFEST.MF y plegado a 72 bytes UTF-8');
+      }
     } else if (relPath.toLowerCase().endsWith('.iflw')) {
       let xml = entry.text || contentBuf.toString('utf8');
 
@@ -955,9 +974,14 @@ export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], out
           if (isExternalCall && idm) externalCallIds.add(idm[1]);
         }
         const skipped = [];
+        const linked = new Set();
         xml = xml.replace(/<bpmn2:messageFlow\b([^>]*)>([\s\S]*?)<\/bpmn2:messageFlow>/gi, (flowBlock, attrs, inner) => {
-          const src = (attrs.match(/\bsourceRef\s*=\s*"([^"]+)"/) || [])[1];
-          if (!src || !externalCallIds.has(src)) return flowBlock;
+          // A receiver channel may reference the Request-Reply task as sourceRef OR targetRef (same rule as the audit).
+          const srcRef = (attrs.match(/\bsourceRef\s*=\s*"([^"]+)"/) || [])[1];
+          const tgtRef = (attrs.match(/\btargetRef\s*=\s*"([^"]+)"/) || [])[1];
+          const src = externalCallIds.has(srcRef) ? srcRef : externalCallIds.has(tgtRef) ? tgtRef : null;
+          if (!src) return flowBlock;
+          linked.add(src);
           if (/<key>[^<]*timeout[^<]*<\/key>/i.test(inner) || /key\s*=\s*"[^"]*timeout/i.test(inner)) return flowBlock;
           const comp = (inner.match(/<key>ComponentType<\/key>\s*<value>([^<]*)<\/value>/i) || [])[1] || '';
           if (comp.toUpperCase() !== 'HTTP' || !/<\/bpmn2:extensionElements>/i.test(inner)) {
@@ -969,6 +993,7 @@ export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], out
             '    <ifl:property>\n                    <key>httpRequestTimeout</key>\n                    <value>60000</value>\n                </ifl:property>\n            </bpmn2:extensionElements>'
           );
         });
+        for (const id of externalCallIds) if (!linked.has(id)) skipped.push(`${id} (sin canal receptor messageFlow)`);
         if (xml !== before) appliedChanges.push('timeouts: Añadido httpRequestTimeout=60000 ms en el canal receptor HTTP (messageFlow) de las llamadas Request-Reply');
         if (skipped.length) appliedChanges.push(`timeouts: revisión manual necesaria (adaptador no HTTP o sin extensionElements): ${skipped.join(', ')}`);
       }
@@ -1012,10 +1037,12 @@ const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log(
       'Uso: node inspect-iflow-zip.mjs <archivo.zip | archivo.iflw | --demo> [--pdf <informe.pdf>] [--remediate <manifest,https,timeouts,streaming,csrf|all> --out < Corregido.zip>] [--extract-dir <carpeta>] [--show-prop-values] [--json]'
     );
-    process.exit(0);
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   const target = args[0];
@@ -1029,6 +1056,11 @@ if (isMain) {
   const remSpec = remIdx !== -1 ? (args[remIdx + 1] || 'all').split(',') : null;
   const outIdx = args.indexOf('--out');
   const outZipPath = outIdx !== -1 ? args[outIdx + 1] : null;
+
+  if (remSpec && !outZipPath) {
+    console.error('Error: --remediate necesita --out <Corregido.zip> (la remediación nunca sobrescribe el origen).');
+    process.exit(2);
+  }
 
   try {
     let report = inspectBundle(target, extractDir, { showPropValues });
@@ -1076,9 +1108,19 @@ if (isMain) {
         console.log(`3. Parámetros Sensibles/URLs Hardcoded: ${report.heuristics.hardcodedSensitivePatterns.length} detectado(s)`);
         report.heuristics.hardcodedSensitivePatterns.forEach((h) => console.log(`   - [ALTA] ${h.key}: ${h.val} (${h.reason})`));
         console.log(`4. Request-Reply sin Timeout: ${report.heuristics.syncTasksWithoutTimeout.length} detectado(s)`);
-        report.heuristics.syncTasksWithoutTimeout.forEach((t) => console.log(`   - [MEDIA] Task: ${t.name} (${t.id})`));
+        report.heuristics.syncTasksWithoutTimeout.forEach((t) => console.log(`   - [MEDIA] Task: ${t.name} (${t.id})${t.note ? ` — ${t.note}` : ''}`));
         console.log(`5. Content Modifiers copiando \${body} a Property: ${report.heuristics.contentModifiersReadingBodyToProperty.length} detectado(s)`);
         report.heuristics.contentModifiersReadingBodyToProperty.forEach((cm) => console.log(`   - [CRÍTICO] ${cm.key} = ${cm.val}`));
+        // Console parity with --json / PDF (BUG-07): every heuristic that lowers the score is printed.
+        const h = report.heuristics;
+        console.log(`5b. Canales con Basic Auth: ${(h.basicAuthChannels || []).length} detectado(s)`);
+        (h.basicAuthChannels || []).forEach((c) => console.log(`   - [MEDIA] ${c.channel || c.key} (${c.adapter || 'adaptador'}): ${c.reason}`));
+        console.log(`5c. Canales HTTP/HTTPS sin protección CSRF: ${(h.csrfDisabledChannels || []).length} detectado(s)`);
+        (h.csrfDisabledChannels || []).forEach((c) => console.log(`   - [ALTA] ${c.key} = ${c.val}`));
+        console.log(`5d. Splitters sin streaming: ${(h.splittersWithoutStreaming || []).length} detectado(s)`);
+        (h.splittersWithoutStreaming || []).forEach((s) => console.log(`   - [ALTA] Splitter: ${s.name} (${s.id})`));
+        console.log(`5e. Routers sin ruta por defecto: ${(h.routersWithoutDefaultRoute || []).length} detectado(s)`);
+        (h.routersWithoutDefaultRoute || []).forEach((r) => console.log(`   - [MEDIA] Router: ${r.name} (${r.id})`));
         if (report.heuristics.referencedScriptCollections?.length > 0 || report.heuristics.referencedScripts?.length > 0) {
           console.log(`6. Dependencias de Scripts:`);
           if (report.heuristics.referencedScriptCollections?.length > 0) {

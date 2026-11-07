@@ -11,7 +11,7 @@
 import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
-import { lintGroovyScript, readTextFileSafely } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
+import { lintGroovyScript, readTextFileSafely, normalizeGroovyVersion } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
 
 export const SAMPLE_VULNERABLE_GROOVY = `import com.sap.gateway.ip.core.customdev.util.Message
 import java.util.*
@@ -123,11 +123,39 @@ const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso: node audit-groovy.mjs <original.groovy | --demo> [--refactored <refactored.groovy>] [--json]');
-    process.exit(0);
+    // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
+    const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
+    console.log('Uso: node audit-groovy.mjs <original.groovy | --demo> [--refactored <refactored.groovy>] [--groovy 2.4|4] [--json]');
+    process.exit(args.length === 0 ? 2 : 0);
   }
 
   const jsonFlag = args.includes('--json');
+  const fail = (msg) => {
+    console.error(`Error: ${msg}`);
+    process.exit(2);
+  };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--refactored' || a === '--groovy') {
+      if (args[i + 1] === undefined || args[i + 1].startsWith('--')) fail(`${a} requiere un valor.`);
+      i++;
+    } else if (a.startsWith('--') && !['--json', '--demo'].includes(a)) {
+      fail(`Argumento desconocido: ${a}. Usa --help.`);
+    }
+  }
+  const gIdx = args.indexOf('--groovy');
+  const groovyVersion = gIdx !== -1 ? normalizeGroovyVersion(args[gIdx + 1]) : undefined;
+  if (gIdx !== -1 && !groovyVersion) fail('--groovy debe ser 2.4 o 4.');
+  const lintOptions = groovyVersion ? { groovyVersion } : {};
+  const readGroovyFile = (p, label) => {
+    if (!fs.existsSync(p)) {
+      console.error(`Archivo ${label} no encontrado: ${p}`);
+      process.exit(1);
+    }
+    if (fs.statSync(p).isDirectory()) fail(`${p} es una carpeta. Pasa un archivo .groovy (para carpetas o .zip usa validate-groovy.mjs).`);
+    if (/\.zip$/i.test(p)) fail(`${path.basename(p)} es un .zip. El auditor compara scripts sueltos; extrae el .groovy o usa validate-groovy.mjs <paquete.zip>.`);
+    return readTextFileSafely(p);
+  };
   const isDemo = args[0] === '--demo';
 
   let originalCode = '';
@@ -140,28 +168,21 @@ if (isMain) {
     refactoredCode = SAMPLE_REFACTORED_GROOVY;
     refactoredName = 'RefactoredScript.groovy';
   } else {
+    if (args[0].startsWith('--')) fail('El primer argumento debe ser el script original o --demo.');
     const origPath = path.resolve(args[0]);
-    if (!fs.existsSync(origPath)) {
-      console.error(`Archivo original no encontrado: ${origPath}`);
-      process.exit(1);
-    }
-    originalCode = readTextFileSafely(origPath);
+    originalCode = readGroovyFile(origPath, 'original');
     originalName = path.basename(origPath);
 
     const refIdx = args.indexOf('--refactored');
     if (refIdx !== -1 && args[refIdx + 1]) {
       const refPath = path.resolve(args[refIdx + 1]);
-      if (!fs.existsSync(refPath)) {
-        console.error(`Archivo refactorizado no encontrado: ${refPath}`);
-        process.exit(1);
-      }
-      refactoredCode = readTextFileSafely(refPath);
+      refactoredCode = readGroovyFile(refPath, 'refactorizado');
       refactoredName = path.basename(refPath);
     }
   }
 
-  const origAudit = lintGroovyScript(originalCode, originalName);
-  const refAudit = refactoredCode ? lintGroovyScript(refactoredCode, refactoredName) : null;
+  const origAudit = lintGroovyScript(originalCode, originalName, lintOptions);
+  const refAudit = refactoredCode ? lintGroovyScript(refactoredCode, refactoredName, lintOptions) : null;
   const comparison = compareAuditResults(origAudit, refAudit);
 
   if (jsonFlag) {

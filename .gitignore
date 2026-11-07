@@ -26,3 +26,19 @@ Desktop.ini
 .idea/
 *.swp
 *.swo
+
+# Desarrollo interno del pack (no necesario para usar las skills)
+# Suite de pruebas, fixtures, catálogo de prompts e informes de los bots de test
+tests/
+coverage/
+.nyc_output/
+*.test-output
+# Documentos de trabajo del desarrollo (análisis de gaps y plan de pruebas)
+docs/GAP_ANALYSIS_*.md
+docs/TEST_PLAN_PROMPT.md
+
+# Instalaciones locales generadas por setup-skills.mjs al apuntar a este mismo repo
+.agents/
+.claude/
+.cursor/
+.mcp.json

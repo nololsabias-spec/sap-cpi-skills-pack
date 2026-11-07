@@ -31,7 +31,7 @@ node mcp-server.mjs --self-test  # Autoverificación de las 20 tools y 9 resourc
 
 | Variable | Efecto |
 | :--- | :--- |
-| `CPI_MCP_ROOT` | Raíz principal del workspace. Si no se define, se usa `CLAUDE_PROJECT_DIR` o el directorio de trabajo. También se permite siempre el workspace donde está instalado el servidor (`<workspace>/.agents/`). |
+| `CPI_MCP_ROOT` | Raíz principal del workspace. `setup-skills.mjs --mcp` la fija en `.mcp.json` (`env.CPI_MCP_ROOT`) para que el sandbox no dependa del cwd del cliente. Si no se define, se usa `CLAUDE_PROJECT_DIR` o el directorio de trabajo. También se permite siempre el workspace donde está instalado el servidor (`<workspace>/.agents/`). |
 | `CPI_MCP_ALLOWED_ROOTS` | Raíces adicionales, separadas por el delimitador de rutas del SO (`;` en Windows, `:` en Unix). |
 | `CPI_MCP_UNSAFE_PATHS=1` | Desactiva la restricción (no recomendado). |
 
