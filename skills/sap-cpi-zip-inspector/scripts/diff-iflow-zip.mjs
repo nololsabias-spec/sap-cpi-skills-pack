@@ -13,6 +13,7 @@
  *   node diff-iflow-zip.mjs --demo [--pdf <diff.pdf>] [--json]
  *   node diff-iflow-zip.mjs <v1.zip> <v2.zip> [--pdf <diff.pdf>] [--show-prop-values] [--json]
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { inspectBundle, buildDemoBundleZipBuffer } from './inspect-iflow-zip.mjs';
@@ -68,8 +69,12 @@ function parsePropLines(propText) {
 }
 
 export function compareIflowBundles(bundlePathA, bundlePathB, options = {}) {
-  const reportA = inspectBundle(bundlePathA, null, options);
-  const reportB = inspectBundle(bundlePathB, null, options);
+  // Real values are needed in memory to detect MODIFIED parameters; they are masked on output
+  // unless options.showPropValues is set (S4: .prop values never leave the process by default).
+  const reveal = Boolean(options.showPropValues);
+  const mask = (v) => (reveal ? v : '[REDACTED]');
+  const reportA = inspectBundle(bundlePathA, null, { ...options, showPropValues: true });
+  const reportB = inspectBundle(bundlePathB, null, { ...options, showPropValues: true });
 
   // 1. Manifest Diff
   const manifestDiff = {
@@ -130,14 +135,14 @@ export function compareIflowBundles(bundlePathA, bundlePathB, options = {}) {
 
   for (const [key, valB] of propsB.entries()) {
     if (!propsA.has(key)) {
-      addedParams.push({ key, value: valB });
+      addedParams.push({ key, value: mask(valB) });
     } else if (propsA.get(key) !== valB) {
-      modifiedParams.push({ key, oldValue: propsA.get(key), newValue: valB });
+      modifiedParams.push({ key, oldValue: mask(propsA.get(key)), newValue: mask(valB) });
     }
   }
   for (const [key, valA] of propsA.entries()) {
     if (!propsB.has(key)) {
-      removedParams.push({ key, value: valA });
+      removedParams.push({ key, value: mask(valA) });
     }
   }
 
@@ -263,7 +268,7 @@ export function buildDiffPdfSpec(diffResult) {
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {

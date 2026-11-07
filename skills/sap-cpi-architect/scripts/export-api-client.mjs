@@ -10,12 +10,18 @@
  *   node export-api-client.mjs --demo [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--json]
  *   node export-api-client.mjs <iflow.zip> [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--json]
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { inspectBundle, buildDemoBundleZipBuffer } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
 
-export function extractParametersMap(report) {
+/**
+ * Map of externalized parameters. By default values are NOT resolved: each key maps to the
+ * Postman/OpenAPI placeholder {{key}} so real hosts from parameters.prop never end up in exported
+ * files or MCP responses. Pass { resolveParams: true } to embed the configured values.
+ */
+export function extractParametersMap(report, { resolveParams = false } = {}) {
   const map = {};
   const propEntry = (report.catalog?.parameterFiles || []).find((f) => f.path.endsWith('parameters.prop'));
   const rawText = propEntry?.content || propEntry?.text || '';
@@ -28,7 +34,7 @@ export function extractParametersMap(report) {
       if (eqIdx !== -1) {
         const k = trimmed.slice(0, eqIdx).trim();
         const v = trimmed.slice(eqIdx + 1).trim();
-        map[k] = v;
+        map[k] = resolveParams ? v : `{{${k}}}`;
       }
     }
   }
@@ -201,6 +207,7 @@ export function extractOutboundEndpointsFromIflw(iflwXml, propMap = {}) {
 }
 
 export function extractIflowEndpointsSummary(bundlePathOrBuf, options = {}) {
+  const { resolveParams = false } = options;
   const target = bundlePathOrBuf === '--demo' ? buildDemoBundleZipBuffer() : bundlePathOrBuf;
   const report = inspectBundle(target, null, { showPropValues: true });
 
@@ -223,7 +230,7 @@ export function extractIflowEndpointsSummary(bundlePathOrBuf, options = {}) {
     };
   }
 
-  const propMap = extractParametersMap(report);
+  const propMap = extractParametersMap(report, { resolveParams });
   const inbounds = extractInboundEndpointsFromIflw(iflwXml, propMap, { allowFallback: false });
   const outbounds = extractOutboundEndpointsFromIflw(iflwXml, propMap);
 
@@ -567,9 +574,9 @@ export function generateOpenApiSpec(report, options = {}) {
 }
 
 export function exportApiClientContracts(bundlePathOrBuf, options = {}) {
-  const { format = 'both', outDir = null, baseUrl = null, authType = 'basic' } = options;
+  const { format = 'both', outDir = null, baseUrl = null, authType = 'basic', resolveParams = false } = options;
   const report = inspectBundle(bundlePathOrBuf, null, { showPropValues: true });
-  const propMap = extractParametersMap(report);
+  const propMap = extractParametersMap(report, { resolveParams });
 
   const postman = format === 'postman' || format === 'both' ? generatePostmanCollection(report, { baseUrl, authType, propMap }) : null;
   const openapi = format === 'openapi' || format === 'both' ? generateOpenApiSpec(report, { baseUrl, propMap }) : null;
@@ -603,13 +610,13 @@ export function exportApiClientContracts(bundlePathOrBuf, options = {}) {
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso 1 (Demo): node export-api-client.mjs --demo [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--json]');
-    console.log('Uso 2 (iFlow): node export-api-client.mjs <iflow.zip> [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--json]');
-    console.log('Uso 3 (Endpoints): node export-api-client.mjs <iflow.zip|--demo> --endpoints [--json]');
+    console.log('Uso 1 (Demo): node export-api-client.mjs --demo [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--resolve-params] [--json]');
+    console.log('Uso 2 (iFlow): node export-api-client.mjs <iflow.zip> [--format postman|openapi|both] [--out-dir <dir>] [--base-url <url>] [--resolve-params] [--json]');
+    console.log('Uso 3 (Endpoints): node export-api-client.mjs <iflow.zip|--demo> --endpoints [--resolve-params] [--json]');
     process.exit(0);
   }
 
@@ -618,7 +625,7 @@ if (isMain) {
   const target = args[0] === '--demo' ? buildDemoBundleZipBuffer() : args[0];
 
   if (endpointsFlag) {
-    const res = extractIflowEndpointsSummary(target);
+    const res = extractIflowEndpointsSummary(target, { resolveParams: args.includes('--resolve-params') });
     if (jsonFlag) {
       console.log(JSON.stringify(res, null, 2));
     } else {
@@ -648,7 +655,7 @@ if (isMain) {
   const outDir = getOpt('--out-dir', null);
   const baseUrl = getOpt('--base-url', null);
 
-  const res = exportApiClientContracts(target, { format, outDir, baseUrl });
+  const res = exportApiClientContracts(target, { format, outDir, baseUrl, resolveParams: args.includes('--resolve-params') });
 
   if (jsonFlag) {
     console.log(JSON.stringify(res, null, 2));

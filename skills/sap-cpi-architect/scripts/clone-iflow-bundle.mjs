@@ -10,9 +10,11 @@
  *   node clone-iflow-bundle.mjs --source <source.zip> --target-name <New_iFlow_Name> --out <output.zip> [--replace <old=new> ...] [--xpath <oldXpath=newXpath>]
  *   node clone-iflow-bundle.mjs --update-sc <source-sc.zip> --scripts-dir <dir> --out <output-sc.zip>
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readZipEntries, createZipBuffer } from '../../../shared/zip-utils.mjs';
+import { refoldManifest, getManifestHeader } from '../../../shared/manifest-utils.mjs';
 import { lintGroovyScript } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
 import { buildDemoBundleZipBuffer, inspectBundle } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
 import { validateXsdForSapCpi } from '../../sap-cpi-xsd-studio/scripts/validate-xsd.mjs';
@@ -63,7 +65,9 @@ export function cloneIflowBundleZip(sourceZipPathOrBuf, options = {}) {
   const entries = readZipEntries(sourceZipPathOrBuf);
   const rootPrefix = detectRootFolderPrefix(entries);
   const manifestEntry = entries.find((e) => e.path.endsWith('META-INF/MANIFEST.MF'));
-  const symbolicMatch = manifestEntry?.text?.match(/Bundle-SymbolicName:\s*([^\s;\r\n]+)/);
+  // Read the UNFOLDED header: a long SymbolicName is split across 72-byte continuation lines.
+  const symbolicHeader = manifestEntry ? getManifestHeader(manifestEntry.text, 'Bundle-SymbolicName') : null;
+  const symbolicMatch = symbolicHeader ? symbolicHeader.match(/^([^\s;]+)/) : null;
   const iflwEntry = entries.find((e) => e.path.toLowerCase().endsWith('.iflw'));
 
   const oldName =
@@ -95,7 +99,15 @@ export function cloneIflowBundleZip(sourceZipPathOrBuf, options = {}) {
     ) {
       let text = entry.text;
       if (targetName !== oldName) {
-        text = text.split(oldName).join(targetName);
+        // Whole-identifier replacement: "Order" must not corrupt "OrderItem_Mapping" or "PurchaseOrder".
+        const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const idRx = new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, 'g');
+        if (newPath === 'META-INF/MANIFEST.MF') {
+          // Unfold first (the name may be split across 72-byte continuation lines), then refold.
+          text = refoldManifest(text, (line) => line.replace(idRx, targetName));
+        } else {
+          text = text.replace(idRx, targetName);
+        }
       }
 
       if (newPath.endsWith('.iflw')) {
@@ -181,7 +193,7 @@ export function updateScriptCollectionBundleZip(sourceScZipPathOrBuf, newScripts
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {

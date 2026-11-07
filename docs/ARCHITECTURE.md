@@ -50,7 +50,7 @@ La carpeta `shared/` y `mcp-server.mjs` se ubican al mismo nivel jerárquico que
 ```text
 <proyecto-destino>/
 ├── AGENTS.md                                # OpenAI Codex CLI / GPT Agents / Antigravity
-├── .mcp.json                                # Autodescubrimiento MCP (Claude Code / Desktop)
+├── .mcp.json                                # Autodescubrimiento MCP (Claude Code; ruta absoluta al servidor)
 ├── .agents/
 │   ├── mcp-server.mjs                       # Servidor MCP local (stdio JSON-RPC 2.0)
 │   ├── rules/sap-cpi-continuous-learning.md # Harness de auto-mejora continua

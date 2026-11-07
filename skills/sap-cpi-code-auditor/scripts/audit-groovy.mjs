@@ -8,6 +8,7 @@
  *   node audit-groovy.mjs <original.groovy> [--refactored <refactored.groovy>] [--json]
  *   node audit-groovy.mjs --demo
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { lintGroovyScript, readTextFileSafely } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
@@ -118,7 +119,7 @@ export function compareAuditResults(originalAudit, refactoredAudit = null) {
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {

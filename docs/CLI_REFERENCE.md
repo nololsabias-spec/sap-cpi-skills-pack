@@ -17,7 +17,7 @@ node setup-skills.mjs [--target <directorio>] [--agent all|both|antigravity|clau
 | :--- | :--- |
 | `--target <dir>` | Ruta del proyecto donde se instalarán las skills y reglas (por defecto: directorio actual). |
 | `--agent <tipo>` | Ecosistema destino: `all` (todos los IDEs/IAs), `both` (`.agents` + `.claude`), `antigravity`, `claude`, `codex` (`AGENTS.md`), `cursor` (`.cursor/rules/*.mdc`), `copilot` (`.github/copilot-instructions.md`), `windsurf` (`.windsurf/rules/`) o `cline` (`.clinerules/`). |
-| `--mcp` | Registra automáticamente el servidor MCP local (`node .agents/mcp-server.mjs`) en `.mcp.json`, `.cursor/mcp.json` y `.vscode/mcp.json`. |
+| `--mcp` | Registra automáticamente el servidor MCP local (`node <ruta-absoluta>/.agents/mcp-server.mjs`) en `.mcp.json` y `.cursor/mcp.json`, y con `${workspaceFolder}/.agents/mcp-server.mjs` en `.vscode/mcp.json`. La ruta absoluta evita `CONNECTION_CLOSED` cuando el IDE se abre desde una subcarpeta (Claude Code hereda el `.mcp.json` de carpetas padre). |
 
 ### 1.1b. `mcp-server.mjs` (Servidor MCP Local `stdio` JSON-RPC 2.0)
 Expone los 20 motores deterministas como herramientas MCP (`tools/list`, `tools/call`) y las 8 `SKILL.md` como recursos y prompts MCP (`resources/list`, `prompts/list`).
@@ -26,6 +26,16 @@ Expone los 20 motores deterministas como herramientas MCP (`tools/list`, `tools/
 node mcp-server.mjs              # Modo servidor stdio (invocado automáticamente por el IDE)
 node mcp-server.mjs --self-test  # Autoverificación de las 20 tools y 9 resources MCP
 ```
+
+**Raíces de ficheros permitidas (seguridad)**: toda ruta recibida por una herramienta MCP debe estar dentro de una raíz permitida; si no, la llamada devuelve error.
+
+| Variable | Efecto |
+| :--- | :--- |
+| `CPI_MCP_ROOT` | Raíz principal del workspace. Si no se define, se usa `CLAUDE_PROJECT_DIR` o el directorio de trabajo. También se permite siempre el workspace donde está instalado el servidor (`<workspace>/.agents/`). |
+| `CPI_MCP_ALLOWED_ROOTS` | Raíces adicionales, separadas por el delimitador de rutas del SO (`;` en Windows, `:` en Unix). |
+| `CPI_MCP_UNSAFE_PATHS=1` | Desactiva la restricción (no recomendado). |
+
+El directorio temporal del sistema siempre está permitido. `setup-skills.mjs --mcp` registra el servidor con ruta absoluta, de modo que arranca aunque el IDE se abra desde otro directorio.
 
 ### 1.2. `verify-all.mjs` (Suite de Auto-Verificación)
 Ejecuta pruebas integrales sobre los 16 módulos deterministas y el servidor MCP creando artefactos sintéticos en memoria/temporal y verificando su salida.
@@ -76,7 +86,8 @@ Valida estáticamente uno o varios scripts Groovy de SAP CPI (archivo individual
 
 ```bash
 # Modo 1: Validar script, carpeta o .zip
-node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs <script.groovy | carpeta | paquete.zip> [--strict] [--json]
+node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs <script.groovy | carpeta | paquete.zip> [--groovy 2.4|4] [--strict] [--json]
+# --groovy: versión de Groovy del paso Script (no se infiere de la API Message v1/v2); activa las reglas de compilación de esa versión
 
 # Modo 2: Generar plantilla canónica 100/100 para patrones de CPI
 node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs \
@@ -138,7 +149,7 @@ node skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs \
 ```
 
 - `--pattern`: Expresión regular (debe incluir anclaje `^...$`).
-- `--prop`: Nombre de la propiedad en SAP CPI para generar las expresiones `${property.<prop>} regex '...'` y `.replaceAll(...)`.
+- `--prop`: Nombre de la propiedad en SAP CPI para generar las expresiones `${exchangeProperty.<prop>} regex '...'` y `.replaceAll(...)`.
 - `--replacement`: Plantilla de reemplazo usando grupos `$1`, `$2`, etc.
 - `--match` / `--no-match`: Listas separadas por comas de cadenas que deben coincidir o no coincidir.
 - `--spec <archivo.json>`: Alternativa para pasar los casos de prueba desde un archivo JSON.
@@ -260,7 +271,8 @@ node skills/sap-cpi-architect/scripts/extract-for-docs.mjs --validate-doc <docum
 Inspecciona los canales de entrada (`HTTPS`, `SOAP`, `OData`, `AS2`) de un iFlow `.zip`, extrae esquemas XSD y genera colecciones listas para pruebas en Postman v2.1 (con flujo de obtención CSRF) y contratos OpenAPI 3.0.3.
 
 ```bash
-node skills/sap-cpi-architect/scripts/export-api-client.mjs <paquete.zip> [--format postman|openapi|both] [--out-dir <carpeta>] [--base-url <url>] [--json]
+node skills/sap-cpi-architect/scripts/export-api-client.mjs <paquete.zip> [--format postman|openapi|both] [--out-dir <carpeta>] [--base-url <url>] [--resolve-params] [--json]
+# --resolve-params: opt-in para leer los valores de parameters.prop (por defecto se conservan como {{param}})
 node skills/sap-cpi-architect/scripts/export-api-client.mjs --demo [--out-dir <carpeta>]
 ```
 

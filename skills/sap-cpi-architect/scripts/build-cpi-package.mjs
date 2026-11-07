@@ -8,6 +8,7 @@
  * Usage:
  *   node build-cpi-package.mjs <spec.json | --demo> [--out-dir <dir>] [--json]
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createZipBuffer } from '../../../shared/zip-utils.mjs';
@@ -52,9 +53,16 @@ export function buildProjectXml(name) {
 \t<projects>
 \t</projects>
 \t<buildSpec>
+\t\t<buildCommand>
+\t\t\t<name>org.eclipse.jdt.core.javabuilder</name>
+\t\t\t<arguments>
+\t\t\t</arguments>
+\t\t</buildCommand>
 \t</buildSpec>
 \t<natures>
-\t\t<nature>com.sap.ide.ifl.nature.iflow</nature>
+\t\t<nature>org.eclipse.jdt.core.javanature</nature>
+\t\t<nature>com.sap.ide.ifl.project.support.project.nature</nature>
+\t\t<nature>com.sap.ide.ifl.bsn</nature>
 \t</natures>
 </projectDescription>
 `;
@@ -407,7 +415,7 @@ def Message processData(Message message) {
 };
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {

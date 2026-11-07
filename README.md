@@ -46,7 +46,7 @@ node setup-skills.mjs --target /ruta/a/tu/proyecto --agent all --mcp
 
 # O instalar para un asistente o IDE específico:
 node setup-skills.mjs --target /ruta/a/tu/proyecto --agent antigravity  # Google Antigravity (.agents/)
-node setup-skills.mjs --target /ruta/a/tu/proyecto --agent claude --mcp # Claude Code / Desktop (.claude/ + .mcp.json)
+node setup-skills.mjs --target /ruta/a/tu/proyecto --agent claude --mcp # Claude Code (.claude/ + .mcp.json con ruta absoluta; Claude Desktop usa claude_desktop_config.json)
 node setup-skills.mjs --target /ruta/a/tu/proyecto --agent codex        # OpenAI Codex CLI / GPT Agents (AGENTS.md + .agents/)
 node setup-skills.mjs --target /ruta/a/tu/proyecto --agent cursor       # Cursor IDE (.cursor/rules/*.mdc + .cursor/mcp.json)
 node setup-skills.mjs --target /ruta/a/tu/proyecto --agent copilot      # GitHub Copilot VS Code (.github/copilot-instructions.md + .vscode/mcp.json)
@@ -62,6 +62,8 @@ El proyecto incluye [`mcp-server.mjs`](./mcp-server.mjs), un servidor **Model Co
 # Verificar el servidor MCP local
 node mcp-server.mjs --self-test
 ```
+
+Las herramientas MCP solo aceptan rutas dentro del workspace (`CPI_MCP_ROOT`, `CLAUDE_PROJECT_DIR` o cwd), del directorio temporal del sistema y de `CPI_MCP_ALLOWED_ROOTS`. Detalles en [`docs/CLI_REFERENCE.md`](./docs/CLI_REFERENCE.md).
 
 ---
 
@@ -85,7 +87,9 @@ sap-cpi-skills-pack/
 │   ├── CLI_REFERENCE.md                # Referencia completa de comandos, argumentos, flags y herramientas MCP
 │   ├── VALIDATION_RULES.md             # Reglas de validación SAP CPI, scoring y seguridad
 │   ├── WORKFLOWS_GUIDE.md              # Flujos de trabajo prácticos paso a paso
-│   └── LESSONS_LEARNED.md              # Base de conocimiento viva con lecciones reales de SAP CPI anonimizadas
+│   ├── LESSONS_LEARNED.md              # Base de conocimiento viva con lecciones reales de SAP CPI anonimizadas
+│   ├── GAP_ANALYSIS_2026-11.md         # Análisis de gaps verificado y estado de implementación (P0 corregido)
+│   └── TEST_PLAN_PROMPT.md             # Prompt/plan para construir la base de pruebas integral
 └── skills/
     ├── sap-cpi-zip-inspector/          # 1. Inspector .zip, auditor BPMN2, differ semántico, PDF y remediador
     │   └── scripts/                    #    (inspect-iflow-zip.mjs, diff-iflow-zip.mjs)
@@ -259,6 +263,8 @@ Para profundizar en la arquitectura, reglas de validación y parámetros de cada
 - [**Reglas de Validación Determinista (`docs/VALIDATION_RULES.md`)**](./docs/VALIDATION_RULES.md): Catálogo completo de reglas BPMN 2.0, Groovy, XSLT, Regex, XSD y OSGi aplicadas por los validadores.
 - [**Guía de Flujos de Trabajo (`docs/WORKFLOWS_GUIDE.md`)**](./docs/WORKFLOWS_GUIDE.md): Ejemplos prácticos de extremo a extremo para desarrollo, auditoría y empaquetado en SAP CPI.
 - [**Base de Conocimiento y Lecciones Aprendidas (`docs/LESSONS_LEARNED.md`)**](./docs/LESSONS_LEARNED.md): Registro histórico anonimizado de errores reales en SAP CPI y su codificación en los motores CLI.
+- [**Análisis de Gaps (`docs/GAP_ANALYSIS_2026-11.md`)**](./docs/GAP_ANALYSIS_2026-11.md): Gaps verificados contra documentación SAP y exportaciones reales, con prioridades P0/P1/P2 y estado de implementación.
+- [**Plan de Pruebas (`docs/TEST_PLAN_PROMPT.md`)**](./docs/TEST_PLAN_PROMPT.md): Prompt detallado para construir la base de pruebas (unitarias, contrato CLI, MCP, E2E, regresión LL-, catálogo de prompts de usuario).
 
 ---
 

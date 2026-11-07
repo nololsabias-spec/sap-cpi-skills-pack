@@ -13,10 +13,11 @@
  * Uso:
  *   node setup-skills.mjs [--target <ruta-proyecto>] [--agent all|both|antigravity|claude|codex|cursor|copilot|windsurf|cline] [--mcp]
  */
+import { moduleDir } from './shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const ROOT_DIR = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const ROOT_DIR = moduleDir(import.meta.url);
 
 function copyRecursiveSync(src, dest) {
   const stats = fs.statSync(src);
@@ -31,14 +32,62 @@ function copyRecursiveSync(src, dest) {
   }
 }
 
+/** Strips // and block comments plus trailing commas (JSONC used by VS Code / Cursor), outside strings. */
+function stripJsonc(text) {
+  let out = '';
+  let inStr = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const n = text[i + 1];
+    if (inStr) {
+      out += c;
+      if (c === '\\') {
+        out += n ?? '';
+        i++;
+      } else if (c === '"') {
+        inStr = false;
+      }
+      continue;
+    }
+    if (c === '"') {
+      inStr = true;
+      out += c;
+    } else if (c === '/' && n === '/') {
+      while (i < text.length && text[i] !== '\n') i++;
+      out += '\n';
+    } else if (c === '/' && n === '*') {
+      i += 2;
+      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++;
+      i++;
+    } else {
+      out += c;
+    }
+  }
+  return out.replace(/,(\s*[}\]])/g, '$1');
+}
+
 function mergeMcpJsonFile(filePath, serverKey, serverConfig, rootKey = 'mcpServers') {
   let existing = {};
   if (fs.existsSync(filePath)) {
+    const raw = fs.readFileSync(filePath, 'utf8').replace(/^﻿/, '');
     try {
-      existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      existing = raw.trim() ? JSON.parse(raw) : {};
     } catch {
-      existing = {};
+      try {
+        existing = JSON.parse(stripJsonc(raw));
+      } catch (err) {
+        // Never replace a config we cannot parse: it may hold other MCP servers.
+        console.error(
+          `[WARN] No se pudo parsear ${filePath} (${err.message}). No se modifica; añade a mano "${serverKey}": ${JSON.stringify(serverConfig)}`
+        );
+        return false;
+      }
     }
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+      console.error(`[WARN] ${filePath} no contiene un objeto JSON. No se modifica.`);
+      return false;
+    }
+    fs.copyFileSync(filePath, `${filePath}.bak`);
   }
   if (!existing[rootKey] || typeof existing[rootKey] !== 'object') {
     existing[rootKey] = {};
@@ -46,6 +95,7 @@ function mergeMcpJsonFile(filePath, serverKey, serverConfig, rootKey = 'mcpServe
   existing[rootKey][serverKey] = serverConfig;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(existing, null, 2) + '\n', 'utf8');
+  return true;
 }
 
 function buildUnifiedInstructionsMarkdown(baseSkillDir = '.agents') {
@@ -203,18 +253,31 @@ if (['cline', 'all'].includes(agentType)) {
 
 // 7. Auto-configure Local stdio MCP Server JSON files (.mcp.json, .cursor/mcp.json, .vscode/mcp.json)
 if (enableMcpConfigs) {
+  // Relative script paths are resolved against the MCP client's cwd, which is not always the
+  // project root -> MODULE_NOT_FOUND -> "CONNECTION_CLOSED". Always emit absolute/variable paths.
+  const targetProjectPosix = targetProject.split(path.sep).join('/');
+  const mcpScriptAbsPath = `${targetProjectPosix}/${mcpScriptRelPath}`;
   const stdMcpEntry = {
     command: 'node',
-    args: [mcpScriptRelPath]
+    args: [mcpScriptAbsPath]
   };
+  // Absolute path on purpose: Claude Code also loads .mcp.json from PARENT folders, and then
+  // CLAUDE_PROJECT_DIR points to the sub-folder the session was opened in, so
+  // "${CLAUDE_PROJECT_DIR}/.agents/..." would resolve to a missing file (CONNECTION_CLOSED).
+  // Re-run setup-skills.mjs if the workspace is moved.
+  const claudeMcpEntry = {
+    command: 'node',
+    args: [targetProjectPosix + '/' + mcpScriptRelPath]
+  };
+  // VS Code documents ${workspaceFolder} in .vscode/mcp.json.
   const vscodeMcpEntry = {
     type: 'stdio',
     command: 'node',
-    args: [mcpScriptRelPath]
+    args: ['${workspaceFolder}/' + mcpScriptRelPath]
   };
 
   if (['claude', 'both', 'all'].includes(agentType) || args.includes('--mcp')) {
-    mergeMcpJsonFile(path.join(targetProject, '.mcp.json'), 'sap-cpi', stdMcpEntry, 'mcpServers');
+    mergeMcpJsonFile(path.join(targetProject, '.mcp.json'), 'sap-cpi', claudeMcpEntry, 'mcpServers');
   }
   if (['cursor', 'all'].includes(agentType) || args.includes('--mcp')) {
     mergeMcpJsonFile(path.join(targetProject, '.cursor', 'mcp.json'), 'sap-cpi', stdMcpEntry, 'mcpServers');

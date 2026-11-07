@@ -11,6 +11,7 @@
  *   node simulate-mmap.mjs --demo [--json]
  *   node simulate-mmap.mjs <mapping.mmap> --input <input.xml|input.json> [--headers <headers.json>] [--properties <props.json>] [--target-xsd <target.xsd>] [--out <output.xml>] [--json]
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { validateXsdForSapCpi } from './validate-xsd.mjs';
@@ -328,7 +329,7 @@ export function simulateMessageMapping({
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {

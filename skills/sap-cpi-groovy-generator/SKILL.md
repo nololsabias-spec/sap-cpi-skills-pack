@@ -8,7 +8,7 @@ description: >-
 
 # SAP CPI Groovy Script Generator
 
-Generates production-ready, memory-safe Apache Groovy scripts for the official SAP Cloud Integration runtime (`Groovy 2.4/3.0+` on `SapMachine / SAP JVM`), strictly enforcing SAP Help Portal *Integration Flow Design Guidelines* and *Scripting Guidelines*.
+Generates production-ready, memory-safe Apache Groovy scripts for the official SAP Cloud Integration runtime (Script step 1.1 = `Groovy 2.4`, Script step 2.0 = `Groovy 4.0.x`, on `SapMachine / SAP JVM`), strictly enforcing SAP Help Portal *Integration Flow Design Guidelines* and *Scripting Guidelines*.
 
 ## Workflow Steps
 
@@ -33,10 +33,11 @@ Identify from the user's request:
 Write the Groovy script adhering to these mandatory SAP Help Portal rules:
 1. **Ensure Upgrade Readiness & Groovy 2.4 vs Groovy 4 Package Compatibility**:
    - Include **only** the `import` statements actually used in the script. Never use wildcard imports (`import java.util.*`).
-   - Support either `import com.sap.gateway.ip.core.customdev.util.Message` (Script v1 / Groovy 2.4) or `import com.sap.it.script.v2.api.Message` (Script v2 / Groovy 4).
+   - Support either `import com.sap.gateway.ip.core.customdev.util.Message` (Script API v1) or `import com.sap.it.script.v2.api.Message` (Script API v2).
+   - **The Groovy runtime (2.4 or 4) is selected in the iFlow Script step (Script step 2.0 = Groovy 4) and CANNOT be inferred from the Message import.** If the user has not said which version the step uses, ask (Step 0) and pass it to the validator with `--groovy 2.4|4`.
    - **`XmlSlurper` Package by Engine Version (`CRITICAL` Compile Error Prevention)**:
-     - In **SAP CPI Script v1 (Groovy 2.4 — `com.sap.gateway.ip.core.customdev.util.Message`)**, `XmlSlurper` lives in **`groovy.util.XmlSlurper`** (`import groovy.util.XmlSlurper`). **NEVER** write `import groovy.xml.XmlSlurper` in a Groovy 2.4 script — `groovy.xml.XmlSlurper` does not exist in Groovy 2.4 and fails at compilation with `unable to resolve class groovy.xml.XmlSlurper`.
-     - Only use `import groovy.xml.XmlSlurper` when explicitly writing a **Groovy 4 Script v2** (`import com.sap.it.script.v2.api.Message`).
+     - In **Groovy 2.4**, `XmlSlurper` lives in **`groovy.util.XmlSlurper`** (`import groovy.util.XmlSlurper`). **NEVER** write `import groovy.xml.XmlSlurper` in a Groovy 2.4 script — `groovy.xml.XmlSlurper` does not exist in Groovy 2.4 and fails at compilation with `unable to resolve class groovy.xml.XmlSlurper`.
+     - In **Groovy 4**, `groovy.util.XmlSlurper` / `XmlParser` / `XmlNodePrinter` / `slurpersupport.GPathResult` were removed: use `import groovy.xml.XmlSlurper`. Also avoid `org.apache.camel.*` imports and GDK `Date.format()/Date.parse()` (use `java.time`).
    - Never import restricted/internal frameworks banned by SAP's *"Restrict usage to supported frameworks and libraries"* guideline (`org.apache.camel.impl.*`, `org.apache.camel.processor.*`, `com.sap.it.script.v2.api.proxy.*`, `org.osgi.framework.*`, `org.springframework.*`, `com.zaxxer.hikari.*`, `groovy.sql.*`, `org.quartz.*`, `net.sf.saxon.*`).
 2. **Signature, Local Scoping & Return**:
    - Always use `def Message processData(Message message)` and return `message`.
@@ -69,10 +70,14 @@ Write the Groovy script adhering to these mandatory SAP Help Portal rules:
 Save the generated script(s) and run the deterministic validator script on the `.groovy` file, an entire script folder, or a packaged `.zip`:
 
 ```bash
-node ./scripts/validate-groovy.mjs <path-to-script.groovy | folder | bundle.zip> [--strict] [--json]
+node ./scripts/validate-groovy.mjs <path-to-script.groovy | folder | bundle.zip> [--groovy 2.4|4] [--strict] [--json]
+
+# Canonical template for a given runtime
+node ./scripts/validate-groovy.mjs --template xml-slurper --api v2 --groovy 4 --raw
 ```
 
 * Validator script: [validate-groovy.mjs](./scripts/validate-groovy.mjs)
+* **`--groovy 2.4|4`**: enables the hard compile-error rules for that runtime (`GROOVY24_INVALID_XMLSLURPER_IMPORT`, `GROOVY4_REMOVED_GROOVY_UTIL_XML`, `GROOVY4_CAMEL_IMPORT`, `GROOVY4_DATE_EXTENSIONS`). Without it, version-dependent XML APIs are reported as `GROOVY_VERSION_DEPENDENT_XML_API` (MEDIUM).
 * **Verification Requirement**: The script must achieve a **100/100 score** with **0 Critical/High/Medium violations** before presenting the final code to the user. If `validate-groovy.mjs` reports any violation (e.g., an unused import, missing `disallow-doctype-decl`, or unclosed `Reader`), fix the Groovy code and re-run `validate-groovy.mjs` until it passes cleanly.
 
 

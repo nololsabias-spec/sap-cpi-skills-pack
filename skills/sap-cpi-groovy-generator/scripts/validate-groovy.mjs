@@ -15,6 +15,7 @@
  * Usage:
  *   node validate-groovy.mjs <file.groovy> [--strict] [--json]
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readZipEntries } from '../../../shared/zip-utils.mjs';
@@ -76,7 +77,16 @@ function hasMultipleTopLevelSetBodyArgs(code) {
   return null;
 }
 
-export function lintGroovyScript(code, fileName = 'Script.groovy') {
+/** Normalizes a user-supplied Groovy runtime version to '2.4' | '4' | null (unknown). */
+export function normalizeGroovyVersion(v) {
+  const s = String(v ?? '').trim().toLowerCase().replace(/^groovy\s*/, '');
+  if (!s) return null;
+  if (s === '2' || s.startsWith('2.')) return '2.4';
+  if (s === '4' || s.startsWith('4.')) return '4';
+  return null;
+}
+
+export function lintGroovyScript(code, fileName = 'Script.groovy', options = {}) {
   const findings = [];
   const cleanCode = stripComments(code);
   const lines = cleanCode.split(/\r?\n/);
@@ -191,46 +201,80 @@ export function lintGroovyScript(code, fileName = 'Script.groovy') {
       );
     }
 
-    const isGroovy4V2 = /import\s+com\.sap\.it\.script\.v2\.api\.Message\b/.test(cleanCode);
-    if (!isGroovy4V2 && (fullImport === 'groovy.xml.XmlSlurper' || fullImport === 'groovy.xml.XmlParser')) {
-      addFinding(
-        'CRITICAL',
-        'Upgrade Readiness & Imports',
-        'GROOVY24_INVALID_XMLSLURPER_IMPORT',
-        `Error de compilación en Groovy 2.4: unable to resolve class ${fullImport}`,
-        `En el motor Groovy 2.4 de SAP CPI (Script v1 con \`com.sap.gateway.ip.core.customdev.util.Message\`), \`${fullImport}\` no existe y falla al compilar con \`unable to resolve class ${fullImport}\`.`,
-        'Usa `import groovy.util.XmlSlurper` en scripts Groovy 2.4 (Script v1).',
-        lineNo
-      );
-    } else if (isGroovy4V2 && (fullImport === 'groovy.util.XmlSlurper' || fullImport === 'groovy.util.XmlParser')) {
-      addFinding(
-        'HIGH',
-        'Upgrade Readiness & Imports',
-        'DEPRECATED_GROOVY_UTIL_XML',
-        `Paquete eliminado en Groovy 4 (${fullImport})`,
-        'En scripts Groovy 4 (`com.sap.it.script.v2.api.Message`), `groovy.util.Xml*` fue movido a `groovy.xml.*`.',
-        'Usa `import groovy.xml.XmlSlurper` cuando emplees la API Script v2 (Groovy 4).',
-        lineNo
-      );
-    }
   }
 
-  // Check inline groovy.xml.XmlSlurper in Groovy 2.4 scripts (when not caught by import line)
-  const isGroovy4V2Global = /import\s+com\.sap\.it\.script\.v2\.api\.Message\b/.test(cleanCode);
-  if (
-    !isGroovy4V2Global &&
-    /\bgroovy\.xml\.XmlSlurper\b/.test(cleanCode) &&
-    !findings.some((f) => f.ruleId === 'GROOVY24_INVALID_XMLSLURPER_IMPORT')
-  ) {
+  // 2b. Groovy runtime-version-dependent APIs.
+  // The Groovy version is chosen in the Script step (Groovy 2.4 vs Groovy 4) and CANNOT be
+  // inferred from the Message import (Script API v1/v2). Only report hard compile errors when
+  // the caller states the version (options.groovyVersion / CLI --groovy 2.4|4).
+  //   Groovy 2.4: groovy.xml.XmlSlurper / XmlParser do not exist (moved there in Groovy 3).
+  //   Groovy 4:   groovy.util.XmlSlurper / XmlParser / XmlNodePrinter / slurpersupport.GPathResult removed.
+  const gv = normalizeGroovyVersion(options.groovyVersion);
+  const g24XmlRe = /\bgroovy\.xml\.(XmlSlurper|XmlParser|slurpersupport\.GPathResult)\b/;
+  const g4XmlRe = /\bgroovy\.util\.(XmlSlurper|XmlParser|XmlNodePrinter|slurpersupport\.GPathResult)\b/;
+  const g24Hit = cleanCode.match(g24XmlRe);
+  const g4Hit = cleanCode.match(g4XmlRe);
+  if (gv === '2.4' && g24Hit) {
     addFinding(
       'CRITICAL',
       'Upgrade Readiness & Imports',
       'GROOVY24_INVALID_XMLSLURPER_IMPORT',
-      'Error de compilación en Groovy 2.4: unable to resolve class groovy.xml.XmlSlurper',
-      'En el motor Groovy 2.4 de SAP CPI (`com.sap.gateway.ip.core.customdev.util.Message`), `groovy.xml.XmlSlurper` no existe y falla al compilar.',
-      'Usa `import groovy.util.XmlSlurper` y `new XmlSlurper(false, false)`.',
-      findLineNumber(/\bgroovy\.xml\.XmlSlurper\b/)
+      `Error de compilación en Groovy 2.4: unable to resolve class ${g24Hit[0]}`,
+      `En el runtime Groovy 2.4 de SAP CPI, \`${g24Hit[0]}\` no existe (el paquete groovy.xml.* para estas clases llegó en Groovy 3).`,
+      'Usa `import groovy.util.XmlSlurper` (Groovy 2.4) o cambia la versión del paso Script a Groovy 4.',
+      findLineNumber(g24XmlRe)
     );
+  } else if (gv === '4' && g4Hit) {
+    addFinding(
+      'CRITICAL',
+      'Upgrade Readiness & Imports',
+      'GROOVY4_REMOVED_GROOVY_UTIL_XML',
+      `Error de compilación en Groovy 4: unable to resolve class ${g4Hit[0]}`,
+      `En Groovy 4, \`${g4Hit[0]}\` fue eliminado (deprecado en Groovy 3, movido a \`groovy.xml.*\`).`,
+      `Usa \`import ${g4Hit[0].replace('groovy.util.', 'groovy.xml.')}\`.`,
+      findLineNumber(g4XmlRe)
+    );
+  } else if (!gv && (g24Hit || g4Hit)) {
+    const hit = (g24Hit || g4Hit)[0];
+    addFinding(
+      'MEDIUM',
+      'Upgrade Readiness & Imports',
+      'GROOVY_VERSION_DEPENDENT_XML_API',
+      `API XML dependiente de la versión de Groovy (${hit})`,
+      g24Hit
+        ? `\`${hit}\` solo compila en Groovy 3+/4: falla con "unable to resolve class" si el paso Script usa Groovy 2.4.`
+        : `\`${hit}\` solo compila en Groovy 2.4/3: falla con "unable to resolve class" si el paso Script usa Groovy 4.`,
+      'Indica la versión del paso Script (`--groovy 2.4|4` / opción groovyVersion) para validarlo con certeza. La versión de la API Message (v1/v2) no determina la versión de Groovy.',
+      findLineNumber(g24Hit ? g24XmlRe : g4XmlRe)
+    );
+  }
+
+  if (gv === '4') {
+    const camelRe = /^\s*import\s+(?:static\s+)?org\.apache\.camel\./m;
+    if (camelRe.test(cleanCode) && !findings.some((f) => f.ruleId === 'INTERNAL_CAMEL_IMPORT')) {
+      addFinding(
+        'HIGH',
+        'Upgrade Readiness & Imports',
+        'GROOVY4_CAMEL_IMPORT',
+        'Import directo de Apache Camel en un script Groovy 4',
+        'Los scripts Groovy 4 se ejecutan sobre un runtime Camel distinto; las clases org.apache.camel.* no forman parte de la API pública y pueden no resolverse.',
+        'Usa exclusivamente la interfaz `Message` y `ITApiFactory`.',
+        findLineNumber(/^\s*import\s+(?:static\s+)?org\.apache\.camel\./)
+      );
+    }
+    // Date#format(pattern[, tz]) / Date.parse(pattern, text); String.format(...) is excluded.
+    const dateFmtRe = /(?<!\bString)\.format\s*\(\s*['"][^'"%]*['"]\s*(?:,\s*TimeZone\b[^)]*)?\)|\bDate\.parse\s*\(/;
+    if (/\bDate\b/.test(cleanCode) && dateFmtRe.test(cleanCode)) {
+      addFinding(
+        'MEDIUM',
+        'Upgrade Readiness & Imports',
+        'GROOVY4_DATE_EXTENSIONS',
+        'Date.format()/Date.parse() de la GDK en Groovy 4',
+        'En Groovy 4 las extensiones de fecha de la GDK (Date.format/parse) viven en el módulo opcional groovy-dateutil y pueden no estar disponibles.',
+        'Usa `java.time` (DateTimeFormatter.ofPattern(...).withZone(ZoneId.of("UTC"))).',
+        findLineNumber(/\.format\s*\(|\bDate\.parse\s*\(/)
+      );
+    }
   }
 
   // 3. Reader.getText(charset) MissingMethodException (CRITICAL -30)
@@ -588,6 +632,10 @@ export function generateCanonicalGroovyTemplate(pattern = 'json-streaming', opti
   const messageImport = apiVersion === 'v2'
     ? 'import com.sap.it.script.v2.api.Message'
     : 'import com.sap.gateway.ip.core.customdev.util.Message';
+  // Groovy runtime of the Script step. Generation default: Groovy 4 for API v2, Groovy 2.4 for API v1
+  // (an explicit choice for the generated code, NOT an inference about an existing script).
+  const groovyVersion = normalizeGroovyVersion(options.groovyVersion) || (apiVersion === 'v2' ? '4' : '2.4');
+  const xmlSlurperImport = groovyVersion === '4' ? 'import groovy.xml.XmlSlurper' : 'import groovy.util.XmlSlurper';
 
   let code = '';
   switch (pattern) {
@@ -602,7 +650,7 @@ export function generateCanonicalGroovyTemplate(pattern = 'json-streaming', opti
 // 4. Observabilidad: addCustomHeaderProperty condicional en Message Processing Log.
 // ============================================================================
 ${messageImport}
-import groovy.util.XmlSlurper
+${xmlSlurperImport}
 import groovy.transform.Field
 import java.io.Reader
 import java.time.ZoneId
@@ -641,7 +689,7 @@ Message processData(Message message) {
 }
 `
         : `${messageImport}
-import groovy.util.XmlSlurper
+${xmlSlurperImport}
 import groovy.transform.Field
 import java.io.Reader
 import java.time.ZoneId
@@ -1013,10 +1061,11 @@ Message processData(Message message) {
       break;
   }
 
-  const lint = lintGroovyScript(code, scriptName);
+  const lint = lintGroovyScript(code, scriptName, { groovyVersion });
   return {
     pattern,
     apiVersion,
+    groovyVersion,
     scriptName,
     customComments,
     score: lint.score,
@@ -1027,12 +1076,12 @@ Message processData(Message message) {
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    console.log('Uso 1 (Validar):  node validate-groovy.mjs <archivo.groovy | carpeta | paquete.zip> [--strict] [--json]');
-    console.log('Uso 2 (Template): node validate-groovy.mjs --template <json-streaming|xml-slurper|mpl-custom-headers|oauth-token-inject|dynamic-routing-header|base64-attachment> [--api v1|v2] [--json]');
+    console.log('Uso 1 (Validar):  node validate-groovy.mjs <archivo.groovy | carpeta | paquete.zip> [--groovy 2.4|4] [--strict] [--json]');
+    console.log('Uso 2 (Template): node validate-groovy.mjs --template <json-streaming|xml-slurper|mpl-custom-headers|oauth-token-inject|dynamic-routing-header|base64-attachment> [--api v1|v2] [--groovy 2.4|4] [--json]');
     process.exit(0);
   }
 
@@ -1051,8 +1100,10 @@ if (isMain) {
     const outIdx = args.indexOf('--out');
     const outPath = outIdx !== -1 && args[outIdx + 1] ? path.resolve(args[outIdx + 1]) : null;
 
+    const gIdx = args.indexOf('--groovy');
     const templateRes = generateCanonicalGroovyTemplate(pattern, {
       apiVersion,
+      groovyVersion: gIdx !== -1 ? args[gIdx + 1] : undefined,
       customComments: commentsFlag
     });
 
@@ -1076,6 +1127,12 @@ if (isMain) {
   const targetPath = path.resolve(args[0]);
   const jsonFlag = args.includes('--json');
   const strictFlag = args.includes('--strict');
+  const groovyArgIdx = args.indexOf('--groovy');
+  const lintOptions = { groovyVersion: groovyArgIdx !== -1 ? args[groovyArgIdx + 1] : undefined };
+  if (groovyArgIdx !== -1 && !normalizeGroovyVersion(lintOptions.groovyVersion)) {
+    console.error('Error: --groovy debe ser 2.4 o 4');
+    process.exit(1);
+  }
 
   if (!fs.existsSync(targetPath)) {
     console.error(`Archivo o carpeta no encontrado: ${targetPath}`);
@@ -1111,7 +1168,7 @@ if (isMain) {
   }
 
   if (scriptsToValidate.length === 1 && !stat.isDirectory() && !targetPath.toLowerCase().endsWith('.zip')) {
-    const result = lintGroovyScript(scriptsToValidate[0].code, scriptsToValidate[0].name);
+    const result = lintGroovyScript(scriptsToValidate[0].code, scriptsToValidate[0].name, lintOptions);
 
     if (jsonFlag) {
       console.log(JSON.stringify(result, null, 2));
@@ -1135,7 +1192,7 @@ if (isMain) {
       process.exit(1);
     }
   } else {
-    const results = scriptsToValidate.map((s) => lintGroovyScript(s.code, s.name));
+    const results = scriptsToValidate.map((s) => lintGroovyScript(s.code, s.name, lintOptions));
     const avgScore = Math.round(results.reduce((acc, r) => acc + r.score, 0) / results.length);
     const allPassed = results.every((r) => r.passed && (!strictFlag || r.score === 100));
 

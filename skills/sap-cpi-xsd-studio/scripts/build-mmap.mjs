@@ -16,6 +16,7 @@
  *     [--header /TargetRoot/h=CamelHttpMethod] [--property /TargetRoot/p=PropName] \
  *     --out <MappingName.mmap>
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -182,7 +183,7 @@ export function validateMmapForSapCpi(mmapContent) {
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {

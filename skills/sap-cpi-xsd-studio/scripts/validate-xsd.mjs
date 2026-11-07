@@ -8,6 +8,7 @@
  *   node validate-xsd.mjs <schema.xsd | --demo> [--json]
  *   node validate-xsd.mjs --infer <sample1.json> [sample2.json ...] [--root RootName] [--ns http://...] [--prefix ns0] [--out out.xsd]
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -203,7 +204,7 @@ export function validateXsdForSapCpi(xsdContent) {
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {

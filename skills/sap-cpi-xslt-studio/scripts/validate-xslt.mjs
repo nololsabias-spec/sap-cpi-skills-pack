@@ -6,6 +6,7 @@
  * Usage:
  *   node validate-xslt.mjs <mapping.xslt | --demo> [--engine 2.0|1.0] [--json]
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -143,7 +144,7 @@ export const DEMO_VALID_XSLT = `<?xml version="1.0" encoding="UTF-8"?>
 </xsl:stylesheet>`;
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {

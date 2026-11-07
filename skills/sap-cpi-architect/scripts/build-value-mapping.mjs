@@ -4,16 +4,18 @@
  * Zero external dependencies.
  * Converts key-value equivalence tables from JSON or CSV into an OSGi-compliant
  * SAP Integration Suite Value Mapping bundle (.zip) with:
- * - .project (com.sap.ide.ifl.nature.valuemapping)
+ * - .project (javanature + com.sap.ide.ifl.project.support.project.nature + com.sap.ide.ifl.valmap)
  * - META-INF/MANIFEST.MF (SAP-BundleType: ValueMapping, wrapped to 72 bytes UTF-8)
  * - metainfo.prop
- * - src/main/resources/value_mapping.xml (<ns2:valueMapping>)
+ * - value_mapping.xml (<vm version="2.0"><group id=hex32><entry><agency/><schema/><value/>)
  *
  * Usage:
  *   node build-value-mapping.mjs --demo [--out <VM_Demo.zip>] [--json]
  *   node build-value-mapping.mjs <table.json|table.csv> --name <VM_Name> [--out <VM_Name.zip>] [--json]
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { createZipBuffer } from '../../../shared/zip-utils.mjs';
 import { sanitizeBundleName, wrapManifestLine72, buildProjectXml } from './build-cpi-package.mjs';
@@ -28,6 +30,7 @@ function escapeXml(str) {
 }
 
 export function buildValueMappingProjectXml(name) {
+  // Structure of real Integration Suite Value Mapping exports (LL-VM-FORMAT).
   return `<?xml version="1.0" encoding="UTF-8"?>
 <projectDescription>
 \t<name>${escapeXml(name)}</name>
@@ -35,9 +38,16 @@ export function buildValueMappingProjectXml(name) {
 \t<projects>
 \t</projects>
 \t<buildSpec>
+\t\t<buildCommand>
+\t\t\t<name>org.eclipse.jdt.core.javabuilder</name>
+\t\t\t<arguments>
+\t\t\t</arguments>
+\t\t</buildCommand>
 \t</buildSpec>
 \t<natures>
-\t\t<nature>com.sap.ide.ifl.nature.valuemapping</nature>
+\t\t<nature>org.eclipse.jdt.core.javanature</nature>
+\t\t<nature>com.sap.ide.ifl.project.support.project.nature</nature>
+\t\t<nature>com.sap.ide.ifl.valmap</nature>
 \t</natures>
 </projectDescription>
 `;
@@ -48,9 +58,11 @@ export function buildValueMappingManifest(name) {
     'Manifest-Version: 1.0',
     'Bundle-ManifestVersion: 2',
     `Bundle-Name: ${name}`,
-    `Bundle-SymbolicName: ${name}`,
+    `Bundle-SymbolicName: ${name}; singleton:=true`, // as in SAP's official TestValueMap exemplar
     'Bundle-Version: 1.0.0',
     'SAP-BundleType: ValueMapping',
+    'Import-Package: com.sap.xi.mapping.camel.valmap',
+    'Bundle-Activator: com.sap.xi.mapping.camel.valmap.ValueMappingActivator',
     'SAP-NodeType: IFLMAP',
     `Origin-Bundle-Name: ${name}`,
     `Origin-Bundle-SymbolicName: ${name}`
@@ -101,42 +113,51 @@ export function parseCsvValueMapping(csvText) {
   return Array.from(groupsMap.values());
 }
 
-export function buildValueMappingXml(groups = []) {
-  const groupXmls = [];
+/** Deterministic 32-hex group id (same input -> same id, so re-builds produce stable diffs). */
+function vmGroupId(seed) {
+  return crypto.createHash('md5').update(seed).digest('hex');
+}
 
-  for (let gIdx = 0; gIdx < groups.length; gIdx++) {
-    const g = groups[gIdx];
+/**
+ * Builds value_mapping.xml in the format used by real SAP Integration Suite exports:
+ *   <vm version="2.0">
+ *     <group id="<32 hex>">            one group = one value-mapping row
+ *       <entry><agency/><schema/><value/></entry>   one entry per agency/identifier pair
+ *     </group>
+ *   </vm>
+ * The input model (sourceAgency/sourceSchema/targetAgency/targetSchema + entries[]) is unchanged.
+ * An entry may set isDefault: true -> isDefault="true" on the SOURCE side (default value).
+ */
+export function buildValueMappingXml(groups = []) {
+  const out = [];
+  for (const g of groups) {
     const srcAgency = g.sourceAgency || 'SourceSystem';
     const srcSchema = g.sourceSchema || 'DefaultSchema';
     const tgtAgency = g.targetAgency || 'TargetSystem';
     const tgtSchema = g.targetSchema || 'DefaultSchema';
-
-    const entriesXml = (g.entries || [])
-      .map(
-        (e) => `        <valueEntry>
-            <val>${escapeXml(e.sourceValue)}</val>
-            <val>${escapeXml(e.targetValue)}</val>
-        </valueEntry>`
-      )
-      .join('\n');
-
-    groupXmls.push(`    <group id="Group_${gIdx + 1}">
-        <schema>
+    for (const e of g.entries || []) {
+      const id = vmGroupId([srcAgency, srcSchema, e.sourceValue, tgtAgency, tgtSchema, e.targetValue].join('\u0000'));
+      const def = e.isDefault ? ' isDefault="true"' : '';
+      out.push(
+        `    <group id="${id}">
+        <entry${def}>
             <agency>${escapeXml(srcAgency)}</agency>
             <schema>${escapeXml(srcSchema)}</schema>
-        </schema>
-        <schema>
+            <value>${escapeXml(e.sourceValue)}</value>
+        </entry>
+        <entry>
             <agency>${escapeXml(tgtAgency)}</agency>
             <schema>${escapeXml(tgtSchema)}</schema>
-        </schema>
-${entriesXml}
-    </group>`);
+            <value>${escapeXml(e.targetValue)}</value>
+        </entry>
+    </group>`
+      );
+    }
   }
-
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<ns2:valueMapping xmlns:ns2="http://sap.com/xi/mapping/valuemapping">
-${groupXmls.join('\n')}
-</ns2:valueMapping>
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<vm version="2.0">
+${out.join('\n')}
+</vm>
 `;
 }
 
@@ -183,7 +204,7 @@ export function validateAndBuildValueMappingBundle(spec) {
     { path: '.project', content: buildValueMappingProjectXml(safeName) },
     { path: 'META-INF/MANIFEST.MF', content: buildValueMappingManifest(safeName) },
     { path: 'metainfo.prop', content: `#Store metainfo properties\ndescription=${description}\n` },
-    { path: 'src/main/resources/value_mapping.xml', content: vmXml }
+    { path: 'value_mapping.xml', content: vmXml } // bundle root, as in real VM exports
   ];
 
   files.sort((a, b) => {
@@ -209,7 +230,7 @@ export function validateAndBuildValueMappingBundle(spec) {
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {

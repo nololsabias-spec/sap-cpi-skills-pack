@@ -7,10 +7,12 @@
  *   node inspect-iflow-zip.mjs <path-to-file.zip | path-to-file.iflw> [--extract-dir <dir>] [--json]
  *   node inspect-iflow-zip.mjs --demo [--extract-dir <dir>] [--json]
  */
+import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
-import { readZipEntries, createZipBuffer } from '../../../shared/zip-utils.mjs';
+import { readZipEntries, createZipBuffer, resolveInside, redactPropText } from '../../../shared/zip-utils.mjs';
 import { writeAuditPdfFile } from '../../../shared/pdf-utils.mjs';
+import { refoldManifest } from '../../../shared/manifest-utils.mjs';
 import { lintGroovyScript } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
 
 export function parseManifestContent(manifestText) {
@@ -125,10 +127,6 @@ export function analyzeIflwLocally(iflwXml) {
       unencryptedChannels.push({ key: prop.key, val, tag: 'Adapter Channel' });
     }
 
-    if (keyLower === 'authenticationtype' && valLower === 'basicauthentication') {
-      basicAuthChannels.push({ key: prop.key, val, reason: 'CPILint CleartextBasicAuth: Se recomienda OAuth2 o Client Certificate en lugar de Basic Auth' });
-    }
-
     if (keyLower === 'xsrfprotection' && (val === '0' || valLower === 'false')) {
       csrfDisabledChannels.push({ key: prop.key, val, reason: 'CPILint CsrfProtectionRequired: Protección CSRF desactivada en adaptador HTTP/HTTPS' });
     }
@@ -164,6 +162,49 @@ export function analyzeIflwLocally(iflwXml) {
         val: val.length > 100 ? val.slice(0, 100) + '...' : val,
         location: 'ContentModifier'
       });
+    }
+  }
+
+  // CPILint CleartextBasicAuth (per channel). Each adapter uses a different key/value:
+  //   HTTP / OData: authenticationMethod=Basic   SOAP / IDoc: authentication=Basic
+  //   XI: AuthenticationType=BasicAuthentication  AS2: authenticationType=BasicAuthentication
+  //   AS4: authenticationType=basic
+  // Exempt when the channel routes through the Cloud Connector (proxyType=sapcc): on-premise
+  // Basic Auth through the SCC tunnel is the standard, accepted pattern.
+  const basicAuthReason = 'CPILint CleartextBasicAuth: Se recomienda OAuth2 o Client Certificate en lugar de Basic Auth';
+  const isBasicAuthPair = (k, v) => {
+    const kl = k.toLowerCase();
+    const vl = String(v || '').trim().toLowerCase();
+    if (kl === 'authenticationmethod' || kl === 'authentication') return vl === 'basic';
+    if (kl === 'authenticationtype') return vl === 'basicauthentication' || vl === 'basic';
+    return false;
+  };
+  const readChannelProps = (inner) => {
+    const out = [];
+    let cm;
+    const reA = /<([a-zA-Z0-9_:-]*property)\b([^>]*)\/?>/gi;
+    while ((cm = reA.exec(inner)) !== null) {
+      const a = parseXmlAttributes(cm[2]);
+      if (a.key !== undefined) out.push({ key: a.key, val: a.value || '' });
+    }
+    const reB = /<([a-zA-Z0-9_:-]*property)\b[^>]*>\s*<key>([^<]*)<\/key>\s*(?:<value>([\s\S]*?)<\/value>|<value\s*\/>)\s*<\/\1>/gi;
+    while ((cm = reB.exec(inner)) !== null) out.push({ key: cm[2].trim(), val: (cm[3] || '').trim() });
+    return out;
+  };
+  {
+    const chRegex = /<bpmn2:messageFlow\b([^>]*)>([\s\S]*?)<\/bpmn2:messageFlow>/gi;
+    let ch;
+    while ((ch = chRegex.exec(iflwXml)) !== null) {
+      const chAttrs = parseXmlAttributes(ch[1]);
+      const chProps = readChannelProps(ch[2] || '');
+      const viaScc = chProps.some((p) => p.key.toLowerCase() === 'proxytype' && p.val.trim().toLowerCase() === 'sapcc');
+      if (viaScc) continue;
+      for (const p of chProps) {
+        if (isBasicAuthPair(p.key, p.val)) {
+          const adapter = (chProps.find((x) => x.key === 'ComponentType') || {}).val || '';
+          basicAuthChannels.push({ key: p.key, val: p.val, channel: chAttrs.name || chAttrs.id || '', adapter, reason: basicAuthReason });
+        }
+      }
     }
   }
 
@@ -370,20 +411,7 @@ SAP-BundleType: IntegrationFlow
   ]);
 }
 
-export function redactPropText(rawText) {
-  if (!rawText) return '';
-  return rawText
-    .split(/\r?\n/)
-    .map((line) => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return line;
-      const eqIdx = line.indexOf('=');
-      if (eqIdx === -1) return line;
-      const key = line.slice(0, eqIdx).trim();
-      return `${key}=[REDACTED]`;
-    })
-    .join('\n');
-}
+export { redactPropText }; // implementation lives in shared/zip-utils.mjs
 
 export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) {
   const showPropValues = Boolean(options.showPropValues);
@@ -411,7 +439,7 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
   if (extractDir) {
     const targetRoot = path.resolve(extractDir);
     for (const entry of entries) {
-      const destPath = path.join(targetRoot, entry.path);
+      const destPath = resolveInside(targetRoot, entry.path); // zip-slip guard
       fs.mkdirSync(path.dirname(destPath), { recursive: true });
       fs.writeFileSync(destPath, entry.data);
     }
@@ -641,22 +669,6 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
   };
 }
 
-function wrapManifestLine72Local(headerLine) {
-  const full = String(headerLine || '');
-  if (Buffer.byteLength(full, 'utf8') <= 72) return full;
-  const outLines = [];
-  let current = '';
-  for (const ch of full) {
-    if (Buffer.byteLength(current + ch, 'utf8') > 72) {
-      outLines.push(current);
-      current = ' ' + ch;
-    } else {
-      current += ch;
-    }
-  }
-  if (current) outLines.push(current);
-  return outLines.join('\r\n');
-}
 
 /**
  * Construye el modelo estructurado para exportar el informe de auditoría en PDF
@@ -865,7 +877,7 @@ export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], out
   if (inputPathOrDemo === '--demo') {
     entries = readZipEntries(buildDemoBundleZipBuffer());
   } else {
-    entries = readZipEntries(path.resolve(inputPathOrDemo));
+    entries = readZipEntries(Buffer.isBuffer(inputPathOrDemo) ? inputPathOrDemo : path.resolve(inputPathOrDemo));
   }
 
   const fixSet = new Set(selectedFixes.map((s) => s.trim().toLowerCase()));
@@ -894,13 +906,8 @@ export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], out
     let contentBuf = entry.data;
 
     if ((applyAll || fixSet.has('manifest')) && relPath === 'META-INF/MANIFEST.MF') {
-      const unfolded = (entry.text || '').replace(/\r?\n /g, '');
-      const headerLines = unfolded
-        .split(/\r?\n/)
-        .map((l) => l.trimEnd())
-        .filter(Boolean);
-      const wrapped = headerLines.map(wrapManifestLine72Local).join('\r\n') + '\r\n\r\n';
-      contentBuf = Buffer.from(wrapped, 'utf8');
+      // Keeps blank-line separated sections ("Name:" per-entry sections) intact (LL: manifest refold).
+      contentBuf = Buffer.from(refoldManifest(entry.text || ''), 'utf8');
       appliedChanges.push('manifest: Normalizada raíz META-INF/MANIFEST.MF y plegado a 72 bytes UTF-8');
     } else if (relPath.toLowerCase().endsWith('.iflw')) {
       let xml = entry.text || contentBuf.toString('utf8');
@@ -934,31 +941,46 @@ export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], out
 
       if (applyAll || fixSet.has('timeouts')) {
         const before = xml;
-        xml = xml.replace(
-          /<bpmn2:(serviceTask|callActivity)\b[^>]*>[\s\S]*?<\/bpmn2:\1>/gi,
-          (taskBlock) => {
-            const isExternalCall =
-              /<key>activityType<\/key>\s*<value>ExternalCall<\/value>/i.test(taskBlock) ||
-              /key\s*=\s*"activityType"\s+value\s*=\s*"ExternalCall"/i.test(taskBlock);
-            if (!isExternalCall || /timeout/i.test(taskBlock)) {
-              return taskBlock;
-            }
-            return taskBlock.replace(
-              /<\/bpmn2:extensionElements>/i,
-              '        <ifl:property><key>httpRequestTimeout</key><value>60000</value></ifl:property>\n      </bpmn2:extensionElements>'
-            );
+        // The timeout belongs to the RECEIVER ADAPTER channel (bpmn2:messageFlow), not to the
+        // Request-Reply serviceTask: SAP CPI ignores unknown properties on the task. Only the HTTP
+        // adapter key (httpRequestTimeout) is written; other adapters are reported for manual review.
+        const externalCallIds = new Set();
+        const taskRx = /<bpmn2:(serviceTask|callActivity)\b([^>]*)>([\s\S]*?)<\/bpmn2:\1>/gi;
+        let tmx;
+        while ((tmx = taskRx.exec(xml)) !== null) {
+          const isExternalCall =
+            /<key>activityType<\/key>\s*<value>ExternalCall<\/value>/i.test(tmx[3]) ||
+            /key\s*=\s*"activityType"\s+value\s*=\s*"ExternalCall"/i.test(tmx[3]);
+          const idm = tmx[2].match(/\bid\s*=\s*"([^"]+)"/);
+          if (isExternalCall && idm) externalCallIds.add(idm[1]);
+        }
+        const skipped = [];
+        xml = xml.replace(/<bpmn2:messageFlow\b([^>]*)>([\s\S]*?)<\/bpmn2:messageFlow>/gi, (flowBlock, attrs, inner) => {
+          const src = (attrs.match(/\bsourceRef\s*=\s*"([^"]+)"/) || [])[1];
+          if (!src || !externalCallIds.has(src)) return flowBlock;
+          if (/<key>[^<]*timeout[^<]*<\/key>/i.test(inner) || /key\s*=\s*"[^"]*timeout/i.test(inner)) return flowBlock;
+          const comp = (inner.match(/<key>ComponentType<\/key>\s*<value>([^<]*)<\/value>/i) || [])[1] || '';
+          if (comp.toUpperCase() !== 'HTTP' || !/<\/bpmn2:extensionElements>/i.test(inner)) {
+            skipped.push(`${src}${comp ? ` (${comp})` : ''}`);
+            return flowBlock;
           }
-        );
-        if (xml !== before) appliedChanges.push('timeouts: Añadido httpRequestTimeout=60000 ms en llamadas ExternalCall');
+          return flowBlock.replace(
+            /<\/bpmn2:extensionElements>/i,
+            '    <ifl:property>\n                    <key>httpRequestTimeout</key>\n                    <value>60000</value>\n                </ifl:property>\n            </bpmn2:extensionElements>'
+          );
+        });
+        if (xml !== before) appliedChanges.push('timeouts: Añadido httpRequestTimeout=60000 ms en el canal receptor HTTP (messageFlow) de las llamadas Request-Reply');
+        if (skipped.length) appliedChanges.push(`timeouts: revisión manual necesaria (adaptador no HTTP o sin extensionElements): ${skipped.join(', ')}`);
       }
 
       contentBuf = Buffer.from(xml, 'utf8');
     } else if ((applyAll || fixSet.has('groovy')) && (relPath.toLowerCase().endsWith('.groovy') || relPath.toLowerCase().endsWith('.gsh'))) {
       let gCode = entry.text || contentBuf.toString('utf8');
       const before = gCode;
-      gCode = gCode.replace(/\bimport\s+groovy\.xml\.XmlSlurper\b/g, 'import groovy.util.XmlSlurper');
-      gCode = gCode.replace(/\bimport\s+groovy\.xml\.XmlParser\b/g, 'import groovy.util.XmlParser');
-      gCode = gCode.replace(/\bgroovy\.xml\.XmlSlurper\b/g, 'groovy.util.XmlSlurper');
+      // NOTE: XmlSlurper/XmlParser imports are NOT rewritten. groovy.util.* only exists up to
+      // Groovy 3 (script step 1.x / Groovy 2.4) and groovy.xml.* only from Groovy 3 (step 2.x /
+      // Groovy 4): the correct package depends on the Script step version, which is not reliably
+      // inferable from the bundle. validate-groovy.mjs --groovy 2.4|4 reports the right one.
       gCode = gCode.replace(/(\b(?:[a-zA-Z0-9_]*[Rr]eader)\s*\.\s*getText\s*\()\s*['"][^'"]+['"]\s*(\))/g, '$1$2');
       gCode = gCode.replace(/\bimport\s+groovy\.json\.JsonSlurper\b(?!Classic)/g, 'import groovy.json.JsonSlurperClassic');
       gCode = gCode.replace(/\bnew\s+JsonSlurper\s*\(\s*\)/g, 'new JsonSlurperClassic()');
@@ -986,7 +1008,7 @@ export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], out
 }
 
 // CLI Runner
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {

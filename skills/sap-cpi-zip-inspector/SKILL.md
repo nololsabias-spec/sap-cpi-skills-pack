@@ -63,7 +63,7 @@ Review the deterministic output from `inspect-iflow-zip.mjs` across these 5 mand
 7. **CPILint & SAP Design Guideline Advisory Checks**:
    - **Splitter Streaming (`splittersWithoutStreaming`)**: Flags `General`/`Iterating Splitter` steps with `streaming="false"`.
    - **Router Default Route (`routersWithoutDefaultRoute`)**: Flags `<bpmn2:exclusiveGateway>` elements missing a `default` route.
-   - **Basic Auth & CSRF Protection (`basicAuthChannels` / `csrfDisabledChannels`)**: Flags channels using `BasicAuthentication` (CPILint `CleartextBasicAuth`) or disabling CSRF protection (`xsrfProtection=0` — CPILint `CsrfProtectionRequired`).
+   - **Basic Auth & CSRF Protection (`basicAuthChannels` / `csrfDisabledChannels`)**: Flags channels (per `messageFlow`) using Basic Auth with each adapter's own key — HTTP/OData `authenticationMethod=Basic`, SOAP/IDoc `authentication=Basic`, XI `AuthenticationType=BasicAuthentication`, AS2 `authenticationType=BasicAuthentication`, AS4 `authenticationType=basic` — exempting channels with `proxyType=sapcc` (Cloud Connector) (CPILint `CleartextBasicAuth`) or disabling CSRF protection (`xsrfProtection=0` — CPILint `CsrfProtectionRequired`).
 
 ### Step 3: Cross-Module Code Audit (When Groovy Scripts Exist)
 If `inspect-iflow-zip.mjs` detects Groovy scripts in `src/main/resources/script/*.groovy`, run the Groovy Code Auditor skill (`sap-cpi-code-auditor`) on each extracted script to check for Heap OOM, XXE, and `static def` memory leaks.
@@ -79,10 +79,10 @@ If `inspect-iflow-zip.mjs` detects Groovy scripts in `src/main/resources/script/
        - **Regla de Confirmación Previa Obligatoria**: Antes de modificar o empaquetar el `.zip`, muestra al usuario la lista numerada de cambios propuestos detectados en `heuristics.availableRemediations` (y en los scripts Groovy si los hubiera) y **pregúntale siempre cuáles de esos cambios específicos desea aplicar**:
          - `manifest`: Mover `.project` y `META-INF/MANIFEST.MF` a la raíz del `.zip` (eliminando carpetas contenedoras intermedias) y plegar líneas a 72 bytes UTF-8.
          - `https`: Actualizar canales `http://` a `https://`.
-         - `timeouts`: Añadir `httpRequestTimeout = 60000` ms en llamadas síncronas `ExternalCall` sin timeout.
+         - `timeouts`: Añadir `httpRequestTimeout = 60000` ms en el `messageFlow` del canal HTTP de las llamadas `ExternalCall` sin timeout (nunca en el `serviceTask`). Los canales de otros adaptadores se reportan para revisión manual.
          - `streaming`: Activar `<key>streaming</key><value>true</value>` en pasos `Splitter`.
          - `csrf`: Activar `<key>xsrfProtection</key><value>1</value>` en canales HTTP modificadores.
-         - `groovy`: Corregir automáticamente errores deterministas de Groovy 2.4 en scripts `.groovy` incluidos (`groovy.xml.XmlSlurper` -> `groovy.util.XmlSlurper`, `Reader.getText("UTF-8")` -> `Reader.getText()` y `JsonSlurper` -> `JsonSlurperClassic`).
+         - `groovy`: Corregir automáticamente errores deterministas de Groovy 2.4 en scripts `.groovy` incluidos (`Reader.getText("UTF-8")` -> `Reader.getText()` y `JsonSlurper` -> `JsonSlurperClassic`). Los imports `groovy.util.Xml*` / `groovy.xml.Xml*` **no** se reescriben: dependen de la versión de Groovy del paso Script (2.4 vs 4), que el `.zip` no indica de forma fiable.
        - Una vez que el usuario confirme qué cambios desea aplicar, ejecuta `inspect-iflow-zip.mjs <paquete.zip> --remediate <cambios_elegidos> --out <Paquete_Corregido.zip>` (sin tocar nunca los valores privados de `.prop`) y entrégale el `.zip` resultante validado.
 
 

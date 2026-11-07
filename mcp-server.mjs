@@ -10,8 +10,10 @@
  *   node mcp-server.mjs                (Starts MCP stdio server)
  *   node mcp-server.mjs --self-test    (Runs deterministic self-test of MCP tools/resources/prompts)
  */
+import { isMainModule, moduleDir } from './shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { writeAuditPdfFile } from './shared/pdf-utils.mjs';
 import { extractBundleFile } from './shared/zip-utils.mjs';
 import { inspectBundle, buildAuditPdfSpec, remediateBundleZip } from './skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
@@ -30,7 +32,60 @@ import { validateAndBuildCpiBundles, DEMO_ARCHITECT_SPEC } from './skills/sap-cp
 import { cloneIflowBundleZip, updateScriptCollectionBundleZip } from './skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs';
 import { validateAndBuildMockSuiteZip, parseMockSuiteInput, DEMO_BATCH_TEXT } from './skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs';
 
-const SERVER_DIR = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const SERVER_DIR = moduleDir(import.meta.url);
+
+/**
+ * S3 — Path sandbox for MCP tool arguments. A prompt-injected model must not be able to read or
+ * write arbitrary files (e.g. ~/.ssh, other repos) through this server. Every path argument is
+ * resolved against the workspace root and must stay inside an allowed root:
+ *   - CPI_MCP_ROOT or CLAUDE_PROJECT_DIR (when set), otherwise the server's working directory
+ *   - the OS temp directory
+ *   - extra roots in CPI_MCP_ALLOWED_ROOTS (separated by path.delimiter)
+ * Set CPI_MCP_UNSAFE_PATHS=1 to disable the check (not recommended).
+ */
+function realOrResolved(p) {
+  let cur = path.resolve(p);
+  const tail = [];
+  while (!fs.existsSync(cur)) {
+    const parent = path.dirname(cur);
+    if (parent === cur) return path.resolve(p);
+    tail.unshift(path.basename(cur));
+    cur = parent;
+  }
+  try {
+    return path.join(fs.realpathSync(cur), ...tail);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+export function getAllowedRoots() {
+  const primary = process.env.CPI_MCP_ROOT || process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const extra = (process.env.CPI_MCP_ALLOWED_ROOTS || '').split(path.delimiter).filter(Boolean);
+  // Workspace the server was installed into (<workspace>/.agents/mcp-server.mjs) or the repo itself.
+  // Needed because CLAUDE_PROJECT_DIR may point to a sub-folder when .mcp.json is inherited from a parent.
+  const installRoot = ['.agents', '.claude'].includes(path.basename(SERVER_DIR)) ? path.dirname(SERVER_DIR) : SERVER_DIR;
+  return [...new Set([primary, installRoot, os.tmpdir(), ...extra].map(realOrResolved))];
+}
+
+export function resolveUserPath(p) {
+  if (p === undefined || p === null || p === '') return p;
+  if (typeof p !== 'string' || p.includes('\0')) throw new Error('Ruta inválida.');
+  const roots = getAllowedRoots();
+  const abs = realOrResolved(path.resolve(roots[0], p));
+  if (process.env.CPI_MCP_UNSAFE_PATHS === '1') return abs;
+  const norm = (x) => (process.platform === 'win32' ? x.toLowerCase() : x);
+  const inside = roots.some((r) => {
+    const rel = path.relative(norm(r), norm(abs));
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  });
+  if (!inside) {
+    throw new Error(
+      `Ruta fuera del workspace permitido: ${p}. Raíces permitidas: ${roots.join(', ')} (añade otras con CPI_MCP_ALLOWED_ROOTS).`
+    );
+  }
+  return abs;
+}
 
 const SKILL_IDS = [
   'sap-cpi-architect',
@@ -86,7 +141,8 @@ export const MCP_TOOLS = [
       properties: {
         code: { type: 'string', description: 'Código fuente Groovy a validar (opcional si se indica filePath).' },
         filePath: { type: 'string', description: 'Ruta al archivo .groovy en disco (opcional si se indica code).' },
-        fileName: { type: 'string', description: 'Nombre identificador del script (ej. TransformOrder.groovy).' }
+        fileName: { type: 'string', description: 'Nombre identificador del script (ej. TransformOrder.groovy).' },
+        groovyVersion: { type: 'string', enum: ['2.4', '4'], description: 'Versión de Groovy del paso Script (2.4 o 4). Sin ella, las APIs XML dependientes de versión se reportan como MEDIUM en lugar de error de compilación; no se infiere de la API Message v1/v2.' }
       }
     }
   },
@@ -99,7 +155,8 @@ export const MCP_TOOLS = [
       properties: {
         originalCode: { type: 'string', description: 'Código Groovy original.' },
         refactoredCode: { type: 'string', description: 'Código Groovy refactorizado (opcional).' },
-        fileName: { type: 'string', description: 'Nombre del archivo Groovy.' }
+        fileName: { type: 'string', description: 'Nombre del archivo Groovy.' },
+        groovyVersion: { type: 'string', enum: ['2.4', '4'], description: 'Versión de Groovy del paso Script (2.4 o 4). Sin ella, las APIs XML dependientes de versión se reportan como MEDIUM en lugar de error de compilación; no se infiere de la API Message v1/v2.' }
       },
       required: ['originalCode']
     }
@@ -294,7 +351,7 @@ export const MCP_TOOLS = [
   {
     name: 'cpi_build_value_mapping',
     description:
-      'Construye paquetes OSGi (.zip) de Value Mapping estándar para SAP CPI a partir de especificaciones JSON o tablas CSV (con metainfo.prop, .project com.sap.ide.ifl.nature.valuemapping y value_mapping.xml).',
+      'Construye paquetes OSGi (.zip) de Value Mapping estándar para SAP CPI a partir de especificaciones JSON o tablas CSV (con metainfo.prop, .project con nature com.sap.ide.ifl.valmap y value_mapping.xml en formato <vm version="2.0">).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -385,34 +442,36 @@ export const MCP_TOOLS = [
 export function executeMcpTool(name, args = {}) {
   switch (name) {
     case 'cpi_inspect_zip': {
-      const report = inspectBundle(args.filePath || '--demo', args.extractDir || null);
+      const report = inspectBundle(args.filePath && args.filePath !== '--demo' ? resolveUserPath(args.filePath) : '--demo', args.extractDir ? resolveUserPath(args.extractDir) : null);
       if (args.pdfPath) {
         const pdfSpec = buildAuditPdfSpec(report);
-        const bytes = writeAuditPdfFile(path.resolve(args.pdfPath), pdfSpec);
-        report.pdfGenerated = { path: path.resolve(args.pdfPath), sizeBytes: bytes };
+        const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
+        report.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
       }
       return report;
     }
     case 'cpi_remediate_zip': {
       const fixes = Array.isArray(args.fixes) ? args.fixes : ['all'];
-      const remRes = remediateBundleZip(args.filePath, fixes, args.outZipPath);
-      const postReport = inspectBundle(args.outZipPath);
+      const srcPath = args.filePath === '--demo' ? '--demo' : resolveUserPath(args.filePath);
+      const outZip = resolveUserPath(args.outZipPath);
+      const remRes = remediateBundleZip(srcPath, fixes, outZip);
+      const postReport = inspectBundle(outZip);
       postReport.remediationResult = remRes;
       if (args.pdfPath) {
         const pdfSpec = buildAuditPdfSpec(postReport);
-        const bytes = writeAuditPdfFile(path.resolve(args.pdfPath), pdfSpec);
-        postReport.pdfGenerated = { path: path.resolve(args.pdfPath), sizeBytes: bytes };
+        const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
+        postReport.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
       }
       return postReport;
     }
     case 'cpi_validate_groovy': {
-      const code = args.code || (args.filePath ? fs.readFileSync(path.resolve(args.filePath), 'utf8') : '');
+      const code = args.code || (args.filePath ? fs.readFileSync(resolveUserPath(args.filePath), 'utf8') : '');
       const fName = args.fileName || (args.filePath ? path.basename(args.filePath) : 'Script.groovy');
-      return lintGroovyScript(code, fName);
+      return lintGroovyScript(code, fName, { groovyVersion: args.groovyVersion });
     }
     case 'cpi_audit_groovy': {
-      const orig = lintGroovyScript(args.originalCode || '', args.fileName || 'Original.groovy');
-      const ref = args.refactoredCode ? lintGroovyScript(args.refactoredCode, args.fileName || 'Refactored.groovy') : null;
+      const orig = lintGroovyScript(args.originalCode || '', args.fileName || 'Original.groovy', { groovyVersion: args.groovyVersion });
+      const ref = args.refactoredCode ? lintGroovyScript(args.refactoredCode, args.fileName || 'Refactored.groovy', { groovyVersion: args.groovyVersion }) : null;
       return compareAuditResults(orig, ref);
     }
     case 'cpi_infer_xsd': {
@@ -424,26 +483,26 @@ export function executeMcpTool(name, args = {}) {
       });
       const validation = validateXsdForSapCpi(xsd);
       if (args.outPath) {
-        fs.mkdirSync(path.dirname(path.resolve(args.outPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.outPath), xsd, 'utf8');
+        fs.mkdirSync(path.dirname(resolveUserPath(args.outPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.outPath), xsd, 'utf8');
       }
-      return { xsd, validation, outPath: args.outPath ? path.resolve(args.outPath) : null };
+      return { xsd, validation, outPath: args.outPath ? resolveUserPath(args.outPath) : null };
     }
     case 'cpi_validate_xsd': {
-      const content = args.xsdContent || (args.filePath ? fs.readFileSync(path.resolve(args.filePath), 'utf8') : '');
+      const content = args.xsdContent || (args.filePath ? fs.readFileSync(resolveUserPath(args.filePath), 'utf8') : '');
       return validateXsdForSapCpi(content);
     }
     case 'cpi_build_mmap': {
       const mmapXml = generateMmapXml(args);
       const validation = validateMmapForSapCpi(mmapXml);
       if (args.outPath) {
-        fs.mkdirSync(path.dirname(path.resolve(args.outPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.outPath), mmapXml, 'utf8');
+        fs.mkdirSync(path.dirname(resolveUserPath(args.outPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.outPath), mmapXml, 'utf8');
       }
-      return { mmapXml, validation, outPath: args.outPath ? path.resolve(args.outPath) : null };
+      return { mmapXml, validation, outPath: args.outPath ? resolveUserPath(args.outPath) : null };
     }
     case 'cpi_validate_xslt': {
-      const content = args.xsltContent || (args.filePath ? fs.readFileSync(path.resolve(args.filePath), 'utf8') : '');
+      const content = args.xsltContent || (args.filePath ? fs.readFileSync(resolveUserPath(args.filePath), 'utf8') : '');
       return validateXsltStylesheet(content, args.engine || null);
     }
     case 'cpi_test_regex': {
@@ -462,14 +521,14 @@ export function executeMcpTool(name, args = {}) {
         if (!args.specPath || args.specPath === '--demo') {
           specObj = DEMO_ARCHITECT_SPEC;
         } else {
-          const p = path.resolve(args.specPath);
+          const p = resolveUserPath(args.specPath);
           baseDir = path.dirname(p);
           specObj = JSON.parse(fs.readFileSync(p, 'utf8'));
         }
       }
       const res = validateAndBuildCpiBundles(specObj, baseDir);
       if (args.outDir) {
-        const targetDir = path.resolve(args.outDir);
+        const targetDir = resolveUserPath(args.outDir);
         fs.mkdirSync(targetDir, { recursive: true });
         fs.writeFileSync(path.join(targetDir, res.artifacts.iflowFileName), res.artifacts.iflowZipBuffer);
         if (res.artifacts.scriptCollectionZipBuffer) {
@@ -494,21 +553,21 @@ export function executeMcpTool(name, args = {}) {
     }
     case 'cpi_clone_bundle': {
       const additionalResources = (args.resourceFiles || []).map((rf) => {
-        const abs = path.resolve(rf);
+        const abs = resolveUserPath(rf);
         return { fileName: path.basename(abs), content: fs.readFileSync(abs) };
       });
-      const buf = cloneIflowBundleZip(path.resolve(args.sourceZipPath), {
+      const buf = cloneIflowBundleZip(resolveUserPath(args.sourceZipPath), {
         targetName: args.targetName,
         additionalResources
       });
-      const outAbs = path.resolve(args.outZipPath);
+      const outAbs = resolveUserPath(args.outZipPath);
       fs.mkdirSync(path.dirname(outAbs), { recursive: true });
       fs.writeFileSync(outAbs, buf);
       return { outZipPath: outAbs, sizeBytes: buf.length, injectedResources: additionalResources.map((r) => r.fileName) };
     }
     case 'cpi_simulate_mmap': {
-      const mmapContent = args.mmapContent || (args.mmapPath ? fs.readFileSync(path.resolve(args.mmapPath), 'utf8') : '');
-      const inputPayload = args.sourcePayload || (args.sourcePayloadPath ? fs.readFileSync(path.resolve(args.sourcePayloadPath), 'utf8') : '');
+      const mmapContent = args.mmapContent || (args.mmapPath ? fs.readFileSync(resolveUserPath(args.mmapPath), 'utf8') : '');
+      const inputPayload = args.sourcePayload || (args.sourcePayloadPath ? fs.readFileSync(resolveUserPath(args.sourcePayloadPath), 'utf8') : '');
       const sim = simulateMmapExecution({
         mmapContent,
         inputPayload,
@@ -516,47 +575,47 @@ export function executeMcpTool(name, args = {}) {
         properties: args.properties
       });
       if (args.outPath && sim.outputXml) {
-        fs.mkdirSync(path.dirname(path.resolve(args.outPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.outPath), sim.outputXml, 'utf8');
+        fs.mkdirSync(path.dirname(resolveUserPath(args.outPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.outPath), sim.outputXml, 'utf8');
       }
       return sim;
     }
     case 'cpi_diff_bundles': {
-      const diff = diffBundles(path.resolve(args.baseZipPath), path.resolve(args.targetZipPath));
+      const diff = diffBundles(resolveUserPath(args.baseZipPath), resolveUserPath(args.targetZipPath));
       if (args.pdfPath) {
         const pdfSpec = buildDiffPdfSpec(diff);
-        const bytes = writeAuditPdfFile(path.resolve(args.pdfPath), pdfSpec);
-        diff.pdfGenerated = { path: path.resolve(args.pdfPath), sizeBytes: bytes };
+        const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
+        diff.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
       }
       if (args.outJsonPath) {
-        fs.mkdirSync(path.dirname(path.resolve(args.outJsonPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.outJsonPath), JSON.stringify(diff, null, 2), 'utf8');
+        fs.mkdirSync(path.dirname(resolveUserPath(args.outJsonPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.outJsonPath), JSON.stringify(diff, null, 2), 'utf8');
       }
       return diff;
     }
     case 'cpi_export_technical_doc': {
-      const doc = extractIflowDocumentation(args.filePath === '--demo' ? '--demo' : path.resolve(args.filePath));
+      const doc = extractIflowDocumentation(args.filePath === '--demo' ? '--demo' : resolveUserPath(args.filePath));
       if (args.pdfPath) {
         const pdfSpec = buildTechnicalDocPdfSpec(doc.report, doc.markdownDocument);
-        const bytes = writeAuditPdfFile(path.resolve(args.pdfPath), pdfSpec);
-        doc.pdfGenerated = { path: path.resolve(args.pdfPath), sizeBytes: bytes };
+        const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
+        doc.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
       }
       if (args.markdownPath) {
-        fs.mkdirSync(path.dirname(path.resolve(args.markdownPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.markdownPath), doc.markdownDocument, 'utf8');
+        fs.mkdirSync(path.dirname(resolveUserPath(args.markdownPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.markdownPath), doc.markdownDocument, 'utf8');
       }
       return doc;
     }
     case 'cpi_export_api_client': {
-      const res = exportApiClientArtifacts(path.resolve(args.filePath), {
-        outDir: args.outDir ? path.resolve(args.outDir) : null,
+      const res = exportApiClientArtifacts(resolveUserPath(args.filePath), {
+        outDir: args.outDir ? resolveUserPath(args.outDir) : null,
         baseUrl: args.baseUrl,
         authType: args.authType
       });
       return res;
     }
     case 'cpi_build_value_mapping': {
-      const csvContent = args.csvContent || (args.csvPath ? fs.readFileSync(path.resolve(args.csvPath), 'utf8') : null);
+      const csvContent = args.csvContent || (args.csvPath ? fs.readFileSync(resolveUserPath(args.csvPath), 'utf8') : null);
       const res = validateAndBuildValueMappingBundle({
         name: args.name,
         description: args.description,
@@ -569,13 +628,13 @@ export function executeMcpTool(name, args = {}) {
         targetSchema: args.targetSchema
       });
       if (args.outZipPath && res.zipBuffer) {
-        fs.mkdirSync(path.dirname(path.resolve(args.outZipPath)), { recursive: true });
-        fs.writeFileSync(path.resolve(args.outZipPath), res.zipBuffer);
+        fs.mkdirSync(path.dirname(resolveUserPath(args.outZipPath)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(args.outZipPath), res.zipBuffer);
       }
       const { zipBuffer, ...summary } = res;
       return {
         ...summary,
-        outZipPath: args.outZipPath ? path.resolve(args.outZipPath) : null
+        outZipPath: args.outZipPath ? resolveUserPath(args.outZipPath) : null
       };
     }
     case 'cpi_pack_mock_suite': {
@@ -600,7 +659,7 @@ export function executeMcpTool(name, args = {}) {
       } else if (!args.specPath || args.specPath === '--demo') {
         payloads = parseMockSuiteInput(DEMO_BATCH_TEXT);
       } else {
-        const raw = fs.readFileSync(path.resolve(args.specPath), 'utf8');
+        const raw = fs.readFileSync(resolveUserPath(args.specPath), 'utf8');
         payloads = parseMockSuiteInput(raw);
       }
       if (!Array.isArray(payloads) || payloads.length === 0) {
@@ -612,23 +671,23 @@ export function executeMcpTool(name, args = {}) {
       });
       const targetZip = args.outputZipPath || args.outZipPath;
       if (targetZip && res.zipBuffer) {
-        fs.mkdirSync(path.dirname(path.resolve(targetZip)), { recursive: true });
-        fs.writeFileSync(path.resolve(targetZip), res.zipBuffer);
+        fs.mkdirSync(path.dirname(resolveUserPath(targetZip)), { recursive: true });
+        fs.writeFileSync(resolveUserPath(targetZip), res.zipBuffer);
       }
       const { zipBuffer, ...summary } = res;
       return {
         ...summary,
-        outZipPath: targetZip ? path.resolve(targetZip) : null,
-        outputZipPath: targetZip ? path.resolve(targetZip) : null,
+        outZipPath: targetZip ? resolveUserPath(targetZip) : null,
+        outputZipPath: targetZip ? resolveUserPath(targetZip) : null,
         sizeBytes: zipBuffer?.length || 0
       };
     }
     case 'cpi_get_iflow_endpoints': {
-      const p = args.filePath === '--demo' ? '--demo' : path.resolve(args.filePath);
+      const p = args.filePath === '--demo' ? '--demo' : resolveUserPath(args.filePath);
       return extractIflowEndpointsSummary(p);
     }
     case 'cpi_extract_bundle_file': {
-      const zipPath = path.resolve(args.zipPath);
+      const zipPath = resolveUserPath(args.zipPath);
       return extractBundleFile(zipPath, args.fileName);
     }
     case 'cpi_generate_groovy_template': {
@@ -792,7 +851,7 @@ export function handleJsonRpcMessage(msg) {
 }
 
 // CLI Self-Test Mode or Stdio Server Mode
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   if (args.includes('--self-test')) {

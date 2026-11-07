@@ -23,7 +23,7 @@
 
 ## 4. Correo Corporativo RFC 5322 Simplificado
 - **Componente**: `Router / Validator`
-- **Campo**: `${property.RecipientEmail}`
+- **Campo**: `${exchangeProperty.RecipientEmail}`
 - **Patrón**: `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
 - **Muestra MATCH**: `integration.suite@my-company.com`
 
@@ -34,6 +34,6 @@
 - **Muestra MATCH**: `c9bf9e57-1685-4c89-bafb-ff5af830be8a`
 
 ## 6. Lista de Inclusión / Exclusión (`in` / `not in`) y Fechas con Zona Horaria
-- **Alternativa oficial a `not in` en Router**: `${property.CountryCode} not regex '^(ES|PT|FR|IT)$'`
+- **Alternativa oficial a `not in` en Router**: `${exchangeProperty.CountryCode} not regex '^(ES|PT|FR|IT)$'`
 - **Timestamp con Zona Horaria en Content Modifier (sin Groovy)**: `${date-with-timezone:now:UTC:yyyy-MM-dd'T'HH:mm:ss'Z'}`
 - **XPath resiliente a Namespaces en Content Modifier**: `//*[local-name()='OrderNumber']/text()` (extraer siempre a una Exchange Property tipada `java.lang.String` antes del Router).
