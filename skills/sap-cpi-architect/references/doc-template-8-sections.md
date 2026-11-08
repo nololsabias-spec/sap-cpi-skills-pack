@@ -1,5 +1,7 @@
 # Plantilla Oficial de 8 Secciones para Documentación Técnica de iFlows (Modo 2)
 
+> Esta plantilla es la del **Markdown** (validada con `--validate-doc`, DOC-001). El **PDF** (`--pdf`) tiene su propia estructura de 10 secciones con índice navegable: 1 Objetivo y alcance, 2 Arquitectura, 3 Pasos, 4 Endpoints y llamadas, 5 Contratos, 6 Scripts y mapeos, 7 Errores, 8 Parámetros, 9 Operación, 10 Supuestos y glosario.
+
 Toda documentación técnica generada por ingeniería inversa debe contener **exactamente** estos 8 encabezados `##`:
 
 ```markdown

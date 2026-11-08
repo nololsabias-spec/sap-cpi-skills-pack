@@ -56,7 +56,7 @@ node setup-skills.mjs --target /ruta/a/tu/proyecto --agent cline        # Cline 
 
 ### Servidor MCP Local (`mcp-server.mjs` — Cero Dependencias, 100% Local `stdio`)
 
-El proyecto incluye [`mcp-server.mjs`](./mcp-server.mjs), un servidor **Model Context Protocol (MCP)** sobre `stdin`/`stdout` (JSON-RPC 2.0) que el IDE arranca automáticamente en segundo plano al abrir la carpeta (gracias a `.vscode/mcp.json`, `.cursor/mcp.json` o `.mcp.json`), exponiendo **20 Tools nativas** (`cpi_inspect_zip`, `cpi_remediate_zip`, `cpi_diff_bundles`, `cpi_validate_groovy`, `cpi_audit_groovy`, `cpi_generate_groovy_template`, `cpi_infer_xsd`, `cpi_validate_xsd`, `cpi_build_mmap`, `cpi_simulate_mmap`, `cpi_validate_xslt`, `cpi_test_regex`, `cpi_pack_mock_suite`, `cpi_build_package`, `cpi_clone_bundle`, `cpi_get_iflow_endpoints`, `cpi_extract_bundle_file`, `cpi_export_technical_doc`, `cpi_export_api_client`, `cpi_build_value_mapping`) y las **8 Skills como Resources/Prompts MCP** sin necesidad de pedir permisos de consola en cada validación:
+El proyecto incluye [`mcp-server.mjs`](./mcp-server.mjs), un servidor **Model Context Protocol (MCP)** sobre `stdin`/`stdout` (JSON-RPC 2.0) que el IDE arranca automáticamente en segundo plano al abrir la carpeta (gracias a `.vscode/mcp.json`, `.cursor/mcp.json` o `.mcp.json`), exponiendo **22 Tools nativas** (`cpi_inspect_zip`, `cpi_remediate_zip`, `cpi_diff_bundles`, `cpi_validate_groovy`, `cpi_audit_groovy`, `cpi_generate_groovy_template`, `cpi_infer_xsd`, `cpi_validate_xsd`, `cpi_build_mmap`, `cpi_simulate_mmap`, `cpi_validate_xslt`, `cpi_test_regex`, `cpi_pack_mock_suite`, `cpi_build_package`, `cpi_clone_bundle`, `cpi_get_iflow_endpoints`, `cpi_extract_bundle_file`, `cpi_export_technical_doc`, `cpi_export_api_client`, `cpi_build_value_mapping`) y las **8 Skills como Resources/Prompts MCP** sin necesidad de pedir permisos de consola en cada validación:
 
 ```bash
 # Verificar el servidor MCP local
@@ -119,7 +119,7 @@ sap-cpi-skills-pack/
 | **5** | `sap-cpi-regex-studio` | Diseña y prueba expresiones regulares con anclaje `^...$`, detector estático de *Catastrophic Backtracking (ReDoS)* y expresiones Apache Camel Simple (`date-with-timezone`, listas `not in`). | `test-camel-regex.mjs` |
 | **6** | `sap-cpi-xsd-studio` | Infiere esquemas W3C XSD 1.0 a partir de muestras JSON, genera mapeos gráficos **`.mmap` (`<xiObj>`)** sintetizando contenedores padre y **simula localmente la ejecución del mapeo** con payloads XML/JSON reales. | `validate-xsd.mjs`<br>`build-mmap.mjs`<br>`simulate-mmap.mjs` |
 | **7** | `sap-cpi-mock-data-generator` | Valida sintaxis XML/JSON (incluyendo estándares IDoc `EDI_DC40` y OData `$batch`), comprueba la correlación E2E entre múltiples contratos y empaqueta suites `.zip`. | `pack-mock-suite.mjs` |
-| **8** | `sap-cpi-architect` | **Modo 1:** Construye paquetes OSGi `.zip` duales (iFlow + Script Collection). **Modo 2:** Extrae topología y genera **Documento Técnico formal de 8 secciones en PDF y Markdown**. **Modo 3:** Clona y adapta bundles `.zip` de referencia. **Modo 4:** Exporta **colecciones Postman v2.1 y OpenAPI 3.0** con CSRF handshake. **Modo 5:** Construye paquetes OSGi de **Value Mapping**. | `build-cpi-package.mjs`<br>`clone-iflow-bundle.mjs`<br>`extract-for-docs.mjs`<br>`export-api-client.mjs`<br>`build-value-mapping.mjs` |
+| **8** | `sap-cpi-architect` | **Modo 1:** Construye paquetes OSGi `.zip` duales (iFlow + Script Collection). **Modo 2:** Extrae topología y genera **Documento Técnico en PDF y Word editable `.docx` (10 secciones, índice con enlaces, información funcional por paso, mapeos, pie centrado con el logo reducido de la empresa) y Markdown (8 secciones)**. **Modo 3:** Clona y adapta bundles `.zip` de referencia. **Modo 4:** Exporta **colecciones Postman v2.1 y OpenAPI 3.0** con CSRF handshake. **Modo 5:** Construye paquetes OSGi de **Value Mapping**. | `build-cpi-package.mjs`<br>`clone-iflow-bundle.mjs`<br>`extract-for-docs.mjs`<br>`export-api-client.mjs`<br>`build-value-mapping.mjs` |
 
 ---
 
@@ -138,6 +138,7 @@ node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Paquete_iFlow.
 
 # Comparar semánticamente dos versiones de un paquete (iFlow o Script Collection) con reporte PDF
 node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs ./iFlow_v1.zip ./iFlow_v2.zip --pdf ./Comparativa.pdf
+node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs ./iFlow_v1.zip ./iFlow_v2.zip --docx ./Comparativa.docx   # también --docx en inspect-iflow-zip.mjs (Word editable)
 
 # Limpieza reversible antes de compartir un bundle real con la IA (y restauración antes de importarlo)
 node skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs ./Paquete_iFlow.zip --terms Cliente,Proyecto
@@ -234,9 +235,9 @@ node skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs --spec ./sui
   ```bash
   node skills/sap-cpi-architect/scripts/build-cpi-package.mjs ./bundle-spec.json --out-dir ./dist
   ```
-- **Modo 2 (`extract-for-docs.mjs`):** Extrae la topología completa de un paquete `.zip`, valida las 8 secciones corporativas y genera el **Documento de Diseño Técnico formal en PDF y Markdown**:
+- **Modo 2 (`extract-for-docs.mjs`):** Extrae la topología completa de un paquete `.zip`, valida las 8 secciones del Markdown y genera el **Documento de Diseño Técnico en PDF (10 secciones), Word editable (`--docx`, misma estructura) y Markdown**:
   ```bash
-  node skills/sap-cpi-architect/scripts/extract-for-docs.mjs ./Paquete_iFlow.zip --pdf ./Diseno_Tecnico.pdf
+  node skills/sap-cpi-architect/scripts/extract-for-docs.mjs ./Paquete_iFlow.zip --pdf ./Diseno_Tecnico.pdf --docx ./Diseno_Tecnico.docx
   node skills/sap-cpi-architect/scripts/extract-for-docs.mjs ./Paquete_iFlow.zip --validate-doc ./Documentacion_Tecnica.md
   ```
 - **Modo 3 (`clone-iflow-bundle.mjs`):** Clona un iFlow `.zip` de referencia adaptando su identificador OSGi, scripts `.groovy` invocados y rutas XPath del Splitter (manteniendo intactos sus diagramas BPMN2 y archivos `.prop`), inyecta archivos sueltos (`.xsd`, `.mmap`, `.xsl`, `.groovy`, `.wsdl`) con `--add-resource`, o actualiza una `ScriptCollection.zip`:

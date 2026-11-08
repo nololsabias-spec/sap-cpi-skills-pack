@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readZipEntries, createZipBuffer, resolveInside, redactPropText } from '../../../shared/zip-utils.mjs';
 import { writeAuditPdfFile } from '../../../shared/pdf-utils.mjs';
+import { writeDocxFile } from '../../../shared/docx-writer.mjs';
 import { refoldManifest } from '../../../shared/manifest-utils.mjs';
 import { findSanitizedEntries } from '../../../shared/cpi-sanitizer.mjs';
 import { lintGroovyScript } from '../../sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
@@ -1047,7 +1048,7 @@ if (isMain) {
     // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
     const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log(
-      'Uso: node inspect-iflow-zip.mjs <archivo.zip | archivo.iflw | --demo> [--pdf <informe.pdf>] [--remediate <manifest,https,timeouts,streaming,csrf|all> --out < Corregido.zip>] [--extract-dir <carpeta>] [--show-prop-values] [--json]'
+      'Uso: node inspect-iflow-zip.mjs <archivo.zip | archivo.iflw | --demo> [--pdf <informe.pdf>] [--docx <informe.docx>] [--remediate <manifest,https,timeouts,streaming,csrf|all> --out < Corregido.zip>] [--extract-dir <carpeta>] [--show-prop-values] [--json]'
     );
     process.exit(args.length === 0 ? 2 : 0);
   }
@@ -1059,6 +1060,8 @@ if (isMain) {
   const extractDir = extractIdx !== -1 ? args[extractIdx + 1] : null;
   const pdfIdx = args.indexOf('--pdf');
   const pdfPath = pdfIdx !== -1 ? args[pdfIdx + 1] : null;
+  const docxIdx = args.indexOf('--docx');
+  const docxPath = docxIdx !== -1 ? args[docxIdx + 1] : null;
   const remIdx = args.indexOf('--remediate');
   const remSpec = remIdx !== -1 ? (args[remIdx + 1] || 'all').split(',') : null;
   const outIdx = args.indexOf('--out');
@@ -1080,6 +1083,10 @@ if (isMain) {
       const pdfSpec = buildAuditPdfSpec(report);
       const pdfBytes = writeAuditPdfFile(path.resolve(pdfPath), pdfSpec);
       report.pdfGenerated = { path: path.resolve(pdfPath), sizeBytes: pdfBytes };
+    }
+    if (docxPath) {
+      writeDocxFile(path.resolve(docxPath), buildAuditPdfSpec(report));
+      report.docxGenerated = { path: path.resolve(docxPath), sizeBytes: fs.statSync(path.resolve(docxPath)).size };
     }
     if (jsonFlag) {
       console.log(JSON.stringify(report, null, 2));

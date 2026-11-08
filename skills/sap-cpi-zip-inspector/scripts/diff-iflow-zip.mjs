@@ -19,6 +19,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { inspectBundle, buildDemoBundleZipBuffer } from './inspect-iflow-zip.mjs';
 import { writeAuditPdfFile } from '../../../shared/pdf-utils.mjs';
+import { writeDocxFile } from '../../../shared/docx-writer.mjs';
 import { createZipBuffer, readZipEntries } from '../../../shared/zip-utils.mjs';
 
 function buildDemoTargetBundleZipBuffer() {
@@ -362,8 +363,8 @@ if (isMain) {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
     const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
-    console.log('Uso 1 (Demo): node diff-iflow-zip.mjs --demo [--pdf <informe.pdf>] [--json]');
-    console.log('Uso 2 (Diff): node diff-iflow-zip.mjs <v1.zip> <v2.zip> [--pdf <informe.pdf>] [--show-prop-values] [--json]');
+    console.log('Uso 1 (Demo): node diff-iflow-zip.mjs --demo [--pdf <informe.pdf>] [--docx <informe.docx>] [--json]');
+    console.log('Uso 2 (Diff): node diff-iflow-zip.mjs <v1.zip> <v2.zip> [--pdf <informe.pdf>] [--docx <informe.docx>] [--show-prop-values] [--json]');
     process.exit(args.length === 0 ? 2 : 0);
   }
 
@@ -371,6 +372,8 @@ if (isMain) {
   const showPropValues = args.includes('--show-prop-values');
   const pdfIdx = args.indexOf('--pdf');
   const pdfPath = pdfIdx !== -1 ? args[pdfIdx + 1] : null;
+  const docxIdx = args.indexOf('--docx');
+  const docxPath = docxIdx !== -1 ? args[docxIdx + 1] : null;
 
   let targetA = args[0];
   let targetB = args[1];
@@ -386,6 +389,11 @@ if (isMain) {
     const pdfSpec = buildDiffPdfSpec(result);
     const bytes = writeAuditPdfFile(path.resolve(pdfPath), pdfSpec);
     result.pdfGenerated = { path: path.resolve(pdfPath), sizeBytes: bytes };
+  }
+
+  if (docxPath) {
+    writeDocxFile(path.resolve(docxPath), buildDiffPdfSpec(result));
+    result.docxGenerated = { path: path.resolve(docxPath), sizeBytes: fs.statSync(path.resolve(docxPath)).size };
   }
 
   if (jsonFlag) {

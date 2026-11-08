@@ -13,6 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { inspectBundle, buildDemoBundleZipBuffer } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
 import { writeAuditPdfFile } from '../../../shared/pdf-utils.mjs';
+import { writeDocxFile } from '../../../shared/docx-writer.mjs';
+import { buildIflowDetailBlocks } from '../../../shared/iflow-doc-blocks.mjs';
 
 export const MANDATORY_DOC_SECTIONS = [
   { num: 1, title: 'Resumen Ejecutivo', pattern: /^##\s+1\.\s*Resumen\s+Ejecutivo/im },
@@ -124,68 +126,84 @@ ${(report.findings || []).map((f) => `- [${f.severity || 'INFO'}] **${f.rule || 
   };
 }
 
-export function buildTechnicalDocPdfSpec(report, markdownText = null) {
+const COMPANY_FIELDS = [
+  ['name', 'Empresa'],
+  ['legalName', 'Razón social'],
+  ['taxId', 'Identificación fiscal'],
+  ['address', 'Dirección'],
+  ['project', 'Proyecto'],
+  ['client', 'Cliente'],
+  ['author', 'Autor'],
+  ['reviewer', 'Revisor'],
+  ['documentVersion', 'Versión del documento'],
+  ['date', 'Fecha'],
+  ['classification', 'Clasificación'],
+  ['contact', 'Contacto']
+];
+
+/**
+ * Lee un JSON de datos de empresa (todos los campos son opcionales y se tratan como texto plano).
+ * Campos: name, legalName, taxId, address, project, client, author, reviewer, documentVersion, date, classification, contact.
+ */
+export function loadCompanyInfo(filePath) {
+  const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('El archivo de empresa debe ser un objeto JSON.');
+  }
+  const info = {};
+  for (const [key] of COMPANY_FIELDS) {
+    if (raw[key] !== undefined && raw[key] !== null && String(raw[key]).trim()) info[key] = String(raw[key]).trim();
+  }
+  return info;
+}
+
+/**
+ * @param {object} report resultado de inspectBundle
+ * @param {string|null} markdownText
+ * @param {{ company?: object, logoSvg?: string }} [options]
+ */
+export function buildTechnicalDocPdfSpec(report, markdownText = null, options = {}) {
   const blocks = [];
   const m = report.manifestData || {};
   const h = report.heuristics || {};
+  const company = options.company || null;
+  const detail = buildIflowDetailBlocks(report, { privacy: options.privacy });
 
-  // 1. Resumen Ejecutivo
-  blocks.push({ type: 'section', text: '1. Resumen Ejecutivo' });
-  blocks.push({ type: 'kv', key: 'Nombre del iFlow', value: m.name || report.fileName });
-  blocks.push({ type: 'kv', key: 'Bundle-SymbolicName', value: `${m.symbolicName || 'Desconocido'} (v${m.version || '1.0.0'})` });
-  blocks.push({ type: 'kv', key: 'Tipo de Artefacto', value: m.bundleType || 'IntegrationFlow' });
-  blocks.push({ type: 'kv', key: 'Perfil de Ejecución', value: 'IFLMAP (Cloud Integration Worker Node)' });
-
-  // 2. Arquitectura del Flujo
-  blocks.push({ type: 'section', text: '2. Arquitectura del Flujo' });
-  blocks.push({
-    type: 'kv',
-    key: 'Topología BPMN 2.0',
-    value: `${h.stats?.channels || 0} canales | ${h.stats?.serviceTasks || 0} service tasks | ${h.stats?.routers || 0} routers | ${h.stats?.subprocesses || 0} subprocesos`
-  });
-  if (report.catalog.iflwFiles.length > 0) {
-    blocks.push({ type: 'kv', key: 'Definición BPMN2 (.iflw)', value: report.catalog.iflwFiles.map((f) => f.name).join(', ') });
-  }
-  if (report.catalog.messageMappings.length > 0 || report.catalog.xsdSchemas.length > 0) {
-    const maps = [...report.catalog.messageMappings.map((f) => f.name), ...report.catalog.xsdSchemas.map((f) => f.name)];
-    blocks.push({ type: 'kv', key: 'Esquemas y Mapeos', value: maps.join(', ') });
-  }
-
-  // 3. Parámetros y Configuración Externalizada
-  blocks.push({ type: 'section', text: '3. Parámetros y Configuración Externalizada' });
-  const propFiles = report.catalog.parameterFiles || [];
-  if (propFiles.length > 0) {
-    for (const pf of propFiles) {
-      blocks.push({ type: 'bullet', text: `${pf.name} (${pf.size} bytes)` });
+  // 0. Datos del documento (empresa, proyecto, autoría, clasificación)
+  if (company && Object.keys(company).length > 0) {
+    blocks.push({ type: 'section', text: 'Datos del Documento' });
+    for (const [key, label] of COMPANY_FIELDS) {
+      if (company[key]) blocks.push({ type: 'kv', key: label, value: company[key] });
     }
+    blocks.push({ type: 'subsection', text: 'Control de versiones' });
+    blocks.push({
+      type: 'table',
+      columns: [{ title: 'Versión', weight: 1.5, bold: true }, { title: 'Fecha', weight: 2 }, { title: 'Autor', weight: 3 }, { title: 'Descripción', weight: 5 }],
+      rows: [[company.documentVersion || '1.0', company.date || '-', company.author || '-', 'Documentación técnica generada a partir del diseño del iFlow']]
+    });
+  }
+
+  // Documento técnico completo (secciones 1-10) cuando el bundle incluye .iflw
+  if (detail.available && detail.document.length) {
+    blocks.push(...detail.document);
   } else {
-    blocks.push({ type: 'paragraph', text: 'El paquete no incluye parameters.prop (no contiene parámetros externalizados configurables).' });
+    blocks.push({ type: 'section', text: '1. Resumen Ejecutivo' });
+    blocks.push({ type: 'kv', key: 'Nombre del iFlow', value: m.name || report.fileName });
+    blocks.push({ type: 'kv', key: 'Bundle-SymbolicName', value: `${m.symbolicName || 'Desconocido'} (v${m.version || '1.0.0'})` });
+    blocks.push({ type: 'kv', key: 'Tipo de Artefacto', value: m.bundleType || 'IntegrationFlow' });
+    blocks.push({ type: 'section', text: '2. Arquitectura del Flujo' });
+    blocks.push({ type: 'kv', key: 'Topología BPMN 2.0', value: `${h.stats?.channels || 0} canales | ${h.stats?.serviceTasks || 0} service tasks | ${h.stats?.routers || 0} routers | ${h.stats?.subprocesses || 0} subprocesos` });
+    blocks.push({ type: 'section', text: '3. Scripts Groovy / Script Collection' });
+    for (const g of report.catalog.groovyScripts || []) blocks.push({ type: 'bullet', text: `Script local: ${g.name}` });
+    if (h.referencedScriptCollections?.length > 0) blocks.push({ type: 'kv', key: 'Script Collections Vinculadas', value: h.referencedScriptCollections.join(', ') });
+    blocks.push({ type: 'section', text: '4. Manejo de Errores' });
+    blocks.push({ type: 'kv', key: 'Exception Subprocess', value: h.hasExceptionSubprocess ? 'Activo' : 'No detectado' });
   }
 
-  // 4. Scripts Groovy / Script Collection
-  blocks.push({ type: 'section', text: '4. Scripts Groovy / Script Collection' });
-  if (report.catalog.groovyScripts.length > 0) {
-    for (const g of report.catalog.groovyScripts) {
-      blocks.push({ type: 'bullet', text: `Script local: ${g.name} (${g.size} bytes)` });
-    }
-  }
-  if (h.referencedScriptCollections?.length > 0) {
-    blocks.push({ type: 'kv', key: 'Script Collections Vinculadas', value: h.referencedScriptCollections.join(', ') });
-  }
-  if (report.catalog.groovyScripts.length === 0 && (!h.referencedScriptCollections || h.referencedScriptCollections.length === 0)) {
-    blocks.push({ type: 'paragraph', text: 'No se identificaron scripts Groovy locales ni dependencias de Script Collections.' });
-  }
-
-  // 5. Manejo de Errores
-  blocks.push({ type: 'section', text: '5. Manejo de Errores' });
-  blocks.push({
-    type: 'kv',
-    key: 'Exception Subprocess',
-    value: h.hasExceptionSubprocess ? 'Activo (SubProcess de Excepción Configurado)' : 'No Detectado (Riesgo de fallo no capturado)'
-  });
-
+  // La auditoría (hallazgos, puntaje, recomendaciones) es un documento aparte: solo con --include-audit
+  if (options.includeAudit) {
   // 6. Auditoría de Buenas Prácticas SAP
-  blocks.push({ type: 'section', text: '6. Auditoría de Buenas Prácticas SAP' });
+  blocks.push({ type: 'section', text: 'Auditoría de Buenas Prácticas SAP' });
   let findingsCount = 0;
   for (const c of h.unencryptedChannels || []) {
     findingsCount++;
@@ -200,22 +218,25 @@ export function buildTechnicalDocPdfSpec(report, markdownText = null) {
   }
 
   // 7. Puntaje de Cumplimiento
-  blocks.push({ type: 'section', text: '7. Puntaje de Cumplimiento' });
+  blocks.push({ type: 'section', text: 'Puntaje de Cumplimiento' });
   blocks.push({ type: 'kv', key: 'Puntuación Determinista', value: `${h.score ?? 100}/100` });
   const statusLabel = (h.score ?? 100) >= 85 ? 'APROBADO PARA PRODUCCIÓN' : (h.score ?? 100) >= 60 ? 'APROBADO CON OBSERVACIONES' : 'REQUIERE REMEDIACIÓN';
   blocks.push({ type: 'kv', key: 'Estado de Gobierno', value: statusLabel });
 
   // 8. Recomendaciones de Modernización
-  blocks.push({ type: 'section', text: '8. Recomendaciones de Modernización' });
+  blocks.push({ type: 'section', text: 'Recomendaciones de Modernización' });
   blocks.push({ type: 'bullet', text: 'Externalizar todos los endpoints mediante parámetros configurables {{PARAM}}.' });
   blocks.push({ type: 'bullet', text: 'Usar streaming (Reader) en scripts Groovy para proteger la memoria heap del nodo trabajador.' });
-  blocks.push({ type: 'bullet', text: 'Vincular scripts comunes en Script Collections reutilizables mediante Require-Capability.' });
+  }
 
   return {
     title: `Documento Técnico: ${m.name || path.basename(report.fileName, '.zip')}`,
-    subtitle: `SymbolicName: ${m.symbolicName || 'N/A'} | Versión: ${m.version || '1.0.0'}`,
-    score: h.score ?? 100,
-    footerText: 'SAP CPI Architecture & Technical Documentation (8 Secciones)',
+    subtitle: `Versión ${m.version || "1.0.0"} | ${m.symbolicName || "N/A"}`,
+    score: options.includeAudit ? (h.score ?? 100) : undefined,
+    footerText: company?.name
+      ? `${company.name}${company.classification ? ' - ' + company.classification : ''}`
+      : 'SAP CPI Architecture & Technical Documentation',
+    brand: options.logoSvg ? { svg: options.logoSvg, text: company?.name } : null,
     blocks
   };
 }
@@ -227,7 +248,7 @@ if (isMain) {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
     const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
-    console.log('Uso 1 (Extracción & Contexto): node extract-for-docs.mjs <iflow.zip | --demo> [--pdf <doc.pdf>] [--markdown <doc.md>] [--json]');
+    console.log('Uso 1 (Extracción & Contexto): node extract-for-docs.mjs <iflow.zip | --demo> [--pdf <doc.pdf>] [--docx <doc.docx>] [--company <empresa.json>] [--logo <marca.svg>] [--privacy|--no-privacy] [--include-audit] [--markdown <doc.md>] [--json]');
     console.log('Uso 2 (Validar Markdown):     node extract-for-docs.mjs --validate-doc <documento.md>');
     process.exit(args.length === 0 ? 2 : 0);
   }
@@ -268,10 +289,48 @@ if (isMain) {
   const pdfIdx = args.indexOf('--pdf');
   const pdfPath = pdfIdx !== -1 ? args[pdfIdx + 1] : null;
 
-  if (pdfPath) {
-    const pdfSpec = buildTechnicalDocPdfSpec(report, docResult.markdownDocument);
-    const bytes = writeAuditPdfFile(path.resolve(pdfPath), pdfSpec);
-    report.pdfGenerated = { path: path.resolve(pdfPath), sizeBytes: bytes };
+  const optValue = (flag) => {
+    const k = args.indexOf(flag);
+    return k !== -1 && args[k + 1] && !args[k + 1].startsWith('--') ? args[k + 1] : null;
+  };
+  const companyPath = optValue('--company');
+  if (args.includes('--watermark')) {
+    console.error('Aviso: --watermark ya no existe (los PDFs no llevan marca de agua). Usa --logo <marca.svg> para el pie de página.');
+  }
+  const logoPath = optValue('--logo');
+  for (const [flag, p] of [['--company', companyPath], ['--logo', logoPath]]) {
+    if (args.includes(flag) && !p) {
+      console.error(`Error: ${flag} requiere la ruta de un archivo.`);
+      process.exit(2);
+    }
+    if (p && !fs.existsSync(path.resolve(p))) {
+      console.error(`Archivo no encontrado: ${path.resolve(p)}`);
+      process.exit(1);
+    }
+  }
+  const pdfOptions = {
+    company: companyPath ? loadCompanyInfo(path.resolve(companyPath)) : null,
+    logoSvg: logoPath ? fs.readFileSync(path.resolve(logoPath), 'utf8') : null,
+    includeAudit: args.includes('--include-audit'),
+    privacy: args.includes('--privacy') ? true : args.includes('--no-privacy') ? false : undefined
+  };
+
+  const docxPath = optValue('--docx');
+  if (args.includes('--docx') && !docxPath) {
+    console.error('Error: --docx requiere la ruta del archivo .docx de salida.');
+    process.exit(2);
+  }
+  if (pdfPath || docxPath) {
+    const docSpec = buildTechnicalDocPdfSpec(report, docResult.markdownDocument, pdfOptions);
+    if (pdfPath) {
+      const bytes = writeAuditPdfFile(path.resolve(pdfPath), docSpec);
+      report.pdfGenerated = { path: path.resolve(pdfPath), sizeBytes: bytes };
+    }
+    if (docxPath) {
+      fs.mkdirSync(path.dirname(path.resolve(docxPath)), { recursive: true });
+      writeDocxFile(path.resolve(docxPath), docSpec);
+      report.docxGenerated = { path: path.resolve(docxPath), sizeBytes: fs.statSync(path.resolve(docxPath)).size };
+    }
   }
 
   const mdIdx = args.indexOf('--markdown') !== -1 ? args.indexOf('--markdown') : args.indexOf('--md');
@@ -294,10 +353,10 @@ if (isMain) {
     console.log(`Scripts Groovy detectados: ${report.catalog.groovyScripts.map((s) => s.name).join(', ') || 'Ninguno'}`);
     console.log(`Parámetros detectados:\n${report.catalog.parameterFiles.map((p) => p.content).join('\n') || '(Sin parameters.prop)'}`);
     if (report.pdfGenerated) {
-      console.log(`\n[OK] Documento de Diseño Técnico (8 Secciones) generado en PDF: ${report.pdfGenerated.path} (${report.pdfGenerated.sizeBytes} bytes)`);
+      console.log(`\n[OK] Documento de Diseño Técnico (10 secciones) generado en PDF: ${report.pdfGenerated.path} (${report.pdfGenerated.sizeBytes} bytes)`);
     }
     if (report.markdownGenerated) {
-      console.log(`\n[OK] Documento Markdown (8 Secciones) generado en: ${report.markdownGenerated.path} (${report.markdownGenerated.sizeBytes} bytes)`);
+      console.log(`\n[OK] Documento Markdown (8 secciones) generado en: ${report.markdownGenerated.path} (${report.markdownGenerated.sizeBytes} bytes)`);
     }
   }
 }

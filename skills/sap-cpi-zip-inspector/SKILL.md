@@ -35,6 +35,7 @@ node ./scripts/inspect-iflow-zip.mjs <path-to-iflow.zip-or-.iflw> [--extract-dir
 
 # Exportar resumen y matriz de hallazgos directamente en PDF
 node ./scripts/inspect-iflow-zip.mjs <path-to-iflow.zip-or-.iflw> --pdf <Informe_Auditoria.pdf>
+# Word editable: añade --docx <Informe_Auditoria.docx> (también en diff-iflow-zip.mjs; MCP: docxPath)
 
 # Generar un nuevo paquete .zip aplicando únicamente los cambios autorizados por el usuario
 node ./scripts/inspect-iflow-zip.mjs <path-to-iflow.zip> --remediate <manifest,https,timeouts,streaming,csrf|all> --out <iFlow_Corregido.zip>

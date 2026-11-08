@@ -268,3 +268,81 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 - **Causa Raíz Técnica**: (1) los valores de `parameters.prop` se reutilizan literalmente en otros archivos y en otros bundles del mismo paquete; (2) los valores `Vendor`/`cmdVariantUri` de los adaptadores y las referencias `::` de `.propdef` parecen hosts, pero son metadatos estándar; (3) reescribir `MANIFEST.MF` sin respetar las líneas de 72 bytes lo invalida.
 - **Solución Codificada**: `shared/cpi-sanitizer.mjs` y `sanitize-iflow-zip.mjs`. Usan alias sintácticamente válidos y consistentes, un prepaso de `.prop` sobre todos los zips, propagación de valores con límites de palabra y exclusión de metadatos de adaptador. El MANIFEST se transforma por línea lógica y se repliega. Los zips anidados se procesan recursivamente, las entradas ya limpiadas se rechazan y `--restore` se verifica por SHA-256. Se añade la regla `SANITIZED-001` en inspector y packager, y `rules/sap-cpi-privacy-sanitize.md` (preguntar antes de leer).
 - **Archivos**: `shared/cpi-sanitizer.mjs`, `sanitize-iflow-zip.mjs`, `inspect-iflow-zip.mjs`, `build-cpi-package.mjs`, `mcp-server.mjs`, `setup-skills.mjs`, `rules/sap-cpi-privacy-sanitize.md`.
+
+### `LL-028` — Documentación técnica PDF con datos de empresa y marca de agua SVG
+- **Síntoma**: el PDF de diseño técnico no permitía personalizar la autoría ni aplicar identidad visual; usar `--terms` para ocultar un nombre de producto dejaba alias `SANITIZED_TERM_*` ilegibles en el documento.
+- **Causa Raíz Técnica**: el motor PDF solo dibujaba texto. Un SVG de trazados (p. ej. salida de vectorizadores) se puede incrustar como Form XObject reutilizado en todas las páginas, con ExtGState para la opacidad, sin dependencias.
+- **Solución Codificada**: `shared/svg-watermark.mjs` (parser M/L/H/V/C/Z + translate, rechaza script/image/href), `watermark` en `createAuditPdfBuffer`, y `--company`/`--watermark` en `extract-for-docs.mjs`. Para documentos legibles, limpiar sin `--terms` salvo que el término sea realmente privado.
+- **Archivos**: `shared/svg-watermark.mjs`, `shared/pdf-utils.mjs`, `extract-for-docs.mjs`, `tests/unit/svg-watermark.test.mjs`.
+
+### `LL-029` — PDF técnico con esquema, endpoints, llamadas y ejemplos (modo privacidad)
+- **Síntoma**: la documentación PDF solo listaba recuentos y nombres de ficheros; faltaban esquema del flujo, endpoints, llamadas de ejemplo, pasos y parámetros.
+- **Causa Raíz Técnica**: el motor PDF solo soportaba secciones, texto y hallazgos, y el generador no interpretaba el BPMN2 del `.iflw`.
+- **Solución Codificada**: `shared/iflow-model.mjs` (parser del `.iflw`: procesos, pasos, canales, parámetros, ejemplos de llamada), `shared/pdf-blocks.mjs` (bloques `subsection`, `table`, `code`, `callout`, `diagram` con métricas Helvetica) y `shared/iflow-doc-blocks.mjs` (compone secciones y anexos A/B). Modo privacidad automático para bundles saneados (o `--privacy`): solo alias y `{{Param}}`; nunca se leen valores de `.prop`.
+- **Archivos**: `shared/iflow-model.mjs`, `shared/pdf-blocks.mjs`, `shared/iflow-doc-blocks.mjs`, `shared/pdf-utils.mjs`, `extract-for-docs.mjs`, `tests/unit/iflow-doc.test.mjs`.
+
+### `LL-030` — Documento técnico separado del informe de auditoría y esquemas horizontales
+- **Síntoma**: el PDF técnico incluía auditoría/puntaje/recomendaciones y los diagramas eran verticales (muchas páginas, nodos poco legibles).
+- **Causa Raíz Técnica**: un único generador mezclaba dos documentos con audiencias distintas; `diagram` apilaba los pasos en una columna.
+- **Solución Codificada**: las secciones 6–8 solo se emiten con `--include-audit`. `renderDiagram` dispone el flujo en tramos horizontales (6 capas por banda) con conectores circulares A/B/C entre tramos, nodos con acento de color, eventos en cápsula, gateways en rombo y sistemas externos arriba/abajo.
+- **Archivos**: `shared/pdf-blocks.mjs`, `extract-for-docs.mjs`, `tests/unit/iflow-doc.test.mjs`, `docs/CLI_REFERENCE.md`.
+
+### `LL-031` — Documento técnico estilo especificación y nodos compactos
+- **Síntoma**: el PDF técnico era pobre (listados de ficheros, bytes de ficheros de configuración) y los nodos del esquema ocupaban demasiado, partiendo el diagrama en muchos tramos.
+- **Causa Raíz Técnica**: el generador mostraba metadatos del paquete en lugar de documentar diseño, interfaces y operación; los nodos llevaban el texto dentro de una caja grande.
+- **Solución Codificada**: `shared/iflow-doc-sections.mjs` compone 10 secciones (objetivo y alcance con ficha técnica, arquitectura, flujo funcional con rutas de decisión, interfaces y ejemplos, configuración, scripts, errores, seguridad, operación con resolución de incidencias, glosario) más control de versiones. No se menciona ningún fichero de configuración ni su tamaño. Nodos de 40x24 con la etiqueta debajo y 9 columnas por tramo.
+- **Archivos**: `shared/iflow-doc-sections.mjs`, `shared/iflow-doc-blocks.mjs`, `shared/pdf-blocks.mjs`, `extract-for-docs.mjs`, `tests/unit/iflow-doc.test.mjs`.
+
+### `LL-032` — Pasos con información funcional y procesos como secuencia numerada
+- **Síntoma**: la tabla de pasos del documento técnico copiaba la configuración del iFlow (nombre, tipo, valores) sin aportar nada; los procesos de error se imprimían como una línea `A -> B -> C` ilegible y el nombre de subproceso solapaba la columna siguiente.
+- **Causa Raíz Técnica**: el generador no interpretaba el rol de cada paso en el ciclo ni documentaba el porqué de la arquitectura.
+- **Solución Codificada**: `shared/iflow-functional.mjs` deriva por paso "Qué aporta al ciclo / Consume / Produce" (con análisis de E/S de los Groovy: propiedades y cabeceras leídas/escritas). Los procesos de error se muestran en tabla con pasos numerados.
+- **Archivos**: `shared/iflow-functional.mjs`, `shared/iflow-doc-sections.mjs`, `shared/iflow-doc-blocks.mjs`, `tests/unit/iflow-doc.test.mjs`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-033` — Índice con enlaces, espaciado jerárquico y pie con marca de empresa
+- **Síntoma**: el índice era una lista plana sin páginas ni enlaces, el espaciado entre bloques era uniforme (títulos pegados al contenido anterior) y la marca de agua restaba legibilidad.
+- **Causa Raíz Técnica**: el motor PDF no conocía la jerarquía del documento ni en qué página caía cada título.
+- **Solución Codificada**: `createAuditPdfBuffer` maqueta en dos pasadas; el bloque `toc` lista secciones y subsecciones (nivel por numeración) con puntos guía, número de página y anotaciones `/Link` con `/Dest` interno. Tabla de separaciones por tipo de bloque (sección 26 > subsección 12 > tabla/llamada 8 > párrafo 4) y menor tras un título; los títulos reservan espacio para no quedar huérfanos; bloque `pagebreak`. La marca de agua desaparece: `docSpec.brand = { svg }` dibuja el logo en el pie junto al nombre de la empresa y "Página N de M". CLI: `--logo` sustituye a `--watermark`.
+- **Archivos**: `shared/pdf-utils.mjs`, `shared/pdf-blocks.mjs`, `shared/iflow-doc-sections.mjs`, `extract-for-docs.mjs`, `tests/lessons/lessons.test.mjs`, `tests/unit/svg-watermark.test.mjs`.
+
+### `LL-034` — Sin decisiones de diseño inventadas y documentación de mapeos
+- **Síntoma**: el documento incluía "decisiones de diseño" con su motivo, deducidas de la forma del flujo pero no conocidas realmente; y los mapeos (.mmap, XSLT, XSD) no aparecían.
+- **Causa Raíz Técnica**: el generador especulaba sobre intenciones que el paquete no contiene y no tenía un módulo que describiera los recursos de transformación.
+- **Solución Codificada**: se elimina `designDecisions` (solo se documenta lo observable). `shared/iflow-mappings.mjs` genera en la sección 6 los pasos de mapeo del iFlow, los campos destino/origen de cada .mmap, las expresiones de cada XSLT, los elementos raíz de cada XSD, y avisa si un recurso referenciado no está en el paquete. Los pasos Mapping/XSLTMapping indican el recurso en la sección 3.
+- **Archivos**: `shared/iflow-mappings.mjs`, `shared/iflow-functional.mjs`, `shared/iflow-doc-sections.mjs`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-035` — Descripción funcional de pasos Data Store
+- **Síntoma**: los pasos Data Store (get/put/delete) aparecían como "Paso de proceso" sin explicar su función.
+- **Causa Raíz Técnica**: `functionalStep` no contemplaba la actividad `DBstorage`.
+- **Solución Codificada**: describe la operación (recupera, guarda, elimina) y sus opciones (borrado tras lectura, fallo si no existe, cabeceras, caducidad). El nombre del Data Store solo se cita si es un parámetro `{{Param}}`, nunca un literal.
+- **Archivos**: `shared/iflow-functional.mjs`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-036` — Pie de página del PDF descentrado
+- **Síntoma**: en el pie, el logo y el nombre de la empresa quedaban a distinta altura y pegados al margen izquierdo, no centrados.
+- **Causa Raíz Técnica**: el logo se centraba verticalmente sobre una línea y el texto usaba una línea base distinta, y ambos arrancaban en el margen izquierdo.
+- **Solución Codificada**: `createAuditPdfBuffer` calcula una línea central común, mide el grupo logo+texto de marca y lo centra horizontalmente en la página; "Página N de M" queda alineado a la derecha en la misma línea base.
+- **Archivos**: `shared/pdf-utils.mjs`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-037` — Salida Word editable (.docx)
+- **Síntoma**: el documento técnico solo existía en PDF y no se podía editar.
+- **Causa Raíz Técnica**: el motor de documento solo tenía un renderizador (PDF); el .doc binario no es viable sin dependencias.
+- **Solución Codificada**: `shared/docx-writer.mjs` genera Office Open XML (.docx) desde el mismo docSpec: estilos Heading reales, índice como campo TOC, tablas nativas, listas, llamadas, diagramas como formas de Word agrupadas y pie con logo + campos PAGE/NUMPAGES. CLI `--docx <salida.docx>` y parámetro MCP `docxPath`. Word puede abrirlo y guardarlo como .doc si se necesita ese formato.
+- **Archivos**: `shared/docx-writer.mjs`, `skills/sap-cpi-architect/scripts/extract-for-docs.mjs`, `mcp-server.mjs`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-038` — JSON/XML mostrados como texto plano en el documento
+- **Síntoma**: los ejemplos de solicitud/respuesta (JSON, XML, HTTP) aparecían en el PDF y el Word como líneas de texto sin formato ni indentación.
+- **Causa Raíz Técnica**: el bloque `code` se pintaba como texto monoespaciado sin detectar el lenguaje ni reindentar.
+- **Solución Codificada**: `shared/code-format.mjs` detecta JSON/XML/HTTP (o usa `language`), reindenta JSON y XML válidos y tokeniza cada línea con colores (claves, cadenas, números, etiquetas, atributos). Lo usan `pdf-blocks.mjs` y `docx-writer.mjs`. Los cuerpos que no se pueden deducir del paquete no se inventan.
+- **Archivos**: `shared/code-format.mjs`, `shared/pdf-blocks.mjs`, `shared/docx-writer.mjs`, `shared/iflow-doc-blocks.mjs`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-039` — Salida Word también para auditoría y comparación
+- **Síntoma**: solo el documento técnico se podía exportar a Word; los informes de auditoría, post-remediación y comparación solo salían en PDF.
+- **Causa Raíz Técnica**: `--docx` / `docxPath` solo estaba cableado en `extract-for-docs` y `cpi_export_technical_doc`.
+- **Solución Codificada**: `inspect-iflow-zip.mjs` y `diff-iflow-zip.mjs` aceptan `--docx <ruta>`; `cpi_inspect_zip`, `cpi_remediate_zip` y `cpi_diff_bundles` aceptan `docxPath`. Reutilizan el mismo docSpec que el PDF.
+- **Archivos**: `skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs`, `skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs`, `mcp-server.mjs`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-040` — Ejemplos en texto negro y diagrama con un único nodo
+- **Síntoma**: los ejemplos de código salían coloreados (se pidió texto negro) y, en el Word, un proceso con un único elemento suelto se dibujaba como una caja gigante a todo el ancho.
+- **Causa Raíz Técnica**: el coloreado de sintaxis se aplicaba por fragmento; y el grupo DrawingML se ajustaba al contenido, estirando la única forma hasta ocupar todo el grupo.
+- **Solución Codificada**: PDF y Word imprimen el código con `CODE_TEXT` (negro) conservando la reindentación de JSON/XML. `groupDrawing` añade un marco invisible del tamaño del grupo, por lo que un nodo solo mantiene su tamaño normal.
+- **Archivos**: `shared/code-format.mjs`, `shared/pdf-blocks.mjs`, `shared/docx-writer.mjs`, `tests/lessons/lessons.test.mjs`.

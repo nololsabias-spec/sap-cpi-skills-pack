@@ -64,3 +64,5 @@ docs/TEST_PLAN_PROMPT.md
 # Carpetas de pruebas locales con exportaciones reales
 realtest*/
 prueba*/
+*.docx
+*.doc

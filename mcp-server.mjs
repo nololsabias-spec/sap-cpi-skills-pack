@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { writeAuditPdfFile } from './shared/pdf-utils.mjs';
+import { writeDocxFile } from './shared/docx-writer.mjs';
 import { extractBundleFile } from './shared/zip-utils.mjs';
 import { inspectBundle, buildAuditPdfSpec, remediateBundleZip } from './skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
 import { lintGroovyScript, generateCanonicalGroovyTemplate } from './skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
@@ -23,7 +24,7 @@ import { inferXsdFromJsonSamples, validateXsdForSapCpi } from './skills/sap-cpi-
 import { generateMmapXml, validateMmapForSapCpi } from './skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs';
 import { simulateMmapExecution } from './skills/sap-cpi-xsd-studio/scripts/simulate-mmap.mjs';
 import { diffBundles, buildDiffPdfSpec } from './skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs';
-import { extractIflowDocumentation, buildTechnicalDocPdfSpec } from './skills/sap-cpi-architect/scripts/extract-for-docs.mjs';
+import { extractIflowDocumentation, buildTechnicalDocPdfSpec, loadCompanyInfo } from './skills/sap-cpi-architect/scripts/extract-for-docs.mjs';
 import { exportApiClientArtifacts, extractIflowEndpointsSummary } from './skills/sap-cpi-architect/scripts/export-api-client.mjs';
 import { validateAndBuildValueMappingBundle } from './skills/sap-cpi-architect/scripts/build-value-mapping.mjs';
 import { validateXsltStylesheet } from './skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs';
@@ -123,6 +124,7 @@ export const MCP_TOOLS = [
       properties: {
         filePath: { type: 'string', description: 'Ruta al archivo .zip o .iflw a auditar (o "--demo").' },
         pdfPath: { type: 'string', description: 'Ruta opcional donde guardar el resumen de auditoría en PDF.' },
+        docxPath: { type: 'string', description: 'Ruta opcional donde guardar el informe en Word (.docx editable).' },
         extractDir: { type: 'string', description: 'Carpeta opcional donde extraer los recursos del paquete.' }
       },
       required: ['filePath']
@@ -142,7 +144,8 @@ export const MCP_TOOLS = [
           description: 'Lista de correcciones confirmadas por el usuario.'
         },
         outZipPath: { type: 'string', description: 'Ruta de salida para el nuevo paquete .zip corregido.' },
-        pdfPath: { type: 'string', description: 'Ruta opcional para generar el informe PDF post-remediación.' }
+        pdfPath: { type: 'string', description: 'Ruta opcional para generar el informe PDF post-remediación.' },
+        docxPath: { type: 'string', description: 'Ruta opcional para generar el informe post-remediación en Word (.docx).' }
       },
       required: ['filePath', 'fixes', 'outZipPath']
     }
@@ -362,6 +365,7 @@ export const MCP_TOOLS = [
         baseZipPath: { type: 'string', description: 'Ruta al paquete .zip original (base / baseline).' },
         targetZipPath: { type: 'string', description: 'Ruta al paquete .zip modificado o remediado.' },
         pdfPath: { type: 'string', description: 'Ruta opcional para generar el informe comparativo en PDF.' },
+        docxPath: { type: 'string', description: 'Ruta opcional para generar el informe comparativo en Word (.docx).' },
         outJsonPath: { type: 'string', description: 'Ruta opcional donde escribir el resultado JSON.' }
       },
       required: ['baseZipPath', 'targetZipPath']
@@ -370,13 +374,18 @@ export const MCP_TOOLS = [
   {
     name: 'cpi_export_technical_doc',
     description:
-      'Genera el Documento de Diseño Técnico corporativo de 8 secciones (Resumen, Arquitectura BPMN2, Contratos XSD/WSDL, Mappings, Scripts Groovy, Parámetros Externalizados, Canales Adaptadores y Manejo de Errores) en PDF y/o Markdown para un paquete .zip de iFlow.',
+      'Genera el Documento de Diseño Técnico de un iFlow .zip en PDF y/o Word editable .docx (docxPath) (10 secciones con índice navegable: objetivo, flujo y diagramas, pasos con su función, endpoints y llamadas, contratos, scripts y mapeos, parámetros por uso, errores y glosario) y/o Markdown (8 secciones). Usa privacy automático con bundles sanitizados: solo alias y {{Param}}. El pie lleva la marca de la empresa (sin marca de agua).',
     inputSchema: {
       type: 'object',
       properties: {
         filePath: { type: 'string', description: 'Ruta al archivo .zip del iFlow (o "--demo").' },
         pdfPath: { type: 'string', description: 'Ruta opcional donde guardar el documento técnico en PDF.' },
-        markdownPath: { type: 'string', description: 'Ruta opcional donde guardar el documento técnico en Markdown.' }
+        docxPath: { type: 'string', description: 'Ruta opcional donde guardar el documento técnico en Word (.docx editable, misma estructura que el PDF).' },
+        markdownPath: { type: 'string', description: 'Ruta opcional donde guardar el documento técnico en Markdown.' },
+        companyPath: { type: 'string', description: 'JSON opcional con datos de la empresa (name, classification, author, documentVersion, date...) para la portada y el pie.' },
+        logoPath: { type: 'string', description: 'SVG opcional con la marca de la empresa para el pie de página.' },
+        privacy: { type: 'boolean', description: 'Fuerza (true) o desactiva (false) el modo privado. Por defecto se activa solo con bundles sanitizados.' },
+        includeAudit: { type: 'boolean', description: 'Añade la sección de auditoría de calidad al PDF (por defecto separada).' }
       },
       required: ['filePath']
     }
@@ -500,6 +509,10 @@ export function executeMcpTool(name, args = {}) {
         const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
         report.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
       }
+      if (args.docxPath) {
+        writeDocxFile(resolveUserPath(args.docxPath), buildAuditPdfSpec(report));
+        report.docxGenerated = { path: resolveUserPath(args.docxPath), sizeBytes: fs.statSync(resolveUserPath(args.docxPath)).size };
+      }
       return report;
     }
     case 'cpi_remediate_zip': {
@@ -513,6 +526,10 @@ export function executeMcpTool(name, args = {}) {
         const pdfSpec = buildAuditPdfSpec(postReport);
         const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
         postReport.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
+      }
+      if (args.docxPath) {
+        writeDocxFile(resolveUserPath(args.docxPath), buildAuditPdfSpec(postReport));
+        postReport.docxGenerated = { path: resolveUserPath(args.docxPath), sizeBytes: fs.statSync(resolveUserPath(args.docxPath)).size };
       }
       return postReport;
     }
@@ -675,6 +692,10 @@ export function executeMcpTool(name, args = {}) {
         const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
         diff.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
       }
+      if (args.docxPath) {
+        writeDocxFile(resolveUserPath(args.docxPath), buildDiffPdfSpec(diff));
+        diff.docxGenerated = { path: resolveUserPath(args.docxPath), sizeBytes: fs.statSync(resolveUserPath(args.docxPath)).size };
+      }
       if (args.outJsonPath) {
         fs.mkdirSync(path.dirname(resolveUserPath(args.outJsonPath)), { recursive: true });
         fs.writeFileSync(resolveUserPath(args.outJsonPath), JSON.stringify(diff, null, 2), 'utf8');
@@ -683,10 +704,22 @@ export function executeMcpTool(name, args = {}) {
     }
     case 'cpi_export_technical_doc': {
       const doc = extractIflowDocumentation(args.filePath === '--demo' ? '--demo' : resolveUserPath(args.filePath));
-      if (args.pdfPath) {
-        const pdfSpec = buildTechnicalDocPdfSpec(doc.report, doc.markdownDocument);
-        const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
-        doc.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
+      if (args.pdfPath || args.docxPath) {
+        const pdfSpec = buildTechnicalDocPdfSpec(doc.report, doc.markdownDocument, {
+          company: args.companyPath ? loadCompanyInfo(resolveUserPath(args.companyPath)) : null,
+          logoSvg: args.logoPath ? fs.readFileSync(resolveUserPath(args.logoPath), 'utf8') : null,
+          includeAudit: !!args.includeAudit,
+          privacy: typeof args.privacy === 'boolean' ? args.privacy : undefined
+        });
+        if (args.pdfPath) {
+          const bytes = writeAuditPdfFile(resolveUserPath(args.pdfPath), pdfSpec);
+          doc.pdfGenerated = { path: resolveUserPath(args.pdfPath), sizeBytes: bytes };
+        }
+        if (args.docxPath) {
+          fs.mkdirSync(path.dirname(resolveUserPath(args.docxPath)), { recursive: true });
+          writeDocxFile(resolveUserPath(args.docxPath), pdfSpec);
+          doc.docxGenerated = { path: resolveUserPath(args.docxPath), sizeBytes: fs.statSync(resolveUserPath(args.docxPath)).size };
+        }
       }
       if (args.markdownPath) {
         fs.mkdirSync(path.dirname(resolveUserPath(args.markdownPath)), { recursive: true });

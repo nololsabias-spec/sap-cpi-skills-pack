@@ -4,7 +4,7 @@ description: >-
   Use this skill when the user wants to: (Mode 1) Design and package a complete SAP Cloud
   Integration (CPI / Integration Suite) iFlow + Script Collection OSGi .zip bundle from a
   natural-language functional specification using the 3-stage pipeline (Plan -> BPMN2 .iflw
-  XML -> Groovy Scripts), (Mode 2) Reverse-engineer and generate comprehensive 8-section
+  XML -> Groovy Scripts), (Mode 2) Reverse-engineer and generate comprehensive
   technical documentation from an existing iFlow .zip bundle, OR (Mode 3) Clone and adapt
   an existing reference iFlow and Script Collection .zip bundle to a new API specification.
 ---
@@ -13,7 +13,7 @@ description: >-
 
 Operates in three specialized modes:
 - **Modo 1 · Generar iFlow + Script Collection (`.zip`)**: Designs an enterprise-grade iFlow in 3 stages (Plan -> BPMN2 `.iflw` XML -> Groovy Scripts), validates all artifacts, and builds real OSGi `.zip` bundles importable into SAP Integration Suite.
-- **Modo 2 · Documentar iFlow Existente**: Extracts an existing `.zip` bundle, runs static heuristics, and generates the 8-section technical & architectural documentation.
+- **Modo 2 · Documentar iFlow Existente**: Extracts an existing `.zip` bundle, runs static heuristics, and generates the technical PDF (10 sections: TOC with links, flow diagrams, functional step info, endpoints, scripts, mappings, parameters, errors, glossary) and the 8-section Markdown.
 - **Modo 3 · Clonar y Adaptar Bundles de Referencia (`.zip`) según Nueva Especificación**: Clones an existing working iFlow + Script Collection `.zip` template, adapts scripts, XPath splitters, and OSGi descriptors to a new functional/API specification, and preserves private `.prop` files untouched.
 
 ---
@@ -83,7 +83,7 @@ node ./scripts/build-cpi-package.mjs <spec.json | --demo> --out-dir ./dist-packa
 
 > **Formatos OSGi reales (verificados con exportaciones de SAP)**: `.project` con buildCommand `org.eclipse.jdt.core.javabuilder` y naturalezas `org.eclipse.jdt.core.javanature` + `com.sap.ide.ifl.project.support.project.nature` + `com.sap.ide.ifl.bsn` (iFlow / Script Collection) o `com.sap.ide.ifl.valmap` (Value Mapping). Los Value Mapping (`build-value-mapping.mjs`) usan `<vm version="2.0"><group id="<hex32>"><entry><agency/><schema/><value/></entry>…</group></vm>` y un MANIFEST con `Import-Package: com.sap.xi.mapping.camel.valmap` y `Bundle-Activator: com.sap.xi.mapping.camel.valmap.ValueMappingActivator`. `value_mapping.xml` va en la **raíz** del bundle (como en el ejemplo oficial `TestValueMap.zip` de SAP) y `Bundle-SymbolicName` lleva `; singleton:=true`. Por convención, el Value Mapping se crea en el **mismo paquete de integración** que el iFlow que lo consume, pero los pares agencia/identificador son globales al tenant y no pueden repetirse entre Value Mappings desplegados.
 
-## Modo 2: Documentar iFlow Existente (Ingeniería Inversa en 8 Secciones)
+## Modo 2: Documentar iFlow Existente (Ingeniería Inversa: PDF de 10 secciones y Markdown de 8)
 
 ### Paso 0: Clarificación de Alcance Documental
 Antes de redactar la documentación técnica, verifica:
@@ -95,6 +95,10 @@ Run `extract-for-docs.mjs` on the existing `.zip` bundle:
 
 ```bash
 node ./scripts/extract-for-docs.mjs <existing-iflow.zip | --demo>
+# Optional PDF branding: --pdf doc.pdf --company company.json --logo mark.svg  (footer brand centered; no watermark)
+# Editable Word (same docSpec/structure): add --docx doc.docx (MCP: docxPath). .docx only; Word can "Save as" .doc
+# The PDF includes flow diagrams, endpoints/calls table, call examples, step tables and parameter usage;
+# --privacy (auto for sanitized bundles) keeps only aliases and {{Param}} placeholders.
 ```
 
 * Extractor & Doc Validator script: [extract-for-docs.mjs](./scripts/extract-for-docs.mjs)
@@ -185,3 +189,15 @@ Siempre que el usuario reporte un **error de subida o ejecución en SAP CPI**, c
 2. **Codificar en el Script CLI**: Actualizar el script validador/generador correspondiente en `./scripts/` para detectar o prevenir determinísticamente ese caso en el futuro.
 3. **Actualizar Documentación y Lecciones**: Documentar la mejora en esta `SKILL.md`, en `docs/VALIDATION_RULES.md` y en `docs/LESSONS_LEARNED.md`.
 4. **Verificar y Sincronizar**: Ejecutar `node verify-all.mjs` y `node setup-skills.mjs` para propagar el aprendizaje a `.agents/` y `.claude/`.
+
+### Documento técnico: información funcional (LL-032)
+En el PDF técnico, cada paso debe explicar qué aporta al ciclo y qué consume/produce (`shared/iflow-functional.mjs`), no copiar la configuración del iFlow. Las decisiones relevantes de arquitectura se destacan con su motivo, y los procesos de error se presentan como tabla de pasos numerados.
+
+### Documento técnico PDF/Word: estructura y maquetación (LL-029..LL-037)
+
+- Pie: logo pequeño (14 pt de alto) + nombre de empresa centrados, "Página N de M" a la derecha, misma línea base (LL-036).
+- `--docx` / `docxPath` exporta el mismo docSpec a Word editable (LL-037).
+- Índice con niveles, puntos guía, números de página y enlaces internos; separación vertical según el nivel en el árbol de contenido.
+- Pie de página con la marca de la empresa (`--logo` SVG + nombre/clasificación de `--company`); no hay marca de agua.
+- Sección 6 documenta también los mapeos (Message Mapping, XSLT, XSD, Value Mapping) por campos de origen/destino. No se inventan decisiones de diseño: solo se describe lo que figura en el iFlow.
+- MCP `cpi_export_technical_doc`: `companyPath`, `logoPath`, `privacy`, `includeAudit`.

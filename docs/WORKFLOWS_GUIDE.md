@@ -28,7 +28,7 @@ node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs ./extracted_iflow/src/
 ```
 Obtendrás el `Score de Calidad Original (0-100)` y las líneas exactas donde existan riesgos de OOM, XXE o incompatibilidades con *Upgrade Readiness*.
 
-### Paso 3: Extraer topología y validar la Documentación Técnica (8 Secciones)
+### Paso 3: Extraer topología y validar la Documentación Técnica (PDF de 10 secciones, Word editable con `--docx` y Markdown de 8)
 ```bash
 node skills/sap-cpi-architect/scripts/extract-for-docs.mjs ./Order_Replication.zip --validate-doc ./Doc_Tecnica_Order_Replication.md
 ```
