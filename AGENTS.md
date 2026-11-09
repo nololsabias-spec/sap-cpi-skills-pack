@@ -52,4 +52,4 @@ Regla completa: [`rules/sap-cpi-privacy-sanitize.md`](./rules/sap-cpi-privacy-sa
 
 ## Marca de los documentos
 
-Antes del primer PDF/Word de la sesión ejecuta `node skills/sap-cpi-architect/scripts/brand-setup.mjs --show`; si no hay perfil, pregunta una sola vez por nombre de empresa (y dirección/autor/revisor/fecha) y un logo SVG de solo trazados, y guárdalos con ese mismo script. Se aplican a todos los documentos (`--no-brand` los omite). Nunca versiones `.cpi-brand/`.
+Antes del primer PDF/Word de la sesión ejecuta `node skills/sap-cpi-architect/scripts/brand-setup.mjs --show`; si no hay perfil, pregunta una sola vez por nombre de empresa (y dirección/autor/revisor/fecha) y un logo SVG de solo trazados, y guárdalos con ese mismo script o con la tool MCP `cpi_brand_setup` (`action`: `show`, `save`, `clear`). Se aplican a todos los documentos (`--no-brand` los omite). Nunca versiones `.cpi-brand/`.

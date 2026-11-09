@@ -20,7 +20,7 @@ node setup-skills.mjs [--target <directorio>] [--agent all|both|antigravity|clau
 | `--mcp` | Registra automáticamente el servidor MCP local (`node <ruta-absoluta>/.agents/mcp-server.mjs`) en `.mcp.json` y `.cursor/mcp.json`, y con `${workspaceFolder}/.agents/mcp-server.mjs` en `.vscode/mcp.json`. La ruta absoluta evita `CONNECTION_CLOSED` cuando el IDE se abre desde una subcarpeta (Claude Code hereda el `.mcp.json` de carpetas padre). |
 
 ### 1.1b. `mcp-server.mjs` (Servidor MCP Local `stdio` JSON-RPC 2.0)
-Expone los 22 motores deterministas (incluidos `cpi_sanitize_zip` y `cpi_restore_zip`) como herramientas MCP (`tools/list`, `tools/call`) y las 8 `SKILL.md` como recursos y prompts MCP (`resources/list`, `prompts/list`).
+Expone los 23 motores deterministas (incluidos `cpi_sanitize_zip` y `cpi_restore_zip`) como herramientas MCP (`tools/list`, `tools/call`) y las 8 `SKILL.md` como recursos y prompts MCP (`resources/list`, `prompts/list`).
 
 ```bash
 node mcp-server.mjs              # Modo servidor stdio (invocado automáticamente por el IDE)

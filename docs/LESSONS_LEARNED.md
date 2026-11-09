@@ -400,3 +400,9 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 - **Causa Raíz Técnica**: `iflow-doc-sections.mjs` emite una sección «Contenido» antes del bloque `toc`, y `docx-writer.mjs` ya pinta su propio `TocHeading` (fuera del esquema); el Heading1 sí entra en el campo `TOC \o "1-3"`.
 - **Solución Codificada**: el escritor Word omite la sección «Contenido» cuando el bloque siguiente es `toc`.
 - **Archivos**: `shared/docx-writer.mjs`.
+
+### `LL-050` — El perfil de marca solo se podía crear por CLI, no desde el MCP
+- **Síntoma**: un agente conectado solo por MCP no podía consultar ni guardar el logo y los datos de empresa de los PDF/Word.
+- **Causa Raíz Técnica**: `brand-setup.mjs` no estaba expuesto como tool en `mcp-server.mjs`, y los contadores de herramientas (22) y el catálogo de prompts no lo contemplaban.
+- **Solución Codificada**: nueva tool `cpi_brand_setup` (`action`: `show` | `save` | `clear`) que reutiliza `runBrandSetup`; las rutas pasan por `resolveUserPath`. Contadores actualizados a 23 en README, `docs/ARCHITECTURE.md`, `docs/CLI_REFERENCE.md`, `setup-skills.mjs` y `verify-all.mjs`.
+- **Archivos**: `mcp-server.mjs`, `skills/sap-cpi-architect/SKILL.md`, `AGENTS.md`, `setup-skills.mjs`, `verify-all.mjs`.
