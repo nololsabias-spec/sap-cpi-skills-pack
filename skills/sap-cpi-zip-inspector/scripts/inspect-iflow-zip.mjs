@@ -691,198 +691,159 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
 /**
  * Construye el modelo estructurado para exportar el informe de auditoría en PDF
  */
+const AUDIT_SEV_ORDER = ['CRÍTICA', 'ALTA', 'MEDIA', 'BAJA', 'INFO'];
+const AUDIT_CATEGORIES = [
+  ['seguridad', 'Seguridad y credenciales'],
+  ['fiabilidad', 'Fiabilidad y manejo de errores'],
+  ['rendimiento', 'Rendimiento y memoria'],
+  ['groovy', 'Calidad del código Groovy'],
+  ['paquete', 'Paquete y despliegue']
+];
+
+function normalizeSeverity(s) {
+  const v = String(s || '').toUpperCase();
+  if (/CR[IÍ]T/.test(v)) return 'CRÍTICA';
+  if (/ALTA|HIGH/.test(v)) return 'ALTA';
+  if (/MEDIA|MEDIUM|WARN/.test(v)) return 'MEDIA';
+  if (/BAJA|LOW/.test(v)) return 'BAJA';
+  return 'INFO';
+}
+
+/** Recoge los hallazgos del informe con categoría, severidad, componente, hallazgo y recomendación (ordenados por severidad). */
+export function collectAuditFindings(report) {
+  const h = report.heuristics || {};
+  const list = [];
+  const add = (category, severity, component, finding, recommendation) =>
+    list.push({ category, severity: normalizeSeverity(severity), component, finding, recommendation });
+
+  for (const mi of h.manifestIssues || []) {
+    add('paquete', 'CRÍTICA', 'META-INF/MANIFEST.MF', mi, 'Colocar .project y META-INF/MANIFEST.MF en la raíz del ZIP y plegar las líneas a 72 bytes UTF-8.');
+  }
+  if (!h.isScriptCollection && !h.isValueMapping && !h.hasExceptionSubprocess) {
+    add('fiabilidad', 'CRÍTICA', 'Integration Process (.iflw)', 'Ausencia de Exception Subprocess.', 'Añadir un Exception Subprocess para capturar errores, indexar logs y evitar fallos silenciosos.');
+  }
+  for (const c of h.unencryptedChannels || []) {
+    add('seguridad', 'CRÍTICA', `Canal (${c.key})`, `Endpoint sin cifrado TLS: ${c.val}`, 'Sustituir http:// por https:// y exigir TLS 1.2/1.3 en el adaptador.');
+  }
+  for (const hs of h.hardcodedSensitivePatterns || []) {
+    add('seguridad', 'ALTA', `Propiedad (${hs.key})`, `${hs.reason}: ${hs.val}`, 'Externalizar el valor con parámetros configurables {{NombreParametro}}.');
+  }
+  for (const ba of h.basicAuthChannels || []) {
+    add('seguridad', 'MEDIA', `Autenticación (${ba.key})`, `Uso de Basic Authentication (${ba.val}).`, 'Priorizar OAuth 2.0 Client Credentials o Client Certificate.');
+  }
+  for (const cs of h.csrfDisabledChannels || []) {
+    add('seguridad', 'MEDIA', 'Canal HTTP/HTTPS (xsrfProtection)', `Protección CSRF deshabilitada (${cs.key} = ${cs.val}).`, 'Activar xsrfProtection=1 en adaptadores entrantes modificadores.');
+  }
+  for (const st of h.syncTasksWithoutTimeout || []) {
+    add('fiabilidad', 'MEDIA', `ExternalCall (${st.name} / ${st.id})`, 'Llamada síncrona Request-Reply sin timeout explícito.', 'Configurar un timeout explícito (p. ej. 60000 ms) en el canal del adaptador.');
+  }
+  for (const rt of h.routersWithoutDefaultRoute || []) {
+    add('fiabilidad', 'MEDIA', `Router (${rt.name} / ${rt.id})`, 'Exclusive Gateway sin ruta por defecto.', 'Definir una Default Route para evitar fallos cuando ninguna condición se cumpla.');
+  }
+  for (const cm of h.contentModifiersReadingBodyToProperty || []) {
+    add('rendimiento', 'CRÍTICA', 'Content Modifier (Enricher)', 'Copia de ${body} en una Exchange Property (' + cm.key + ' = ' + cm.val + ')', 'Evitar duplicar el payload completo en memoria; usar streaming o guardar solo identificadores.');
+  }
+  for (const sp of h.splittersWithoutStreaming || []) {
+    add('rendimiento', 'MEDIA', `Splitter (${sp.name} / ${sp.id})`, 'Splitter con streaming deshabilitado.', 'Activar streaming=true para procesar lotes grandes sin saturar la memoria.');
+  }
+  for (const ga of h.groovyAuditResults || []) {
+    for (const gf of ga.findings || []) {
+      add('groovy', gf.severity, `${ga.fileName}:${gf.line || 1}`, `${gf.title} [${gf.code}]`, gf.remediation || '');
+    }
+  }
+  const rank = (s) => AUDIT_SEV_ORDER.indexOf(s);
+  list.sort((a, b) => rank(a.severity) - rank(b.severity));
+  return list;
+}
+
 export function buildAuditPdfSpec(report) {
   const blocks = [];
   const h = report.heuristics || {};
+  const cat = report.catalog || {};
+  const count = (a) => (a || []).length;
+  const names = (a) => (a || []).map((f) => f.name).join(', ');
+  blocks.push({ type: 'toc' });
 
-  blocks.push({ type: 'section', text: '1. Resumen Ejecutivo y Metadatos del Paquete OSGi' });
-  blocks.push({ type: 'kv', key: 'Archivo Auditado', value: `${report.fileName} (${report.totalFiles} archivos)` });
+  // 1. Resumen ejecutivo
+  blocks.push({ type: 'section', text: '1. Resumen ejecutivo' });
+  blocks.push({ type: 'kv', key: 'Archivo auditado', value: `${report.fileName} (${report.totalFiles} archivos)` });
+  blocks.push({ type: 'kv', key: 'Bundle-SymbolicName', value: `${report.manifestData?.symbolicName || 'Desconocido'} (v${report.manifestData?.version || '1.0.0'})` });
+  blocks.push({ type: 'kv', key: 'Tipo de artefacto', value: report.manifestData?.bundleType || 'IntegrationFlow' });
+
+  const isNested = report.nestedBundles && report.nestedBundles.length > 0;
+  const findings = isNested ? [] : collectAuditFindings(report);
+  const sanitized = (h.manifestIssues || []).some((m) => /SANITIZED-001/.test(m));
+  if (sanitized) {
+    blocks.push({ type: 'callout', tone: 'warn', text: 'Este paquete es una copia limpiada para IA (alias SANITIZED). Restáurala con --restore antes de importarla en SAP CPI.' });
+  }
+
+  blocks.push({ type: 'subsection', text: '1.1 Inventario del paquete' });
   blocks.push({
-    type: 'kv',
-    key: 'Bundle-SymbolicName',
-    value: `${report.manifestData?.symbolicName || 'Desconocido'} (v${report.manifestData?.version || '1.0.0'})`
-  });
-  blocks.push({ type: 'kv', key: 'Tipo de Artefacto SAP', value: report.manifestData?.bundleType || 'IntegrationFlow' });
-  blocks.push({
-    type: 'kv',
-    key: 'Catálogo de Recursos',
-    value: `${report.catalog.iflwFiles.length} .iflw | ${report.catalog.groovyScripts.length} .groovy | ${report.catalog.xsltMappings.length} .xslt | ${report.catalog.messageMappings.length} .mmap | ${report.catalog.xsdSchemas.length} .xsd | ${report.catalog.parameterFiles.length} .prop`
+    type: 'table',
+    columns: [{ title: 'Recurso', weight: 2 }, { title: 'Cantidad', weight: 1 }, { title: 'Archivos', weight: 5, mono: true }],
+    rows: [
+      ['Integration Flows (.iflw)', String(count(cat.iflwFiles)), names(cat.iflwFiles) || '-'],
+      ['Scripts Groovy', String(count(cat.groovyScripts)), names(cat.groovyScripts) || '-'],
+      ['Mapeos XSLT', String(count(cat.xsltMappings)), names(cat.xsltMappings) || '-'],
+      ['Message Mappings (.mmap)', String(count(cat.messageMappings)), names(cat.messageMappings) || '-'],
+      ['Esquemas XSD', String(count(cat.xsdSchemas)), names(cat.xsdSchemas) || '-']
+    ]
   });
 
-  if (report.catalog.iflwFiles.length > 0) {
-    blocks.push({ type: 'kv', key: 'Archivos .iflw', value: report.catalog.iflwFiles.map((f) => f.name).join(', ') });
-  }
-  if (report.catalog.groovyScripts.length > 0) {
-    blocks.push({ type: 'kv', key: 'Scripts Groovy', value: report.catalog.groovyScripts.map((f) => f.name).join(', ') });
-  }
-  if (report.catalog.messageMappings.length > 0 || report.catalog.xsdSchemas.length > 0 || report.catalog.xsltMappings.length > 0) {
-    const mapNames = [
-      ...report.catalog.messageMappings.map((f) => f.name),
-      ...report.catalog.xsdSchemas.map((f) => f.name),
-      ...report.catalog.xsltMappings.map((f) => f.name)
-    ];
-    blocks.push({ type: 'kv', key: 'Mapeos y Esquemas XSD', value: mapNames.join(', ') });
+  if (!isNested) {
+    blocks.push({ type: 'subsection', text: '1.2 Hallazgos por categoría y severidad' });
+    const sev3 = AUDIT_SEV_ORDER.slice(0, 3);
+    const rows = AUDIT_CATEGORIES.map(([key, label]) => {
+      const mine = findings.filter((f) => f.category === key);
+      return [label, ...sev3.map((s) => String(mine.filter((f) => f.severity === s).length)), String(mine.length)];
+    });
+    rows.push(['Total', ...sev3.map((s) => String(findings.filter((f) => f.severity === s).length)), String(findings.length)]);
+    blocks.push({
+      type: 'table',
+      columns: [{ title: 'Categoría', weight: 4 }, { title: 'Crítica', weight: 1 }, { title: 'Alta', weight: 1 }, { title: 'Media', weight: 1 }, { title: 'Total', weight: 1 }],
+      rows
+    });
   }
 
-  if (report.nestedBundles && report.nestedBundles.length > 0) {
-    blocks.push({ type: 'section', text: `2. Paquetes Anidados Detectados (${report.nestedBundles.length})` });
-    for (const nb of report.nestedBundles) {
-      blocks.push({
-        type: 'bullet',
-        text: `${nb.fileName} [${nb.bundleType || 'ZIP'}] - SymbolicName: ${nb.symbolicName || '-'} | Score: ${nb.score ?? '-'}/100 | .iflw: ${nb.iflwCount ?? 0} | .groovy: ${nb.groovyCount ?? 0} | .mmap: ${nb.mmapCount ?? 0} | .xsd: ${nb.xsdCount ?? 0}`
-      });
-    }
+  if (isNested) {
+    blocks.push({ type: 'section', text: `2. Paquetes anidados (${report.nestedBundles.length})` });
+    blocks.push({
+      type: 'table',
+      columns: [{ title: 'Paquete', weight: 4, mono: true }, { title: 'Tipo', weight: 2 }, { title: '.iflw', weight: 1 }, { title: '.groovy', weight: 1 }, { title: '.mmap', weight: 1 }],
+      rows: report.nestedBundles.map((nb) => [nb.fileName, nb.bundleType || 'ZIP', String(nb.iflwCount ?? 0), String(nb.groovyCount ?? 0), String(nb.mmapCount ?? 0)])
+    });
   } else {
-    blocks.push({ type: 'section', text: '2. Hallazgos Deterministas de Arquitectura, Seguridad y Código' });
-    let totalFindings = 0;
-
-    if (h.manifestIssues && h.manifestIssues.length > 0) {
-      for (const mi of h.manifestIssues) {
-        totalFindings++;
-        blocks.push({
-          type: 'finding',
-          severity: 'CRÍTICA',
-          component: 'META-INF/MANIFEST.MF',
-          finding: mi,
-          recommendation: 'Colocar .project y META-INF/MANIFEST.MF directamente en la raíz del ZIP y plegar líneas a 72 bytes UTF-8.'
-        });
-      }
+    blocks.push({ type: 'section', text: '2. Hallazgos por categoría' });
+    if (findings.length === 0) {
+      blocks.push({ type: 'callout', tone: 'ok', text: 'Sin hallazgos. El paquete cumple los puntos de control de arquitectura SAP CPI.' });
     }
-
-    if (!h.isScriptCollection && !h.isValueMapping && !h.hasExceptionSubprocess) {
-      totalFindings++;
+    let n = 0;
+    for (const [key, label] of AUDIT_CATEGORIES) {
+      const mine = findings.filter((f) => f.category === key);
+      if (!mine.length) continue;
+      n++;
+      blocks.push({ type: 'subsection', text: `2.${n} ${label} (${mine.length})` });
       blocks.push({
-        type: 'finding',
-        severity: 'CRÍTICA',
-        component: 'Integration Process (.iflw)',
-        finding: 'Ausencia de Exception Subprocess (ErrorEventSubProcessTemplate).',
-        recommendation: 'Añadir un Exception Subprocess para capturar errores, indexar logs y evitar fallos silenciosos.'
-      });
-    }
-
-    for (const c of h.unencryptedChannels || []) {
-      totalFindings++;
-      blocks.push({
-        type: 'finding',
-        severity: 'CRÍTICA',
-        component: `Canal (${c.key})`,
-        finding: `Endpoint sin cifrado TLS detectado: ${c.val}`,
-        recommendation: 'Sustituir http:// por https:// y exigir TLS 1.2/1.3 en el adaptador.'
-      });
-    }
-
-    for (const cm of h.contentModifiersReadingBodyToProperty || []) {
-      totalFindings++;
-      blocks.push({
-        type: 'finding',
-        severity: 'CRÍTICA',
-        component: 'Content Modifier (Enricher)',
-        finding: `Copia de \${body} en Exchange Property (${cm.key} = ${cm.val})`,
-        recommendation: 'Evitar duplicar el payload completo en memoria Heap; usar streaming o almacenar solo IDs escalares.'
-      });
-    }
-
-    for (const hs of h.hardcodedSensitivePatterns || []) {
-      totalFindings++;
-      blocks.push({
-        type: 'finding',
-        severity: 'ALTA',
-        component: `Propiedad (${hs.key})`,
-        finding: `${hs.reason}: ${hs.val}`,
-        recommendation: 'Externalizar el valor mediante parámetros configurables {{NombreParametro}}.'
-      });
-    }
-
-    for (const st of h.syncTasksWithoutTimeout || []) {
-      totalFindings++;
-      blocks.push({
-        type: 'finding',
-        severity: 'MEDIA',
-        component: `ExternalCall (${st.name} / ${st.id})`,
-        finding: 'Llamada síncrona Request-Reply sin timeout explícito configurado.',
-        recommendation: 'Configurar un timeout explícito (ej. 60000 ms) en el canal del adaptador.'
-      });
-    }
-
-    for (const sp of h.splittersWithoutStreaming || []) {
-      totalFindings++;
-      blocks.push({
-        type: 'finding',
-        severity: 'MEDIA',
-        component: `Splitter (${sp.name} / ${sp.id})`,
-        finding: 'Paso Splitter con streaming deshabilitado (streaming=false).',
-        recommendation: 'Activar streaming=true para procesar lotes XML/JSON sin saturar el árbol DOM en memoria.'
-      });
-    }
-
-    for (const cs of h.csrfDisabledChannels || []) {
-      totalFindings++;
-      blocks.push({
-        type: 'finding',
-        severity: 'MEDIA',
-        component: 'Canal HTTP/HTTPS (xsrfProtection)',
-        finding: `Protección CSRF deshabilitada (${cs.key} = ${cs.val}).`,
-        recommendation: 'Activar xsrfProtection=1 en adaptadores entrantes modificadores.'
-      });
-    }
-
-    for (const ba of h.basicAuthChannels || []) {
-      totalFindings++;
-      blocks.push({
-        type: 'finding',
-        severity: 'MEDIA',
-        component: `Autenticación (${ba.key})`,
-        finding: `Uso de Basic Authentication (${ba.val}).`,
-        recommendation: 'Priorizar OAuth 2.0 Client Credentials o Client Certificate frente a Basic Authentication.'
-      });
-    }
-
-    for (const rt of h.routersWithoutDefaultRoute || []) {
-      totalFindings++;
-      blocks.push({
-        type: 'finding',
-        severity: 'MEDIA',
-        component: `Router (${rt.name} / ${rt.id})`,
-        finding: 'Exclusive Gateway sin ruta por defecto (Default Route) definida.',
-        recommendation: 'Definir una ruta por defecto para evitar fallos cuando ninguna condición se cumpla.'
-      });
-    }
-
-    for (const ga of h.groovyAuditResults || []) {
-      for (const gf of ga.findings || []) {
-        totalFindings++;
-        blocks.push({
-          type: 'finding',
-          severity: gf.severity,
-          component: `Groovy (${ga.fileName}:${gf.line || 1})`,
-          finding: `${gf.title} [${gf.code}]`,
-          recommendation: gf.remediation
-        });
-      }
-    }
-
-    if (totalFindings === 0) {
-      blocks.push({
-        type: 'paragraph',
-        text: 'Cero hallazgos críticos, altos o medios. El paquete cumple los puntos de control de arquitectura SAP CPI.'
+        type: 'table',
+        columns: [{ title: 'Severidad', weight: 1.3 }, { title: 'Componente', weight: 3, mono: true }, { title: 'Hallazgo', weight: 4 }, { title: 'Recomendación', weight: 4 }],
+        rows: mine.map((f) => [f.severity, f.component, f.finding, f.recommendation])
       });
     }
 
     if (h.availableRemediations && h.availableRemediations.length > 0) {
-      blocks.push({ type: 'section', text: '3. Cambios Propuestos Automatizables (Selección del Usuario)' });
-      for (const rem of h.availableRemediations) {
-        blocks.push({
-          type: 'bullet',
-          text: `[${rem.id}] ${rem.title}: ${rem.description}`
-        });
-      }
+      blocks.push({ type: 'section', text: '3. Correcciones automatizables' });
+      blocks.push({ type: 'paragraph', text: 'Solo se aplican las que el usuario confirme explícitamente (--remediate).' });
+      blocks.push({
+        type: 'table',
+        columns: [{ title: 'Id', weight: 1.2, mono: true }, { title: 'Corrección', weight: 3 }, { title: 'Qué hace', weight: 6 }],
+        rows: h.availableRemediations.map((r) => [r.id, r.title, r.description])
+      });
     }
   }
 
   return {
     title: `Informe de Auditoría SAP CPI: ${report.fileName}`,
     subtitle: `SymbolicName: ${report.manifestData?.symbolicName || 'N/A'} | Tipo: ${report.manifestData?.bundleType || 'Bundle'}`,
-    score: h.score ?? 100,
     blocks
   };
 }
@@ -1101,22 +1062,19 @@ if (isMain) {
       if (report.nestedBundles && report.nestedBundles.length > 0) {
         console.log(`\n--- PAQUETES ANIDADOS DETECTADOS (${report.nestedBundles.length}) ---`);
         report.nestedBundles.forEach((nb) => {
-          console.log(`  - ${nb.fileName} [${nb.bundleType || 'ZIP'}] | SymbolicName: ${nb.symbolicName || '-'} | Score: ${nb.score ?? '-'}/100 | .iflw: ${nb.iflwCount ?? 0} | .groovy: ${nb.groovyCount ?? 0}`);
+          console.log(`  - ${nb.fileName} [${nb.bundleType || 'ZIP'}] | SymbolicName: ${nb.symbolicName || '-'} | .iflw: ${nb.iflwCount ?? 0} | .groovy: ${nb.groovyCount ?? 0}`);
         });
       } else if (report.heuristics.isScriptCollection) {
         console.log(`\n--- AUDITORÍA DE SCRIPT COLLECTION ---`);
-        console.log(`Score de Empaquetado OSGi: ${report.heuristics.score}/100`);
         console.log(`Provide-Capability: ${report.manifestData.provideCapability || 'No declarado'}`);
         console.log(`Scripts incluidos (${report.catalog.groovyScripts.length}): ${report.catalog.groovyScripts.map((g) => g.name).join(', ')}`);
       } else if (report.heuristics.isValueMapping) {
         console.log(`\n--- AUDITORÍA DE VALUE MAPPING ---`);
-        console.log(`Score de Empaquetado OSGi: ${report.heuristics.score}/100`);
         console.log(`Tipo de Bundle: ${report.manifestData.bundleType}`);
         console.log(`Archivos de definición: ${report.catalog.otherFiles.filter((f) => f.name.includes('value_mapping')).map((f) => f.name).join(', ') || 'value_mapping.xml'}`);
       } else {
         console.log(`\n--- PRE-AUDITORÍA DETERMINISTA (.iflw) ---`);
-        console.log(`Score de Arquitectura: ${report.heuristics.score}/100`);
-        console.log(`1. Exception Subprocess: ${report.heuristics.hasExceptionSubprocess ? 'OK (Presente)' : 'CRÍTICO (Ausente -30 pts)'}`);
+        console.log(`1. Exception Subprocess: ${report.heuristics.hasExceptionSubprocess ? 'OK (Presente)' : 'CRÍTICO (Ausente)'}`);
         console.log(`2. Canales HTTP sin TLS: ${report.heuristics.unencryptedChannels.length} detectado(s)`);
         report.heuristics.unencryptedChannels.forEach((c) => console.log(`   - [CRÍTICO] ${c.key} = ${c.val}`));
         console.log(`3. Parámetros Sensibles/URLs Hardcoded: ${report.heuristics.hardcodedSensitivePatterns.length} detectado(s)`);

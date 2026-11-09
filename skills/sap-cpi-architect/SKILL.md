@@ -198,6 +198,6 @@ En el PDF técnico, cada paso debe explicar qué aporta al ciclo y qué consume/
 - Pie: logo pequeño (14 pt de alto) + nombre de empresa centrados, "Página N de M" a la derecha, misma línea base (LL-036).
 - `--docx` / `docxPath` exporta el mismo docSpec a Word editable (LL-037).
 - Índice con niveles, puntos guía, números de página y enlaces internos; separación vertical según el nivel en el árbol de contenido.
-- Pie de página con la marca de la empresa (`--logo` SVG + nombre/clasificación de `--company`); no hay marca de agua.
+- Pie de página con la marca de la empresa (`--logo` SVG + nombre de `--company`); no hay marca de agua.
 - Sección 6 documenta también los mapeos (Message Mapping, XSLT, XSD, Value Mapping) por campos de origen/destino. No se inventan decisiones de diseño: solo se describe lo que figura en el iFlow.
 - MCP `cpi_export_technical_doc`: `companyPath`, `logoPath`, `privacy`, `includeAudit`.

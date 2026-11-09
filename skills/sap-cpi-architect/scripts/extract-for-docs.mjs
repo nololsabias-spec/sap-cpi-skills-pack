@@ -128,22 +128,15 @@ ${(report.findings || []).map((f) => `- [${f.severity || 'INFO'}] **${f.rule || 
 
 const COMPANY_FIELDS = [
   ['name', 'Empresa'],
-  ['legalName', 'Razón social'],
-  ['taxId', 'Identificación fiscal'],
   ['address', 'Dirección'],
-  ['project', 'Proyecto'],
-  ['client', 'Cliente'],
   ['author', 'Autor'],
   ['reviewer', 'Revisor'],
-  ['documentVersion', 'Versión del documento'],
-  ['date', 'Fecha'],
-  ['classification', 'Clasificación'],
-  ['contact', 'Contacto']
+  ['date', 'Fecha']
 ];
 
 /**
  * Lee un JSON de datos de empresa (todos los campos son opcionales y se tratan como texto plano).
- * Campos: name, legalName, taxId, address, project, client, author, reviewer, documentVersion, date, classification, contact.
+ * Campos: name, address, author, reviewer, date.
  */
 export function loadCompanyInfo(filePath) {
   const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -169,7 +162,7 @@ export function buildTechnicalDocPdfSpec(report, markdownText = null, options = 
   const company = options.company || null;
   const detail = buildIflowDetailBlocks(report, { privacy: options.privacy });
 
-  // 0. Datos del documento (empresa, proyecto, autoría, clasificación)
+  // 0. Datos del documento (empresa, dirección, autoría, fecha)
   if (company && Object.keys(company).length > 0) {
     blocks.push({ type: 'section', text: 'Datos del Documento' });
     for (const [key, label] of COMPANY_FIELDS) {
@@ -234,7 +227,7 @@ export function buildTechnicalDocPdfSpec(report, markdownText = null, options = 
     subtitle: `Versión ${m.version || "1.0.0"} | ${m.symbolicName || "N/A"}`,
     score: options.includeAudit ? (h.score ?? 100) : undefined,
     footerText: company?.name
-      ? `${company.name}${company.classification ? ' - ' + company.classification : ''}`
+      ? company.name
       : 'SAP CPI Architecture & Technical Documentation',
     brand: options.logoSvg ? { svg: options.logoSvg, text: company?.name } : null,
     blocks

@@ -382,7 +382,7 @@ export const MCP_TOOLS = [
         pdfPath: { type: 'string', description: 'Ruta opcional donde guardar el documento técnico en PDF.' },
         docxPath: { type: 'string', description: 'Ruta opcional donde guardar el documento técnico en Word (.docx editable, misma estructura que el PDF).' },
         markdownPath: { type: 'string', description: 'Ruta opcional donde guardar el documento técnico en Markdown.' },
-        companyPath: { type: 'string', description: 'JSON opcional con datos de la empresa (name, classification, author, documentVersion, date...) para la portada y el pie.' },
+        companyPath: { type: 'string', description: 'JSON opcional con datos de la empresa (name, address, author, reviewer, date) para la portada y el pie.' },
         logoPath: { type: 'string', description: 'SVG opcional con la marca de la empresa para el pie de página.' },
         privacy: { type: 'boolean', description: 'Fuerza (true) o desactiva (false) el modo privado. Por defecto se activa solo con bundles sanitizados.' },
         includeAudit: { type: 'boolean', description: 'Añade la sección de auditoría de calidad al PDF (por defecto separada).' }

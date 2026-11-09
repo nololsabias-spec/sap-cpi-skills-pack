@@ -20,7 +20,7 @@ node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs ./Order_Replicat
   --remediate manifest,https,timeouts,streaming \
   --out ./Order_Replication_Corregido.zip
 ```
-Este flujo genera el resumen ejecutivo en PDF con el inventario, score de salud y hallazgos detectados, y permite generar un nuevo `.zip` corregido aplicando únicamente los cambios confirmados por el usuario.
+Este flujo genera el resumen ejecutivo en PDF con el inventario y los hallazgos agrupados por categoría (seguridad, fiabilidad, rendimiento, Groovy y paquete) con tablas y matriz de severidad, y permite generar un nuevo `.zip` corregido aplicando únicamente los cambios confirmados por el usuario.
 
 ### Paso 2: Auditar los scripts Groovy extraídos
 ```bash

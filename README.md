@@ -13,7 +13,16 @@ Construido íntegramente con módulos nativos de **Node.js (`v18+`) sin dependen
 3. [Estructura del Proyecto](#3-estructura-del-proyecto)
 4. [Catálogo de las 8 Skills y Motores CLI](#4-catálogo-de-las-8-skills-y-motores-cli)
 5. [Guía de Uso por Módulo (CLI y Agentes IA)](#5-guía-de-uso-por-módulo-cli-y-agentes-ia)
+   - 5.1. [Inspector y Auditor de Paquetes iFlow](#51-inspector-y-auditor-de-paquetes-iflow-sap-cpi-zip-inspector)
+   - 5.2. [Validador y Linter de Scripts Groovy](#52-validador-y-linter-de-scripts-groovy-sap-cpi-groovy-generator)
+   - 5.3. [Auditor de Calidad y Refactorización Groovy](#53-auditor-de-calidad-y-refactorización-groovy-sap-cpi-code-auditor)
+   - 5.4. [Validador de Transformaciones XSLT](#54-validador-de-transformaciones-xslt-sap-cpi-xslt-studio)
+   - 5.5. [Sandbox de Expresiones Regulares y Camel Simple](#55-sandbox-de-expresiones-regulares-y-camel-simple-sap-cpi-regex-studio)
+   - 5.6. [Inferencia XSD 1.0 y Mapeos Gráficos .mmap](#56-inferencia-xsd-10-y-mapeos-gráficos-mmap-sap-cpi-xsd-studio)
+   - 5.7. [Empaquetador de Baterías de Prueba E2E](#57-empaquetador-de-baterías-de-prueba-e2e-sap-cpi-mock-data-generator)
+   - 5.8. [Arquitecto SAP CPI: Empaquetado, Clonación, Documentación y Clientes API](#58-arquitecto-sap-cpi-empaquetado-osgi-clonación-documentación-y-clientes-api-sap-cpi-architect)
 6. [Documentación Técnica Detallada](#6-documentación-técnica-detallada)
+7. [Harness de Aprendizaje Continuo](#7-harness-de-aprendizaje-continuo-agentsmd--rules)
 
 ---
 

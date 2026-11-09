@@ -279,7 +279,7 @@ Extrae metadatos arquitectónicos de un `.zip`, valida que un documento Markdown
 ```bash
 # Modo 1: Extraer información y opcionalmente exportar el PDF técnico de 10 secciones (índice, mapeos, modo privado)
 node skills/sap-cpi-architect/scripts/extract-for-docs.mjs <paquete.zip> [--pdf <DisenoTecnico.pdf>] [--docx <DisenoTecnico.docx>] [--company <empresa.json>] [--logo <marca.svg>] [--privacy|--no-privacy] [--include-audit] [--json]
-# --company: JSON opcional (name, legalName, taxId, address, project, client, author, reviewer, documentVersion, date, classification, contact) -> seccion "Datos del Documento" y pie de pagina.
+# --company: JSON opcional (name, address, author, reviewer, date) -> seccion "Datos del Documento" y pie de pagina.
 # --include-audit: anade al PDF tecnico las secciones de auditoria (hallazgos, puntaje, recomendaciones); por defecto el documento tecnico NO las incluye (la auditoria es el informe de inspect-iflow-zip --pdf).
 # --privacy/--no-privacy: el PDF incluye esquema, endpoints, llamadas y ejemplos; por defecto se activa solo si el bundle esta saneado (alias, {{Param}}, sin URLs reales). Nunca se leen valores de .prop.
 # --logo: SVG de solo trazados (M/L/H/V/C/Z, fill hex, translate) dibujado en el pie de cada pagina junto al nombre de la empresa; se rechazan script, image y href. No hay marca de agua (--watermark se ignora con un aviso). El documento incluye indice con puntos, subpuntos, numero de pagina y enlaces internos.
@@ -319,7 +319,7 @@ Cuando el servidor `mcp-server.mjs` está activo (arrancado por el IDE o cliente
 
 | Herramienta MCP | Módulo / Skill | Descripción |
 | :--- | :--- | :--- |
-| `cpi_inspect_zip` | `sap-cpi-zip-inspector` | Audita paquetes `.zip`/`.iflw`, calcula puntuación 0-100, genera inventario e informe PDF opcional. |
+| `cpi_inspect_zip` | `sap-cpi-zip-inspector` | Audita paquetes `.zip`/`.iflw`, agrupa los hallazgos por categoría (sin nota) y genera informe PDF/Word opcional. |
 | `cpi_remediate_zip` | `sap-cpi-zip-inspector` | Aplica correcciones automáticas (`manifest`, `https`, `timeouts`, `streaming`, `csrf`, `groovy`, `all`) y emite nuevo `.zip`. |
 | `cpi_diff_bundles` | `sap-cpi-zip-inspector` | Compara semánticamente dos paquetes iFlow/SC, reporta diferencias topológicas y de parámetros, y exporta PDF comparativo. |
 | `cpi_validate_groovy` | `sap-cpi-groovy-generator` | Valida código Groovy (o archivo en disco) frente a reglas de Upgrade Readiness, imports y anti-XXE. |

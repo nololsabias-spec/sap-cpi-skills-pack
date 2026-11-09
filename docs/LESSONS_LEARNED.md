@@ -346,3 +346,21 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 - **Causa Raíz Técnica**: el coloreado de sintaxis se aplicaba por fragmento; y el grupo DrawingML se ajustaba al contenido, estirando la única forma hasta ocupar todo el grupo.
 - **Solución Codificada**: PDF y Word imprimen el código con `CODE_TEXT` (negro) conservando la reindentación de JSON/XML. `groupDrawing` añade un marco invisible del tamaño del grupo, por lo que un nodo solo mantiene su tamaño normal.
 - **Archivos**: `shared/code-format.mjs`, `shared/pdf-blocks.mjs`, `shared/docx-writer.mjs`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-041` — Datos del documento reducidos a lo necesario
+- **Síntoma**: la sección "Datos del Documento" incluía razón social, identificación fiscal, proyecto, cliente, versión del documento, clasificación y contacto, que no hacían falta y aumentaban el riesgo de volcar datos de identidad en el documento.
+- **Causa Raíz Técnica**: `COMPANY_FIELDS` admitía y mostraba campos de identificación que el documento técnico no necesita.
+- **Solución Codificada**: `loadCompanyInfo` solo admite `name`, `address`, `author`, `reviewer` y `date`; el pie usa solo el nombre de la empresa. Los demás campos del JSON de empresa se ignoran.
+- **Archivos**: `skills/sap-cpi-architect/scripts/extract-for-docs.mjs`, `mcp-server.mjs`, `docs/CLI_REFERENCE.md`, `skills/sap-cpi-architect/SKILL.md`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-042` — Informe de auditoría por categorías y con tablas
+- **Síntoma**: el informe de auditoría era una lista larga de hallazgos sin agrupar, difícil de leer.
+- **Causa Raíz Técnica**: `buildAuditPdfSpec` volcaba cada hallazgo como bloque suelto, sin índice, resumen ni categorías.
+- **Solución Codificada**: `collectAuditFindings` clasifica los hallazgos en Seguridad, Fiabilidad, Rendimiento, Código Groovy y Paquete, ordenados por severidad. El informe lleva índice, resumen ejecutivo, inventario, matriz categoría × severidad, una tabla por categoría (severidad, componente, hallazgo, recomendación) y tabla de correcciones automatizables. Si el bundle es una copia saneada, un aviso explica por qué la nota está penalizada. Sirve igual para PDF y Word.
+- **Archivos**: `skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-043` — Informes de auditoría sin nota
+- **Síntoma**: la nota 0-100 del informe de auditoría no aporta valor y confunde (una copia limpiada siempre salía con 0/100).
+- **Causa Raíz Técnica**: `buildAuditPdfSpec` y la salida de consola mostraban la puntuación (kv, insignia SCORE del PDF, columna «Nota» de paquetes anidados).
+- **Solución Codificada**: el PDF/Word de auditoría y la consola ya no muestran puntuación; el informe se centra en los hallazgos por categoría. `heuristics.score` se conserva solo en `--json` por compatibilidad.
+- **Archivos**: `skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs`, `tests/lessons/lessons.test.mjs`.
