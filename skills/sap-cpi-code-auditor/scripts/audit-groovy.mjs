@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * SAP CPI Groovy Code Auditor & Comparative Diff Reporter
- * Evaluates original Groovy script, calculates exact SAP CPI score (100 base: -30/-15/-5/-2),
+ * Evaluates original Groovy script and lists its findings by severity (the numeric score is kept only in --json),
  * and optionally compares against a refactored script to verify 100% remediation.
  *
  * Usage:
@@ -188,9 +188,9 @@ if (isMain) {
   if (jsonFlag) {
     console.log(JSON.stringify({ original: origAudit, refactored: refAudit, comparison }, null, 2));
   } else {
-    console.log(`Score de Calidad Original: ${comparison.originalScore}/100`);
+    console.log(`Hallazgos en el script original: ${origAudit.findings.length}`);
     if (refAudit) {
-      console.log(`Score Refactored: ${comparison.refactoredScore}/100 (${comparison.refactoredPassed ? 'APROBADO 100%' : 'CON OBSERVACIONES'})`);
+      console.log(`Script refactorizado: ${comparison.refactoredPassed ? 'APROBADO (sin hallazgos)' : `CON OBSERVACIONES (${refAudit.findings.length} hallazgos pendientes)`}`);
     }
     console.log('');
     console.log('| Dimensión | Vulnerabilidad Corregida | Severidad (CRÍTICA/ALTA/MEDIA/BAJA) | Diagnóstico Técnico | Cómo se solucionó |');

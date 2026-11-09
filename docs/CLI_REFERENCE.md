@@ -24,7 +24,7 @@ Expone los 22 motores deterministas (incluidos `cpi_sanitize_zip` y `cpi_restore
 
 ```bash
 node mcp-server.mjs              # Modo servidor stdio (invocado automáticamente por el IDE)
-node mcp-server.mjs --self-test  # Autoverificación de las 22 tools y 9 resources MCP
+node mcp-server.mjs --self-test  # Autoverificación de las 23 tools y 9 resources MCP
 ```
 
 **Raíces de ficheros permitidas (seguridad)**: toda ruta recibida por una herramienta MCP debe estar dentro de una raíz permitida; si no, la llamada devuelve error.
@@ -54,7 +54,7 @@ npm test
 Descomprime en memoria un paquete `.zip` de SAP CPI (`IntegrationFlow`, `ScriptCollection` o paquetes compuestos con `.zip` anidados), clasifica sus archivos internos (`.iflw`, `.groovy`, `.xslt`, `.mmap`, `.xsd`, `.prop`), redacta por defecto los valores de `.prop` (`[REDACTED]`), ejecuta la auditoría determinista sobre el modelo BPMN 2.0 (`.iflw`) y permite exportar un **informe ejecutivo en PDF** o generar un **nuevo `.zip` corregido** aplicando únicamente las remediaciones seleccionadas por el usuario.
 
 ```bash
-node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs <archivo.zip | archivo.iflw> [--pdf <informe.pdf>] [--docx <informe.docx>] [--remediate <manifest,https,timeouts,streaming,csrf,groovy|all> --out <Corregido.zip>] [--extract-dir <carpeta>] [--show-prop-values] [--json]
+node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs <archivo.zip | archivo.iflw> [--pdf <informe.pdf>] [--docx <informe.docx>] [--no-brand] [--remediate <manifest,https,timeouts,streaming,csrf,groovy|all> --out <Corregido.zip>] [--extract-dir <carpeta>] [--show-prop-values] [--json]
 ```
 
 - `<archivo.zip>`: Ruta al paquete iFlow, Script Collection o paquete compuesto exportado de SAP CPI.
@@ -68,15 +68,15 @@ node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs <archivo.zip | a
 ---
 
 ### 2.1b. `diff-iflow-zip.mjs` (`sap-cpi-zip-inspector`)
-Compara semánticamente dos paquetes `.zip` de SAP CPI (iFlows o Script Collections) eliminando el ruido BPMNDI y detectando cambios topológicos, parámetros externalizados modificados/añadidos, recursos del paquete OSGi y delta de puntuación de gobernanza (Score).
+Compara semánticamente dos paquetes `.zip` de SAP CPI (iFlows o Script Collections) eliminando el ruido BPMNDI y detectando cambios topológicos, parámetros externalizados modificados/añadidos, recursos del paquete OSGi y resumen de cambios entre versiones.
 
 ```bash
-node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs <v1.zip> <v2.zip> [--pdf <informe-diff.pdf>] [--docx <informe-diff.docx>] [--show-prop-values] [--json]
+node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs <v1.zip> <v2.zip> [--pdf <informe-diff.pdf>] [--docx <informe-diff.docx>] [--no-brand] [--show-prop-values] [--json]
 node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs --demo [--pdf <diff.pdf>] [--docx <diff.docx>] [--json]
 ```
 
 - `<v1.zip>` y `<v2.zip>`: Paquetes base y objetivo a comparar.
-- `--pdf <informe-diff.pdf>`: Genera un informe comparativo formal en PDF con tablas de recursos, checklist de parámetros y delta de cumplimiento.
+- `--pdf <informe-diff.pdf>`: Genera un informe comparativo formal en PDF con tablas de recursos, checklist de parámetros y resumen de cambios.
 - `--docx <informe-diff.docx>`: Genera el informe comparativo en Word editable.
 - `--show-prop-values`: Muestra los valores reales de los parámetros (por defecto `[REDACTED]`).
 - `--json`: Salida estructurada de cambios topológicos, archivos y parámetros.
@@ -274,17 +274,17 @@ node skills/sap-cpi-architect/scripts/clone-iflow-bundle.mjs \
 ```
 
 #### Extractor y Validador de Documentación Técnica (`extract-for-docs.mjs`)
-Extrae metadatos arquitectónicos de un `.zip`, valida que un documento Markdown contenga las 8 secciones técnicas obligatorias y permite exportar el Documento de Diseño Técnico formal en PDF de 10 secciones.
+Extrae metadatos arquitectónicos de un `.zip`, valida que un documento Markdown contenga las 7 secciones técnicas obligatorias y permite exportar el Documento de Diseño Técnico formal en PDF de 10 secciones.
 
 ```bash
 # Modo 1: Extraer información y opcionalmente exportar el PDF técnico de 10 secciones (índice, mapeos, modo privado)
 node skills/sap-cpi-architect/scripts/extract-for-docs.mjs <paquete.zip> [--pdf <DisenoTecnico.pdf>] [--docx <DisenoTecnico.docx>] [--company <empresa.json>] [--logo <marca.svg>] [--privacy|--no-privacy] [--include-audit] [--json]
 # --company: JSON opcional (name, address, author, reviewer, date) -> seccion "Datos del Documento" y pie de pagina.
-# --include-audit: anade al PDF tecnico las secciones de auditoria (hallazgos, puntaje, recomendaciones); por defecto el documento tecnico NO las incluye (la auditoria es el informe de inspect-iflow-zip --pdf).
+# --include-audit: anade al PDF tecnico las secciones de auditoria (hallazgos y recomendaciones); por defecto el documento tecnico NO las incluye (la auditoria es el informe de inspect-iflow-zip --pdf).
 # --privacy/--no-privacy: el PDF incluye esquema, endpoints, llamadas y ejemplos; por defecto se activa solo si el bundle esta saneado (alias, {{Param}}, sin URLs reales). Nunca se leen valores de .prop.
 # --logo: SVG de solo trazados (M/L/H/V/C/Z, fill hex, translate) dibujado en el pie de cada pagina junto al nombre de la empresa; se rechazan script, image y href. No hay marca de agua (--watermark se ignora con un aviso). El documento incluye indice con puntos, subpuntos, numero de pagina y enlaces internos.
 
-# Modo 2: Validar un documento Markdown de diseño técnico (8/8 secciones)
+# Modo 2: Validar un documento Markdown de diseño técnico (7/7 secciones)
 node skills/sap-cpi-architect/scripts/extract-for-docs.mjs --validate-doc <documento.md>
 ```
 
@@ -311,9 +311,21 @@ node skills/sap-cpi-architect/scripts/build-value-mapping.mjs <tabla.json> [--na
 node skills/sap-cpi-architect/scripts/build-value-mapping.mjs --demo [--out <VM_Demo.zip>]
 ```
 
+### 2.9. `brand-setup.mjs` (`sap-cpi-architect`)
+
+Perfil de marca persistente para todos los PDF/Word (empresa + logo).
+
+```bash
+node skills/sap-cpi-architect/scripts/brand-setup.mjs --name "Mi Empresa" [--address ...] [--author ...] [--reviewer ...] [--date ...] [--logo logo.svg] [--dir <carpeta>]
+node skills/sap-cpi-architect/scripts/brand-setup.mjs --show     # estado actual (JSON)
+node skills/sap-cpi-architect/scripts/brand-setup.mjs --clear    # elimina el perfil
+```
+
+Se guarda en `.cpi-brand/` (o `CPI_BRAND_DIR`, o la primera `.cpi-brand` encontrada subiendo desde el directorio de trabajo) con su propio `.gitignore`. Se aplica sola a auditoría, diff y documento técnico; `--no-brand` la omite y `--company`/`--logo` (documento técnico) la sobrescriben.
+
 ---
 
-## 3. Catálogo de Herramientas MCP (20 Tools Nativas)
+## 3. Catálogo de Herramientas MCP (22 Tools Nativas)
 
 Cuando el servidor `mcp-server.mjs` está activo (arrancado por el IDE o cliente MCP vía stdio), se exponen las siguientes herramientas:
 
@@ -336,6 +348,7 @@ Cuando el servidor `mcp-server.mjs` está activo (arrancado por el IDE o cliente
 | `cpi_clone_bundle` | `sap-cpi-architect` | Clona y adapta iFlows existentes, inyecta recursos o actualiza Script Collections. |
 | `cpi_get_iflow_endpoints` | `sap-cpi-architect` | Extrae matriz concisa de conectividad de un iFlow (inbound, outbound, URLs, protocolos, CSRF y timeouts). |
 | `cpi_extract_bundle_file` | `shared/zip-utils` | Extrae e inspecciona en memoria el texto de un archivo específico dentro de un paquete `.zip` sin tocar disco. |
-| `cpi_export_technical_doc` | `sap-cpi-architect` | Genera el Documento de Diseño Técnico en PDF y Word editable .docx (10 secciones; en MCP docxPath, parámetros --company, --logo, --privacy, --include-audit; en MCP companyPath, logoPath, privacy, includeAudit) y/o Markdown (8 secciones). |
+| `cpi_export_technical_doc` | `sap-cpi-architect` | Genera el Documento de Diseño Técnico en PDF y Word editable .docx (10 secciones; en MCP docxPath, parámetros --company, --logo, --privacy, --include-audit; en MCP companyPath, logoPath, privacy, includeAudit) y/o Markdown (7 secciones). |
 | `cpi_export_api_client` | `sap-cpi-architect` | Genera colecciones de pruebas Postman v2.1 (con flujo CSRF) y contratos OpenAPI 3.0. |
 | `cpi_build_value_mapping` | `sap-cpi-architect` | Construye paquetes OSGi `.zip` de Value Mapping a partir de JSON o tablas CSV. |
+| `cpi_brand_setup` | `sap-cpi-architect` | Consulta (`show`), guarda (`save`) o borra (`clear`) el perfil de marca (logo SVG y datos de empresa) de los PDF/Word. |

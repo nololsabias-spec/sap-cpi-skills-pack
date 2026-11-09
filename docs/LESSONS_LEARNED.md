@@ -364,3 +364,39 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 - **Causa Raíz Técnica**: `buildAuditPdfSpec` y la salida de consola mostraban la puntuación (kv, insignia SCORE del PDF, columna «Nota» de paquetes anidados).
 - **Solución Codificada**: el PDF/Word de auditoría y la consola ya no muestran puntuación; el informe se centra en los hallazgos por categoría. `heuristics.score` se conserva solo en `--json` por compatibilidad.
 - **Archivos**: `skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-044` — Pruebas de cierre: carpetas de salida, hallazgos Groovy y paquetes anidados
+- **Síntoma**: al pedir `--pdf`/`--docx` (o `pdfPath`/`docxPath` por MCP) en una carpeta que no existe, el comando fallaba con `ENOENT`; los hallazgos Groovy del informe mostraban `[undefined]`; el informe de un Multi-Bundle incluía un inventario con ceros; el subtítulo del PDF se truncaba y el documento técnico con `--include-audit` mostraba una insignia SCORE.
+- **Causa Raíz Técnica**: los escritores compartidos no creaban el directorio padre; el informe leía `gf.code` en lugar de `gf.ruleId`; el inventario se calculaba también para paquetes anidados; el subtítulo era demasiado largo para la cabecera.
+- **Solución Codificada**: `writePdfFile`/`writeDocxFile` crean las carpetas (`mkdirSync recursive`); el informe usa `ruleId`, omite el inventario en Multi-Bundle y usa un subtítulo corto; se elimina la insignia SCORE del documento técnico; el hallazgo de copia del body muestra solo el nombre de la propiedad (no el XML escapado) y el del manifiesto no repite el prefijo de severidad.
+- **Archivos**: `shared/pdf-utils.mjs`, `shared/docx-writer.mjs`, `skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs`, `skills/sap-cpi-architect/scripts/extract-for-docs.mjs`, `mcp-server.mjs`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-045` — Perfil de marca compartido para todos los documentos
+- **Síntoma**: el logo y los datos de empresa solo se aplicaban al documento técnico y había que pasar `--company`/`--logo` en cada ejecución; auditoría y diff salían sin marca.
+- **Causa Raíz Técnica**: la marca vivía como opciones del generador del documento técnico, no como configuración compartida por los escritores PDF/Word.
+- **Solución Codificada**: `shared/brand.mjs` (`loadBrandProfile`, `withBrand`, `saveBrandProfile`) lee `.cpi-brand/{company.json,logo.svg}`; `writeAuditPdfFile` y `writeDocxFile` lo aplican a cualquier docSpec sin marca propia; `brand-setup.mjs` lo crea/consulta/borra; `--no-brand` lo desactiva. El agente pregunta una sola vez si no hay perfil (SKILL.md/AGENTS.md). `.cpi-brand/` está en `.gitignore`.
+- **Archivos**: `shared/brand.mjs`, `shared/pdf-utils.mjs`, `shared/docx-writer.mjs`, `skills/sap-cpi-architect/scripts/brand-setup.mjs`, `skills/sap-cpi-architect/scripts/extract-for-docs.mjs`, `.gitignore`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-046` — Sin nota en documento técnico, diff ni auditor Groovy
+- **Síntoma**: la sección 7 «Puntaje de Cumplimiento» del documento técnico, la evolución de Score del informe de diff y el «Score de Calidad» del auditor Groovy mostraban una nota numérica que no aporta valor (mismo motivo que LL-043).
+- **Causa Raíz Técnica**: la nota se pintaba en el Markdown de 8 secciones, en el PDF técnico con `--include-audit`, en el kv/subtítulo/consola del diff y en la salida de texto de `audit-groovy.mjs`.
+- **Solución Codificada**: el contrato del Markdown pasa a **7 secciones** (la antigua 8 «Recomendaciones de Modernización» es ahora la 7; `doc-template-8-sections.md` → `doc-template-7-sections.md`); el diff y el auditor Groovy muestran cambios y número de hallazgos en lugar de puntuación. `score`/`scoreDelta` se conservan solo en `--json` por compatibilidad.
+- **Archivos**: `skills/sap-cpi-architect/scripts/extract-for-docs.mjs`, `skills/sap-cpi-architect/references/doc-template-7-sections.md`, `skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs`, `skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs`, `SKILL.md` afectadas, `docs/CLI_REFERENCE.md`, `tests/lessons/lessons.test.mjs`.
+
+### `LL-047` — Participante receptor con la errata `EndpointRecevier` no se clasificaba
+- **Síntoma**: en un `.iflw` cuyo participante receptor tiene `ifl:type="EndpointRecevier"` pero un `name`/`id` sin la palabra «Receiver», el canal de salida no se detectaba como outbound y quedaba fuera del cliente API/endpoints.
+- **Causa Raíz Técnica**: SAP escribe el tipo con la errata «Recevier»; la expresión `/Receiv?er/` solo admite «Receiver» y «Receier», nunca «Recevier».
+- **Solución Codificada**: `parseParticipants` y `classifyMessageFlow` usan `/Rece(?:iv|vi)er/i`, que admite ambas grafías.
+- **Archivos**: `skills/sap-cpi-architect/scripts/export-api-client.mjs`.
+
+### `LL-048` — La remediación `groovy` anunciada por el inspector era rechazada
+- **Síntoma**: `availableRemediations` ofrecía el id `groovy`, pero `--remediate groovy` (o `cpi_remediate_zip`) fallaba con «Remediación desconocida: groovy».
+- **Causa Raíz Técnica**: la corrección existía en `remediateBundleZip`, pero `REMEDIATION_IDS` (lista de validación) no la incluía y la ayuda/SKILL tampoco.
+- **Solución Codificada**: `REMEDIATION_IDS` incluye `groovy`; ayuda de la CLI y `SKILL.md` actualizadas. La corrección solo reescribe variables cuyo nombre termina en `reader` (`reader.getText("UTF-8")`) y `JsonSlurper`→`JsonSlurperClassic`.
+- **Archivos**: `skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs`, `skills/sap-cpi-zip-inspector/SKILL.md`.
+
+### `LL-049` — El Word técnico mostraba «Contenido» dos veces y lo metía en el índice
+- **Síntoma**: en el `.docx` del documento técnico aparecía el título «Contenido» duplicado (un Heading1 y el título del índice), y al actualizar el índice en Word el propio «Contenido» se listaba como entrada.
+- **Causa Raíz Técnica**: `iflow-doc-sections.mjs` emite una sección «Contenido» antes del bloque `toc`, y `docx-writer.mjs` ya pinta su propio `TocHeading` (fuera del esquema); el Heading1 sí entra en el campo `TOC \o "1-3"`.
+- **Solución Codificada**: el escritor Word omite la sección «Contenido» cuando el bloque siguiente es `toc`.
+- **Archivos**: `shared/docx-writer.mjs`.

@@ -26,7 +26,7 @@ Este flujo genera el resumen ejecutivo en PDF con el inventario y los hallazgos 
 ```bash
 node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs ./extracted_iflow/src/main/resources/script/ProcessOrder.groovy
 ```
-Obtendrás el `Score de Calidad Original (0-100)` y las líneas exactas donde existan riesgos de OOM, XXE o incompatibilidades con *Upgrade Readiness*.
+Obtendrás el número de hallazgos por dimensión y severidad y las líneas exactas donde existan riesgos de OOM, XXE o incompatibilidades con *Upgrade Readiness*.
 
 ### Paso 3: Extraer topología y validar la Documentación Técnica (PDF de 10 secciones, Word editable con `--docx` y Markdown de 8)
 ```bash
@@ -194,7 +194,7 @@ node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs \
   ./IF_Remediado_v2.zip \
   --pdf ./Informe_Comparativa_Diff.pdf
 ```
-El reporte PDF incluirá la evolución del Score de cumplimiento, los cambios en parámetros de despliegue (`parameters.prop`), las adiciones/sustituciones de scripts y la resolución de vulnerabilidades de seguridad.
+El reporte PDF incluirá los cambios en parámetros de despliegue (`parameters.prop`), las adiciones/sustituciones de scripts y la resolución de vulnerabilidades de seguridad.
 
 ---
 

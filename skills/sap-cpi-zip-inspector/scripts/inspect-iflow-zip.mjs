@@ -717,7 +717,7 @@ export function collectAuditFindings(report) {
     list.push({ category, severity: normalizeSeverity(severity), component, finding, recommendation });
 
   for (const mi of h.manifestIssues || []) {
-    add('paquete', 'CRÍTICA', 'META-INF/MANIFEST.MF', mi, 'Colocar .project y META-INF/MANIFEST.MF en la raíz del ZIP y plegar las líneas a 72 bytes UTF-8.');
+    add('paquete', 'CRÍTICA', 'META-INF/MANIFEST.MF', String(mi).replace(/^(CR[IÍ]TIC[OA]|ALTA|MEDIA|BAJA)s*/i, ''), 'Colocar .project y META-INF/MANIFEST.MF en la raíz del ZIP y plegar las líneas a 72 bytes UTF-8.');
   }
   if (!h.isScriptCollection && !h.isValueMapping && !h.hasExceptionSubprocess) {
     add('fiabilidad', 'CRÍTICA', 'Integration Process (.iflw)', 'Ausencia de Exception Subprocess.', 'Añadir un Exception Subprocess para capturar errores, indexar logs y evitar fallos silenciosos.');
@@ -741,14 +741,14 @@ export function collectAuditFindings(report) {
     add('fiabilidad', 'MEDIA', `Router (${rt.name} / ${rt.id})`, 'Exclusive Gateway sin ruta por defecto.', 'Definir una Default Route para evitar fallos cuando ninguna condición se cumpla.');
   }
   for (const cm of h.contentModifiersReadingBodyToProperty || []) {
-    add('rendimiento', 'CRÍTICA', 'Content Modifier (Enricher)', 'Copia de ${body} en una Exchange Property (' + cm.key + ' = ' + cm.val + ')', 'Evitar duplicar el payload completo en memoria; usar streaming o guardar solo identificadores.');
+    add('rendimiento', 'CRÍTICA', 'Content Modifier (Enricher)', 'Copia de ${body} en la Exchange Property «' + cm.key + '».', 'Evitar duplicar el payload completo en memoria; usar streaming o guardar solo identificadores.');
   }
   for (const sp of h.splittersWithoutStreaming || []) {
     add('rendimiento', 'MEDIA', `Splitter (${sp.name} / ${sp.id})`, 'Splitter con streaming deshabilitado.', 'Activar streaming=true para procesar lotes grandes sin saturar la memoria.');
   }
   for (const ga of h.groovyAuditResults || []) {
     for (const gf of ga.findings || []) {
-      add('groovy', gf.severity, `${ga.fileName}:${gf.line || 1}`, `${gf.title} [${gf.code}]`, gf.remediation || '');
+      add('groovy', gf.severity, `${ga.fileName}:${gf.line || 1}`, `${gf.title} [${gf.ruleId}]`, gf.remediation || '');
     }
   }
   const rank = (s) => AUDIT_SEV_ORDER.indexOf(s);
@@ -777,8 +777,8 @@ export function buildAuditPdfSpec(report) {
     blocks.push({ type: 'callout', tone: 'warn', text: 'Este paquete es una copia limpiada para IA (alias SANITIZED). Restáurala con --restore antes de importarla en SAP CPI.' });
   }
 
-  blocks.push({ type: 'subsection', text: '1.1 Inventario del paquete' });
-  blocks.push({
+  if (!isNested) blocks.push({ type: 'subsection', text: '1.1 Inventario del paquete' });
+  if (!isNested) blocks.push({
     type: 'table',
     columns: [{ title: 'Recurso', weight: 2 }, { title: 'Cantidad', weight: 1 }, { title: 'Archivos', weight: 5, mono: true }],
     rows: [
@@ -843,7 +843,7 @@ export function buildAuditPdfSpec(report) {
 
   return {
     title: `Informe de Auditoría SAP CPI: ${report.fileName}`,
-    subtitle: `SymbolicName: ${report.manifestData?.symbolicName || 'N/A'} | Tipo: ${report.manifestData?.bundleType || 'Bundle'}`,
+    subtitle: `${report.manifestData?.symbolicName || 'N/A'} (${report.manifestData?.bundleType || 'Bundle'})`,
     blocks
   };
 }
@@ -851,7 +851,7 @@ export function buildAuditPdfSpec(report) {
 /**
  * Aplica al paquete .zip únicamente las correcciones autorizadas por el usuario y genera un nuevo .zip
  */
-export const REMEDIATION_IDS = ['manifest', 'https', 'timeouts', 'streaming', 'csrf', 'all'];
+export const REMEDIATION_IDS = ['manifest', 'https', 'timeouts', 'streaming', 'csrf', 'groovy', 'all'];
 
 export function remediateBundleZip(inputPathOrDemo, selectedFixes = ['all'], outZipPath) {
   const unknownFixes = selectedFixes.map((s) => String(s).trim().toLowerCase()).filter((s) => s && !REMEDIATION_IDS.includes(s));
@@ -1009,7 +1009,7 @@ if (isMain) {
     // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
     const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
     console.log(
-      'Uso: node inspect-iflow-zip.mjs <archivo.zip | archivo.iflw | --demo> [--pdf <informe.pdf>] [--docx <informe.docx>] [--remediate <manifest,https,timeouts,streaming,csrf|all> --out < Corregido.zip>] [--extract-dir <carpeta>] [--show-prop-values] [--json]'
+      'Uso: node inspect-iflow-zip.mjs <archivo.zip | archivo.iflw | --demo> [--pdf <informe.pdf>] [--docx <informe.docx>] [--remediate <manifest,https,timeouts,streaming,csrf,groovy|all> --out < Corregido.zip>] [--extract-dir <carpeta>] [--show-prop-values] [--json]'
     );
     process.exit(args.length === 0 ? 2 : 0);
   }

@@ -161,12 +161,12 @@ const CHECKS = [
     }
   },
   {
-    skill: 'mcp-server.mjs (Local JSON-RPC 2.0 MCP Server - 22 Tools)',
+    skill: 'mcp-server.mjs (Local JSON-RPC 2.0 MCP Server - 23 Tools)',
     script: 'mcp-server.mjs',
     args: ['--self-test', '--json'],
     verify: (out) => {
       const data = JSON.parse(out);
-      return data.valid === true && data.toolsCount === 22 && data.sampleToolCallOk === true;
+      return data.valid === true && data.toolsCount === 23 && data.sampleToolCallOk === true;
     }
   }
 ];

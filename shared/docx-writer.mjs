@@ -7,9 +7,11 @@
  * Bloques: section, subsection, kv, finding, paragraph, bullet, table, code, callout, diagram, toc, pagebreak.
  */
 import fs from 'node:fs';
+import path from 'node:path';
 import { createZipBuffer } from './zip-utils.mjs';
 import { detectLanguage, formatCode, tokenizeLine, CODE_TEXT } from './code-format.mjs';
 import { svgToPdfForm } from './svg-watermark.mjs';
+import { withBrand } from './brand.mjs';
 
 const CONTENT_W = 9638; // ancho útil A4 con márgenes de 2 cm, en twips
 const EMU_PER_TWIP = 635;
@@ -404,6 +406,9 @@ function buildBody(docSpec) {
         break;
       case 'section':
       case 'subsection': {
+        // El bloque 'toc' ya pinta su propio título "Contenido" (TocHeading, fuera del esquema):
+        // un Heading1 duplicado aparecería dos veces y entraría en el índice al actualizarlo en Word.
+        if (blocks[i + 1]?.type === 'toc' && /^contenido$/i.test(String(b.text || '').trim())) break;
         const level = b.type === 'section' ? 1 : headingLevel(b.text);
         const numbered = /^\d/.test(String(b.text || ''));
         const inner = numbered
@@ -577,6 +582,7 @@ export function createDocxBuffer(docSpec) {
 }
 
 export function writeDocxFile(filePath, docSpec) {
-  fs.writeFileSync(filePath, createDocxBuffer(docSpec));
+  fs.mkdirSync(path.dirname(path.resolve(filePath)), { recursive: true });
+  fs.writeFileSync(filePath, createDocxBuffer(withBrand(docSpec)));
   return filePath;
 }

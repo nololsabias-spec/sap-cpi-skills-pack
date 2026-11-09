@@ -57,7 +57,7 @@ export function parseParticipants(iflwXml) {
     all.add(id);
     if (/Sender/i.test(type) || /Sender/i.test(name) || /Sender/i.test(id)) {
       senders.add(id);
-    } else if (/Receiv?er/i.test(type) || /Receiv?er/i.test(name) || /Receiv?er/i.test(id)) {
+    } else if (/Rece(?:iv|vi)er/i.test(type) || /Rece(?:iv|vi)er/i.test(name) || /Rece(?:iv|vi)er/i.test(id)) {
       receivers.add(id);
     }
   }
@@ -93,7 +93,7 @@ export function classifyMessageFlow(attrs, body, participants) {
   // Undeclared participant: whichever end is a process flow node decides.
   if (nodes.has(targetRef) && !nodes.has(sourceRef)) return 'inbound';
   if (nodes.has(sourceRef) && !nodes.has(targetRef)) return 'outbound';
-  if (/Receiv?er/i.test(targetRef)) return 'outbound';
+  if (/Rece(?:iv|vi)er/i.test(targetRef)) return 'outbound';
   if (/Sender/i.test(sourceRef)) return 'inbound';
   return 'unknown';
 }

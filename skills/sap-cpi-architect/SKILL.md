@@ -102,10 +102,10 @@ node ./scripts/extract-for-docs.mjs <existing-iflow.zip | --demo>
 ```
 
 * Extractor & Doc Validator script: [extract-for-docs.mjs](./scripts/extract-for-docs.mjs)
-* 8-Section Template: [doc-template-8-sections.md](./references/doc-template-8-sections.md)
+* 7-Section Template: [doc-template-7-sections.md](./references/doc-template-7-sections.md)
 
-### Paso 2: Redactar y Validar las 8 Secciones Obligatorias
-Write the Markdown documentation following the exact 8 headings in [doc-template-8-sections.md](./references/doc-template-8-sections.md) and validate the generated `.md` file with:
+### Paso 2: Redactar y Validar las 7 Secciones Obligatorias
+Write the Markdown documentation following the exact 7 headings in [doc-template-7-sections.md](./references/doc-template-7-sections.md) and validate the generated `.md` file with:
 
 ```bash
 node ./scripts/extract-for-docs.mjs --validate-doc <generated-doc.md>
@@ -201,3 +201,10 @@ En el PDF técnico, cada paso debe explicar qué aporta al ciclo y qué consume/
 - Pie de página con la marca de la empresa (`--logo` SVG + nombre de `--company`); no hay marca de agua.
 - Sección 6 documenta también los mapeos (Message Mapping, XSLT, XSD, Value Mapping) por campos de origen/destino. No se inventan decisiones de diseño: solo se describe lo que figura en el iFlow.
 - MCP `cpi_export_technical_doc`: `companyPath`, `logoPath`, `privacy`, `includeAudit`.
+
+### Marca de los documentos (PDF/Word) — preguntar una sola vez (LL-045)
+
+Antes de generar el **primer** PDF/Word de la sesión, comprueba el perfil de marca: `node skills/sap-cpi-architect/scripts/brand-setup.mjs --show`.
+- Si `configured` es `false`, **pregunta una sola vez** al usuario: «¿Quieres que los documentos lleven el nombre de tu empresa y un logo en el pie? Pásame el nombre (y opcionalmente dirección, autor, revisor, fecha) y un logo SVG de solo trazados, o dime que no.» Si acepta, guárdalo con la tool MCP `cpi_brand_setup` (action=save) o con `brand-setup.mjs --name "..." [--address ... --author ... --reviewer ... --date ...] [--logo logo.svg]`; si dice que no, no vuelvas a preguntar en la sesión (usa `--no-brand` si quiere desactivarlo).
+- Si ya está configurado, no preguntes: se aplica automáticamente a **todos** los PDF/Word (auditoría, diff, documento técnico). `--company`/`--logo` en el documento técnico lo sobrescriben puntualmente.
+- Se guarda en `.cpi-brand/` (o `CPI_BRAND_DIR`), con su propio `.gitignore`: nunca se versiona. Los datos de empresa son datos del usuario, no los inventes ni los deduzcas de bundles.

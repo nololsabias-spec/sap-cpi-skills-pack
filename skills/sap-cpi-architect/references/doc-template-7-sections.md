@@ -1,8 +1,8 @@
-# Plantilla Oficial de 8 Secciones para Documentación Técnica de iFlows (Modo 2)
+# Plantilla Oficial de 7 Secciones para Documentación Técnica de iFlows (Modo 2)
 
 > Esta plantilla es la del **Markdown** (validada con `--validate-doc`, DOC-001). El **PDF** (`--pdf`) tiene su propia estructura de 10 secciones con índice navegable: 1 Objetivo y alcance, 2 Arquitectura, 3 Pasos, 4 Endpoints y llamadas, 5 Contratos, 6 Scripts y mapeos, 7 Errores, 8 Parámetros, 9 Operación, 10 Supuestos y glosario.
 
-Toda documentación técnica generada por ingeniería inversa debe contener **exactamente** estos 8 encabezados `##`:
+Toda documentación técnica generada por ingeniería inversa debe contener **exactamente** estos 7 encabezados `##`:
 
 ```markdown
 ## 1. Resumen Ejecutivo
@@ -28,9 +28,6 @@ Detalle de cada script detectado (`nombre.groovy`), propósito funcional, entrad
 | Severidad (CRÍTICA/ALTA/MEDIA/LEVE) | Hallazgo | Componente Afectado | Recomendación |
 | :--- | :--- | :--- | :--- |
 
-## 7. Puntaje de Cumplimiento
-Puntaje numérico `X/100` con desglose de deducciones (Crítica -30, Alta -15, Media -5, Baja -2).
-
-## 8. Recomendaciones de Modernización
+## 7. Recomendaciones de Modernización
 Lista priorizada de mejoras accionables en el SAP Integration Suite Designer.
 ```

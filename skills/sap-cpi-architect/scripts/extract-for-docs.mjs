@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * SAP CPI Reverse-Engineering Documentation Extractor & 8-Section Validator (Mode 2)
+ * SAP CPI Reverse-Engineering Documentation Extractor & 7-Section Validator (Mode 2)
  * - Extracts manifest, .iflw excerpt, Groovy scripts, and deterministic heuristics from a .zip bundle.
  * - Validates that a generated Markdown documentation file includes all 8 mandatory sections.
  *
@@ -14,6 +14,7 @@ import path from 'node:path';
 import { inspectBundle, buildDemoBundleZipBuffer } from '../../sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
 import { writeAuditPdfFile } from '../../../shared/pdf-utils.mjs';
 import { writeDocxFile } from '../../../shared/docx-writer.mjs';
+import { loadCompanyInfo, COMPANY_FIELDS, loadBrandProfile } from '../../../shared/brand.mjs';
 import { buildIflowDetailBlocks } from '../../../shared/iflow-doc-blocks.mjs';
 
 export const MANDATORY_DOC_SECTIONS = [
@@ -23,12 +24,11 @@ export const MANDATORY_DOC_SECTIONS = [
   { num: 4, title: 'Scripts Groovy / Script Collection', pattern: /^##\s+4\.\s*Scripts\s+Groovy/im },
   { num: 5, title: 'Manejo de Errores', pattern: /^##\s+5\.\s*Manejo\s+de\s+Errores/im },
   { num: 6, title: 'Auditoría de Buenas Prácticas SAP (Hallazgos)', pattern: /^##\s+6\.\s*Auditor[ií]a\s+de\s+Buenas\s+Pr[aá]cticas/im },
-  { num: 7, title: 'Puntaje de Cumplimiento', pattern: /^##\s+7\.\s*Puntaje\s+de\s+Cumplimiento/im },
-  { num: 8, title: 'Recomendaciones de Modernización', pattern: /^##\s+8\.\s*Recomendaciones\s+de\s+Modernizaci[oó]n/im }
+  { num: 7, title: 'Recomendaciones de Modernización', pattern: /^##\s+7\.\s*Recomendaciones\s+de\s+Modernizaci[oó]n/im }
 ];
 
 /**
- * Checks that the 8 mandatory sections exist AND that each one has real content
+ * Checks that the 7 mandatory sections exist AND that each one has real content
  * (at least one non-empty line that is not a heading, a rule or a placeholder like "TBD" / "...").
  */
 export function validateGeneratedDocumentation(markdownText) {
@@ -84,7 +84,6 @@ export function extractIflowDocumentation(zipPathOrBuf) {
 - **SymbolicName**: ${m.symbolicName || 'N/A'} (v${m.version || '1.0.0'})
 - **Bundle Type**: ${m.bundleType || 'IntegrationFlow'}
 - **Nodo de Ejecución**: IFLMAP (Cloud Integration Worker)
-- **Puntaje de Gobierno**: ${h.score ?? 100}/100
 
 ## 2. Arquitectura del Flujo
 - **Canales de Entrada/Salida**: ${h.stats?.channels || 0}
@@ -109,11 +108,7 @@ ${report.catalog?.groovyScripts?.map((s) => `### ${s.name}\n- **Tamaño**: ${s.s
 ## 6. Auditoría de Buenas Prácticas SAP (Hallazgos)
 ${(report.findings || []).map((f) => `- [${f.severity || 'INFO'}] **${f.rule || f.title || 'Hallazgo'}**: ${f.message || f.description || ''}`).join('\n') || '- Sin hallazgos bloqueantes.'}
 
-## 7. Puntaje de Cumplimiento
-- **Puntaje Global**: ${h.score ?? 100}/100
-- **Nivel**: ${(h.score ?? 100) >= 85 ? 'APROBADO PARA PRODUCCIÓN' : (h.score ?? 100) >= 60 ? 'APROBADO CON OBSERVACIONES' : 'REQUIERE REMEDIACIÓN'}
-
-## 8. Recomendaciones de Modernización
+## 7. Recomendaciones de Modernización
 1. Externalizar todas las URLs y credenciales en \`parameters.prop\`.
 2. Emplear streams \`Reader\` en transformaciones de gran volumen.
 3. Centralizar funciones comunes en Script Collections compartidas.
@@ -126,29 +121,7 @@ ${(report.findings || []).map((f) => `- [${f.severity || 'INFO'}] **${f.rule || 
   };
 }
 
-const COMPANY_FIELDS = [
-  ['name', 'Empresa'],
-  ['address', 'Dirección'],
-  ['author', 'Autor'],
-  ['reviewer', 'Revisor'],
-  ['date', 'Fecha']
-];
-
-/**
- * Lee un JSON de datos de empresa (todos los campos son opcionales y se tratan como texto plano).
- * Campos: name, address, author, reviewer, date.
- */
-export function loadCompanyInfo(filePath) {
-  const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('El archivo de empresa debe ser un objeto JSON.');
-  }
-  const info = {};
-  for (const [key] of COMPANY_FIELDS) {
-    if (raw[key] !== undefined && raw[key] !== null && String(raw[key]).trim()) info[key] = String(raw[key]).trim();
-  }
-  return info;
-}
+export { loadCompanyInfo, COMPANY_FIELDS };
 
 /**
  * @param {object} report resultado de inspectBundle
@@ -159,7 +132,9 @@ export function buildTechnicalDocPdfSpec(report, markdownText = null, options = 
   const blocks = [];
   const m = report.manifestData || {};
   const h = report.heuristics || {};
-  const company = options.company || null;
+  const profile = options.brand === false ? { company: null, logoSvg: null } : loadBrandProfile();
+  const company = options.company || profile.company || null;
+  const logoSvg = options.logoSvg || profile.logoSvg || null;
   const detail = buildIflowDetailBlocks(report, { privacy: options.privacy });
 
   // 0. Datos del documento (empresa, dirección, autoría, fecha)
@@ -193,7 +168,7 @@ export function buildTechnicalDocPdfSpec(report, markdownText = null, options = 
     blocks.push({ type: 'kv', key: 'Exception Subprocess', value: h.hasExceptionSubprocess ? 'Activo' : 'No detectado' });
   }
 
-  // La auditoría (hallazgos, puntaje, recomendaciones) es un documento aparte: solo con --include-audit
+  // La auditoría (hallazgos y recomendaciones) es un documento aparte: solo con --include-audit
   if (options.includeAudit) {
   // 6. Auditoría de Buenas Prácticas SAP
   blocks.push({ type: 'section', text: 'Auditoría de Buenas Prácticas SAP' });
@@ -210,13 +185,7 @@ export function buildTechnicalDocPdfSpec(report, markdownText = null, options = 
     blocks.push({ type: 'paragraph', text: 'Cumple todas las verificaciones estáticas de seguridad y arquitectura SAP CPI.' });
   }
 
-  // 7. Puntaje de Cumplimiento
-  blocks.push({ type: 'section', text: 'Puntaje de Cumplimiento' });
-  blocks.push({ type: 'kv', key: 'Puntuación Determinista', value: `${h.score ?? 100}/100` });
-  const statusLabel = (h.score ?? 100) >= 85 ? 'APROBADO PARA PRODUCCIÓN' : (h.score ?? 100) >= 60 ? 'APROBADO CON OBSERVACIONES' : 'REQUIERE REMEDIACIÓN';
-  blocks.push({ type: 'kv', key: 'Estado de Gobierno', value: statusLabel });
-
-  // 8. Recomendaciones de Modernización
+  // 7. Recomendaciones de Modernización
   blocks.push({ type: 'section', text: 'Recomendaciones de Modernización' });
   blocks.push({ type: 'bullet', text: 'Externalizar todos los endpoints mediante parámetros configurables {{PARAM}}.' });
   blocks.push({ type: 'bullet', text: 'Usar streaming (Reader) en scripts Groovy para proteger la memoria heap del nodo trabajador.' });
@@ -225,11 +194,11 @@ export function buildTechnicalDocPdfSpec(report, markdownText = null, options = 
   return {
     title: `Documento Técnico: ${m.name || path.basename(report.fileName, '.zip')}`,
     subtitle: `Versión ${m.version || "1.0.0"} | ${m.symbolicName || "N/A"}`,
-    score: options.includeAudit ? (h.score ?? 100) : undefined,
+    score: undefined,
     footerText: company?.name
       ? company.name
       : 'SAP CPI Architecture & Technical Documentation',
-    brand: options.logoSvg ? { svg: options.logoSvg, text: company?.name } : null,
+    brand: options.brand === false ? false : logoSvg ? { svg: logoSvg, text: company?.name } : null,
     blocks
   };
 }
@@ -259,8 +228,8 @@ if (isMain) {
     }
     const md = fs.readFileSync(docPath, 'utf8');
     const check = validateGeneratedDocumentation(md);
-    console.log(`=== VALIDACIÓN DE DOCUMENTACIÓN TÉCNICA (8 SECCIONES) ===`);
-    console.log(`Estado: ${check.valid ? 'COMPLETO (8/8 secciones presentes y con contenido)' : `INCOMPLETO (${check.presentCount}/8 secciones, ${check.filledCount} con contenido)`}`);
+    console.log(`=== VALIDACIÓN DE DOCUMENTACIÓN TÉCNICA (7 SECCIONES) ===`);
+    console.log(`Estado: ${check.valid ? 'COMPLETO (7/7 secciones presentes y con contenido)' : `INCOMPLETO (${check.presentCount}/7 secciones, ${check.filledCount} con contenido)`}`);
     if (!check.valid) {
       if (check.missingSections.length) {
         console.log('Secciones faltantes:');
@@ -304,6 +273,7 @@ if (isMain) {
   const pdfOptions = {
     company: companyPath ? loadCompanyInfo(path.resolve(companyPath)) : null,
     logoSvg: logoPath ? fs.readFileSync(path.resolve(logoPath), 'utf8') : null,
+    brand: args.includes('--no-brand') ? false : undefined,
     includeAudit: args.includes('--include-audit'),
     privacy: args.includes('--privacy') ? true : args.includes('--no-privacy') ? false : undefined
   };
@@ -341,7 +311,6 @@ if (isMain) {
     console.log(`=== CONTEXTO DE INGENIERÍA INVERSA PARA DOCUMENTACIÓN (${report.fileName}) ===`);
     console.log(`Nombre: ${report.manifestData.name}`);
     console.log(`SymbolicName: ${report.manifestData.symbolicName} | Versión: ${report.manifestData.version}`);
-    console.log(`Score Preliminar Determinista: ${report.heuristics.score}/100`);
     console.log(`Estadísticas BPMN2: ${JSON.stringify(report.heuristics.stats)}`);
     console.log(`Scripts Groovy detectados: ${report.catalog.groovyScripts.map((s) => s.name).join(', ') || 'Ninguno'}`);
     console.log(`Parámetros detectados:\n${report.catalog.parameterFiles.map((p) => p.content).join('\n') || '(Sin parameters.prop)'}`);
@@ -349,7 +318,7 @@ if (isMain) {
       console.log(`\n[OK] Documento de Diseño Técnico (10 secciones) generado en PDF: ${report.pdfGenerated.path} (${report.pdfGenerated.sizeBytes} bytes)`);
     }
     if (report.markdownGenerated) {
-      console.log(`\n[OK] Documento Markdown (8 secciones) generado en: ${report.markdownGenerated.path} (${report.markdownGenerated.sizeBytes} bytes)`);
+      console.log(`\n[OK] Documento Markdown (7 secciones) generado en: ${report.markdownGenerated.path} (${report.markdownGenerated.sizeBytes} bytes)`);
     }
   }
 }

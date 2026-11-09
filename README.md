@@ -82,7 +82,7 @@ Las herramientas MCP solo aceptan rutas dentro del workspace (`CPI_MCP_ROOT`, `C
 sap-cpi-skills-pack/
 ├── README.md                           # Guía principal de instalación y uso
 ├── AGENTS.md / CLAUDE.md               # Harness de ingeniería y aprendizaje continuo (Codex / Antigravity / Claude)
-├── mcp-server.mjs                      # Servidor MCP local (stdio JSON-RPC 2.0, 22 tools + 9 resources)
+├── mcp-server.mjs                      # Servidor MCP local (stdio JSON-RPC 2.0, 23 tools + 9 resources)
 ├── package.json                        # Scripts de verificación (npm test), MCP y demostraciones
 ├── setup-skills.mjs                    # Instalador universal Multi-IDE (Antigravity, Claude, Codex, Cursor, Copilot, Windsurf, Cline)
 ├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills (17 módulos) + servidor MCP
@@ -104,7 +104,7 @@ sap-cpi-skills-pack/
     ├── sap-cpi-zip-inspector/          # 1. Inspector .zip, auditor BPMN2, differ semántico, PDF y remediador
     │   └── scripts/                    #    (inspect-iflow-zip.mjs, diff-iflow-zip.mjs, sanitize-iflow-zip.mjs)
     ├── sap-cpi-groovy-generator/       # 2. Generador Groovy 2.4 / 4 y linter estático (validate-groovy.mjs)
-    ├── sap-cpi-code-auditor/           # 3. Auditor de calidad/seguridad Groovy (Score 0-100, audit-groovy.mjs)
+    ├── sap-cpi-code-auditor/           # 3. Auditor de calidad/seguridad Groovy (hallazgos por severidad, audit-groovy.mjs)
     ├── sap-cpi-xslt-studio/            # 4. Validador y generador XSLT 1.0/2.0/3.0 (validate-xslt.mjs)
     ├── sap-cpi-regex-studio/           # 5. Sandbox Regex + Apache Camel Simple (test-camel-regex.mjs)
     ├── sap-cpi-xsd-studio/             # 6. Inferencia XSD 1.0, mapeos gráficos .mmap y simulador de ejecución
@@ -128,7 +128,7 @@ sap-cpi-skills-pack/
 | **5** | `sap-cpi-regex-studio` | Diseña y prueba expresiones regulares con anclaje `^...$`, detector estático de *Catastrophic Backtracking (ReDoS)* y expresiones Apache Camel Simple (`date-with-timezone`, listas `not in`). | `test-camel-regex.mjs` |
 | **6** | `sap-cpi-xsd-studio` | Infiere esquemas W3C XSD 1.0 a partir de muestras JSON, genera mapeos gráficos **`.mmap` (`<xiObj>`)** sintetizando contenedores padre y **simula localmente la ejecución del mapeo** con payloads XML/JSON reales. | `validate-xsd.mjs`<br>`build-mmap.mjs`<br>`simulate-mmap.mjs` |
 | **7** | `sap-cpi-mock-data-generator` | Valida sintaxis XML/JSON (incluyendo estándares IDoc `EDI_DC40` y OData `$batch`), comprueba la correlación E2E entre múltiples contratos y empaqueta suites `.zip`. | `pack-mock-suite.mjs` |
-| **8** | `sap-cpi-architect` | **Modo 1:** Construye paquetes OSGi `.zip` duales (iFlow + Script Collection). **Modo 2:** Extrae topología y genera **Documento Técnico en PDF y Word editable `.docx` (10 secciones, índice con enlaces, información funcional por paso, mapeos, pie centrado con el logo reducido de la empresa) y Markdown (8 secciones)**. **Modo 3:** Clona y adapta bundles `.zip` de referencia. **Modo 4:** Exporta **colecciones Postman v2.1 y OpenAPI 3.0** con CSRF handshake. **Modo 5:** Construye paquetes OSGi de **Value Mapping**. | `build-cpi-package.mjs`<br>`clone-iflow-bundle.mjs`<br>`extract-for-docs.mjs`<br>`export-api-client.mjs`<br>`build-value-mapping.mjs` |
+| **8** | `sap-cpi-architect` | **Modo 1:** Construye paquetes OSGi `.zip` duales (iFlow + Script Collection). **Modo 2:** Extrae topología y genera **Documento Técnico en PDF y Word editable `.docx` (10 secciones, índice con enlaces, información funcional por paso, mapeos, pie centrado con el logo reducido de la empresa; la marca se guarda una vez con `brand-setup.mjs` y se aplica a todos los PDF/Word, ver [CLI_REFERENCE](./docs/CLI_REFERENCE.md)) y Markdown (7 secciones)**. **Modo 3:** Clona y adapta bundles `.zip` de referencia. **Modo 4:** Exporta **colecciones Postman v2.1 y OpenAPI 3.0** con CSRF handshake. **Modo 5:** Construye paquetes OSGi de **Value Mapping**. | `build-cpi-package.mjs`<br>`clone-iflow-bundle.mjs`<br>`extract-for-docs.mjs`<br>`export-api-client.mjs`<br>`build-value-mapping.mjs`<br>`brand-setup.mjs` |
 
 ---
 
@@ -168,7 +168,7 @@ node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./SC_Collection
 
 ### 5.3. Auditor de Calidad y Refactorización Groovy (`sap-cpi-code-auditor`)
 
-Calcula el `Score de Calidad Original (0-100)` aplicando penalizaciones estáticas (`CRÍTICA: -30`, `ALTA: -15`, `MEDIA: -5`, `BAJA: -2`) y permite comparar un script original frente a su versión refactorizada:
+Lista los hallazgos del script por dimensión y severidad (sin nota numérica; `--json` conserva el `score` por compatibilidad) y permite comparar un script original frente a su versión refactorizada:
 
 ```bash
 # Auditar un script existente
@@ -244,7 +244,7 @@ node skills/sap-cpi-mock-data-generator/scripts/pack-mock-suite.mjs --spec ./sui
   ```bash
   node skills/sap-cpi-architect/scripts/build-cpi-package.mjs ./bundle-spec.json --out-dir ./dist
   ```
-- **Modo 2 (`extract-for-docs.mjs`):** Extrae la topología completa de un paquete `.zip`, valida las 8 secciones del Markdown y genera el **Documento de Diseño Técnico en PDF (10 secciones), Word editable (`--docx`, misma estructura) y Markdown**:
+- **Modo 2 (`extract-for-docs.mjs`):** Extrae la topología completa de un paquete `.zip`, valida las 7 secciones del Markdown y genera el **Documento de Diseño Técnico en PDF (10 secciones), Word editable (`--docx`, misma estructura) y Markdown**:
   ```bash
   node skills/sap-cpi-architect/scripts/extract-for-docs.mjs ./Paquete_iFlow.zip --pdf ./Diseno_Tecnico.pdf --docx ./Diseno_Tecnico.docx
   node skills/sap-cpi-architect/scripts/extract-for-docs.mjs ./Paquete_iFlow.zip --validate-doc ./Documentacion_Tecnica.md

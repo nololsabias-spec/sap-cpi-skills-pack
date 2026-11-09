@@ -27,6 +27,7 @@ import { diffBundles, buildDiffPdfSpec } from './skills/sap-cpi-zip-inspector/sc
 import { extractIflowDocumentation, buildTechnicalDocPdfSpec, loadCompanyInfo } from './skills/sap-cpi-architect/scripts/extract-for-docs.mjs';
 import { exportApiClientArtifacts, extractIflowEndpointsSummary } from './skills/sap-cpi-architect/scripts/export-api-client.mjs';
 import { validateAndBuildValueMappingBundle } from './skills/sap-cpi-architect/scripts/build-value-mapping.mjs';
+import { runBrandSetup } from './skills/sap-cpi-architect/scripts/brand-setup.mjs';
 import { validateXsltStylesheet } from './skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs';
 import { validateAndTestCamelRegex } from './skills/sap-cpi-regex-studio/scripts/test-camel-regex.mjs';
 import { validateAndBuildCpiBundles, DEMO_ARCHITECT_SPEC } from './skills/sap-cpi-architect/scripts/build-cpi-package.mjs';
@@ -118,7 +119,7 @@ export const MCP_TOOLS = [
   {
     name: 'cpi_inspect_zip',
     description:
-      'Audita un paquete .zip o .iflw de SAP CPI (IntegrationFlow, ScriptCollection o Multi-Bundle), devuelve inventario, puntuación 0-100, hallazgos BPMN2/OSGi/Groovy y cambios automatizables disponibles. Opcionalmente genera un informe PDF.',
+      'Audita un paquete .zip o .iflw de SAP CPI (IntegrationFlow, ScriptCollection o Multi-Bundle), devuelve inventario, hallazgos agrupados por categoría (sin nota), BPMN2/OSGi/Groovy y cambios automatizables disponibles. Opcionalmente genera informe PDF y Word.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -374,7 +375,7 @@ export const MCP_TOOLS = [
   {
     name: 'cpi_export_technical_doc',
     description:
-      'Genera el Documento de Diseño Técnico de un iFlow .zip en PDF y/o Word editable .docx (docxPath) (10 secciones con índice navegable: objetivo, flujo y diagramas, pasos con su función, endpoints y llamadas, contratos, scripts y mapeos, parámetros por uso, errores y glosario) y/o Markdown (8 secciones). Usa privacy automático con bundles sanitizados: solo alias y {{Param}}. El pie lleva la marca de la empresa (sin marca de agua).',
+      'Genera el Documento de Diseño Técnico de un iFlow .zip en PDF y/o Word editable .docx (docxPath) (10 secciones con índice navegable: objetivo, flujo y diagramas, pasos con su función, endpoints y llamadas, contratos, scripts y mapeos, parámetros por uso, errores y glosario) y/o Markdown (7 secciones). Usa privacy automático con bundles sanitizados: solo alias y {{Param}}. El pie lleva la marca de la empresa (sin marca de agua).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -403,6 +404,24 @@ export const MCP_TOOLS = [
         authType: { type: 'string', enum: ['oauth2', 'basic', 'client_certificate', 'none'], description: 'Esquema de autenticación por defecto.' }
       },
       required: ['filePath']
+    }
+  },
+  {
+    name: 'cpi_brand_setup',
+    description:
+      'Gestiona el perfil de marca (logo SVG y datos de empresa) que se aplica a todos los PDF/Word generados. action=show consulta, save guarda (empresa, dirección, autor, revisor, fecha y/o logo .svg), clear lo borra. Se guarda en local (.cpi-brand, fuera de Git).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['show', 'save', 'clear'], description: 'Operación (por defecto show).' },
+        name: { type: 'string', description: 'Nombre de la empresa.' },
+        address: { type: 'string', description: 'Dirección.' },
+        author: { type: 'string', description: 'Autor.' },
+        reviewer: { type: 'string', description: 'Revisor.' },
+        date: { type: 'string', description: 'Fecha.' },
+        logoPath: { type: 'string', description: 'Ruta a un logo .svg.' },
+        brandDir: { type: 'string', description: 'Carpeta del perfil (por defecto CPI_BRAND_DIR o ./.cpi-brand).' }
+      }
     }
   },
   {
@@ -735,6 +754,18 @@ export function executeMcpTool(name, args = {}) {
       });
       return res;
     }
+    case 'cpi_brand_setup': {
+      const action = args.action || 'show';
+      const a = [];
+      if (args.brandDir) a.push('--dir', resolveUserPath(args.brandDir));
+      if (action === 'show') a.push('--show');
+      else if (action === 'clear') a.push('--clear');
+      else if (action === 'save') {
+        for (const k of ['name', 'address', 'author', 'reviewer', 'date']) if (args[k]) a.push('--' + k, String(args[k]));
+        if (args.logoPath) a.push('--logo', resolveUserPath(args.logoPath));
+      } else throw new Error('action debe ser show, save o clear.');
+      return runBrandSetup(a);
+    }
     case 'cpi_build_value_mapping': {
       const csvContent = args.csvContent || (args.csvPath ? fs.readFileSync(resolveUserPath(args.csvPath), 'utf8') : null);
       const res = validateAndBuildValueMappingBundle({
@@ -1057,7 +1088,7 @@ if (isMain) {
     const summary = {
       valid:
         initRes?.result?.serverInfo?.name === 'sap-cpi-skills-pack' &&
-        toolsRes?.result?.tools?.length === 22 &&
+        toolsRes?.result?.tools?.length === 23 &&
         resList?.result?.resources?.length >= 8 &&
         parsedCall.totalFiles === 4,
       toolsCount: toolsRes?.result?.tools?.length,

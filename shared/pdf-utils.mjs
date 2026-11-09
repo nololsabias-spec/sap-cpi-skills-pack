@@ -3,7 +3,9 @@
  * Diseñado para exportar informes ejecutivos y técnicos de auditoría SAP CPI (.iflw / .zip).
  */
 import fs from 'node:fs';
+import path from 'node:path';
 import { svgToPdfForm } from './svg-watermark.mjs';
+import { withBrand } from './brand.mjs';
 import { BLOCK_RENDERERS, textWidth } from './pdf-blocks.mjs';
 
 /**
@@ -376,7 +378,8 @@ export function createAuditPdfBuffer(docSpec) {
 }
 
 export function writeAuditPdfFile(outPath, docSpec) {
-  const buf = createAuditPdfBuffer(docSpec);
+  const buf = createAuditPdfBuffer(withBrand(docSpec));
+  fs.mkdirSync(path.dirname(path.resolve(outPath)), { recursive: true });
   fs.writeFileSync(outPath, buf);
   return buf.length;
 }

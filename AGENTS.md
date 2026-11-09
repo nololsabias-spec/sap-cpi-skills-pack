@@ -11,7 +11,7 @@ El paquete consta de **8 Skills deterministas** sin dependencias externas (`zero
 - `shared/zip-utils.mjs`: Empaquetado/desempaquetado ZIP en memoria (DEFLATE/STORE), normalización de `META-INF/MANIFEST.MF` en raíz y plegado RFC 2822 a 72 bytes UTF-8 (`wrapManifestLine72`).
 - `shared/pdf-utils.mjs`: Generador nativo de informes PDF 1.4 (`WinAnsiEncoding`, multipágina, tablas y bloques de código) sin librerías externas.
 - `shared/cpi-sanitizer.mjs`: Limpieza reversible de bundles reales (endpoints, emails, IPs, alias de credenciales, valores de `.prop`, secretos, URNs privados y términos indicados) con alias consistentes y restauración desde un mapa local.
-- `skills/sap-cpi-architect`: Diseño desde cero (3 etapas), documentación técnica en PDF y Word editable `.docx` (10 secciones, índice navegable, mapeos, pie con marca de empresa, modo privado) y Markdown (8 secciones) (`extract-for-docs.mjs`), clonación/adaptación (`clone-iflow-bundle.mjs`), exportación de clientes de pruebas Postman v2.1 y OpenAPI 3.0 (`export-api-client.mjs`), y constructor de Value Mappings OSGi (`build-value-mapping.mjs`).
+- `skills/sap-cpi-architect`: Diseño desde cero (3 etapas), documentación técnica en PDF y Word editable `.docx` (10 secciones, índice navegable, mapeos, pie con marca de empresa, modo privado) y Markdown (7 secciones) (`extract-for-docs.mjs`), clonación/adaptación (`clone-iflow-bundle.mjs`), exportación de clientes de pruebas Postman v2.1 y OpenAPI 3.0 (`export-api-client.mjs`), y constructor de Value Mappings OSGi (`build-value-mapping.mjs`).
 - `skills/sap-cpi-zip-inspector`: Auditoría estática de paquetes `.zip` e `.iflw`, generador de resumen PDF (`--pdf`), autorremediación interactiva (`--remediate ... --out`), comparador semántico de paquetes y control de versiones (`diff-iflow-zip.mjs`) y limpieza/restauración reversible de bundles reales (`sanitize-iflow-zip.mjs`).
 - `skills/sap-cpi-groovy-generator` & `skills/sap-cpi-code-auditor`: Generación y auditoría AST/heurística de Groovy 2.4 / 4 (`validate-groovy.mjs`, `audit-groovy.mjs`).
 - `skills/sap-cpi-xslt-studio`: Generación y validación XSLT 1.0 (Xalan) / 2.0 (Saxon-HE) (`validate-xslt.mjs`).
@@ -49,3 +49,7 @@ Regla completa: [`rules/sap-cpi-privacy-sanitize.md`](./rules/sap-cpi-privacy-sa
 2. **Trabajar solo sobre el `.sanitized.zip`** (`sanitize-iflow-zip.mjs` o MCP `cpi_sanitize_zip`). Los alias (`host-001.sanitized.invalid`, `SANITIZED_PARAM_001`, `urn:sanitized:ns-001`…) son sintácticamente válidos y se conservan tal cual al editar.
 3. **Nunca leer, imprimir ni subir** el mapa (`*.sanitize-map.json`, o `sanitize-map.json` con `--out-dir`): contiene los valores originales (ignorado en `.gitignore`).
 4. **Restaurar antes de importar** en SAP CPI (`--restore` o MCP `cpi_restore_zip`). El inspector marca los alias pendientes como `SANITIZED-001` (CRÍTICO) y `build-cpi-package.mjs` se niega a empaquetarlos.
+
+## Marca de los documentos
+
+Antes del primer PDF/Word de la sesión ejecuta `node skills/sap-cpi-architect/scripts/brand-setup.mjs --show`; si no hay perfil, pregunta una sola vez por nombre de empresa (y dirección/autor/revisor/fecha) y un logo SVG de solo trazados, y guárdalos con ese mismo script. Se aplican a todos los documentos (`--no-brand` los omite). Nunca versiones `.cpi-brand/`.

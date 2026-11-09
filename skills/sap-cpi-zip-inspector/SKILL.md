@@ -24,7 +24,7 @@ node scripts/sanitize-iflow-zip.mjs <in.zip...> --out-dir <carpeta> [--terms Cli
 Before running the audit or generating the remediation plan, check if any context is missing and **ask brief clarifying questions when needed**:
 1. **Target Artifact Path**: If the user has not specified which `.zip` bundle or `.iflw` file to inspect, ask for the path (or offer to run `--demo` on a sample bundle).
 2. **Operational & Landscape Context**: If architectural findings depend on the deployment environment (e.g., whether an internal endpoint is behind SAP Cloud Connector where `http://` virtual hosts are intentional, expected payload sizes in MB, or corporate timeout SLAs), ask the user so the remediation report is tailored and accurate.
-3. **Remediation Depth**: Ask whether they want only the diagnostic audit report (`0–100` score + findings matrix) or if they also want the refactored Groovy scripts and patched `.iflw` generated automatically.
+3. **Remediation Depth**: Ask whether they want only the diagnostic audit report (findings matrix by category) or if they also want the refactored Groovy scripts and patched `.iflw` generated automatically.
 
 ### Step 1: Run Deterministic Bundle Extraction & Static Heuristics
 Execute the inspection script against the user's `.zip` package (`IntegrationFlow`, `ScriptCollection`, or multi-bundle outer `.zip`) or `.iflw` XML file (or run with `--demo` to generate and inspect a sample vulnerable iFlow bundle):
@@ -38,7 +38,7 @@ node ./scripts/inspect-iflow-zip.mjs <path-to-iflow.zip-or-.iflw> --pdf <Informe
 # Word editable: añade --docx <Informe_Auditoria.docx> (también en diff-iflow-zip.mjs; MCP: docxPath)
 
 # Generar un nuevo paquete .zip aplicando únicamente los cambios autorizados por el usuario
-node ./scripts/inspect-iflow-zip.mjs <path-to-iflow.zip> --remediate <manifest,https,timeouts,streaming,csrf|all> --out <iFlow_Corregido.zip>
+node ./scripts/inspect-iflow-zip.mjs <path-to-iflow.zip> --remediate <manifest,https,timeouts,streaming,csrf,groovy|all> --out <iFlow_Corregido.zip>
 ```
 
 * Resource script: [inspect-iflow-zip.mjs](./scripts/inspect-iflow-zip.mjs)
@@ -78,10 +78,10 @@ If `inspect-iflow-zip.mjs` detects Groovy scripts in `src/main/resources/script/
 
 ### Step 4: Present Executive Summary & Interactive Deliverable Selection (PDF / Detailed Response / Selective Auto-Remediation)
 1. **Present Concise Executive Summary**:
-   - Show the **OSGi Bundle Metadata** (`Bundle-SymbolicName`, `Bundle-Version`, catalog counts of `.iflw`, `.groovy`, `.xslt`, `.mmap`, `.xsd`, `.prop`), the **Compliance Score (`0–100`)**, and a compact summary of the findings detected.
+   - Show the **OSGi Bundle Metadata** (`Bundle-SymbolicName`, `Bundle-Version`, catalog counts of `.iflw`, `.groovy`, `.xslt`, `.mmap`, `.xsd`, `.prop`) and a compact summary (grouped by category, no numeric score) of the findings detected.
 2. **Interactive Deliverable & Remediation Gate (Mandatory Question)**:
    - After showing the executive summary, **always ask the user which option(s) they want to execute**:
-     - **Opción 1 · Generar un PDF con el resumen y detalle de todo lo encontrado**: Ejecuta `node ./scripts/inspect-iflow-zip.mjs <paquete.zip> --pdf <Informe_Auditoria.pdf>` para entregar un informe PDF ejecutivo y técnico listo para compartir. El informe va por categorías (Seguridad, Fiabilidad, Rendimiento, Groovy, Paquete) con tablas y matriz de severidad, y no muestra nota numérica (también `--docx` para Word).
+     - **Opción 1 · Generar un PDF con el resumen y detalle de todo lo encontrado**: Ejecuta `node ./scripts/inspect-iflow-zip.mjs <paquete.zip> --pdf <Informe_Auditoria.pdf>` para entregar un informe PDF ejecutivo y técnico listo para compartir. El informe va por categorías (Seguridad, Fiabilidad, Rendimiento, Groovy, Paquete) con tablas y matriz de severidad, y no muestra nota numérica (también `--docx` para Word). Los PDF/Word llevan automáticamente la marca guardada con `brand-setup.mjs` (ver SKILL de `sap-cpi-architect`, «Marca de los documentos»); si no hay perfil, pregunta una sola vez antes del primer documento; `--no-brand` la desactiva.
      - **Opción 2 · Mostrar una respuesta larga y detallada en el chat**: Despliega el informe técnico completo en Markdown con la tabla exhaustiva de hallazgos (`| Severidad | Componente Afectado | Hallazgo Técnico | Recomendación SAP Best Practice |`) y los pasos detallados de remediación en SAP Integration Suite Designer.
      - **Opción 3 · Generar el nuevo paquete iFlow (`.zip`) con los cambios propuestos que sean posibles**:
        - **Regla de Confirmación Previa Obligatoria**: Antes de modificar o empaquetar el `.zip`, muestra al usuario la lista numerada de cambios propuestos detectados en `heuristics.availableRemediations` (y en los scripts Groovy si los hubiera) y **pregúntale siempre cuáles de esos cambios específicos desea aplicar**:

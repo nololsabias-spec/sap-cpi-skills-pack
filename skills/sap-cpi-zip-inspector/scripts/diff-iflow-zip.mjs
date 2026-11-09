@@ -6,7 +6,6 @@
  * - Topology differences (ignoring graphical BPMNDI coordinates).
  * - Parameters added/removed in parameters.prop (deployment checklist).
  * - Scripts (.groovy), schemas (.xsd), mappings (.mmap/.xslt) added/removed/modified.
- * - Architecture compliance score evolution (e.g., 25/100 -> 100/100).
  * - Optional comparison report in PDF via shared/pdf-utils.mjs.
  *
  * Usage:
@@ -285,11 +284,9 @@ export function buildDiffPdfSpec(diffResult) {
   const bA = diffResult.bundleA;
   const bB = diffResult.bundleB;
 
-  blocks.push({ type: 'section', text: '1. Comparativa de Versiones y Puntuación Arquitectónica' });
-  blocks.push({ type: 'kv', key: 'Paquete Origen (v1)', value: `${bA.name} (v${bA.version}) - Score: ${bA.score}/100` });
-  blocks.push({ type: 'kv', key: 'Paquete Destino (v2)', value: `${bB.name} (v${bB.version}) - Score: ${bB.score}/100` });
-  const sign = diffResult.scoreDelta > 0 ? `+${diffResult.scoreDelta}` : `${diffResult.scoreDelta}`;
-  blocks.push({ type: 'kv', key: 'Evolución de Score', value: `${sign} puntos (${bA.score} -> ${bB.score})` });
+  blocks.push({ type: 'section', text: '1. Comparativa de Versiones' });
+  blocks.push({ type: 'kv', key: 'Paquete Origen (v1)', value: `${bA.name} (v${bA.version}) ` });
+  blocks.push({ type: 'kv', key: 'Paquete Destino (v2)', value: `${bB.name} (v${bB.version}) ` });
 
   blocks.push({ type: 'section', text: '2. Cambios en Parámetros Externalizados (Checklist Despliegue)' });
   if (diffResult.parametersDiff.added.length > 0) {
@@ -350,8 +347,7 @@ export function buildDiffPdfSpec(diffResult) {
 
   return {
     title: `Comparativa iFlow: ${path.basename(bA.name, '.zip')} vs ${path.basename(bB.name, '.zip')}`,
-    subtitle: `Delta: ${sign} pts | v${bA.version} -> v${bB.version}`,
-    score: bB.score,
+    subtitle: `v${bA.version} -> v${bB.version}`,
     blocks
   };
 }
@@ -400,10 +396,8 @@ if (isMain) {
     console.log(JSON.stringify(result, null, 2));
   } else {
     console.log('=== SAP CPI SEMANTIC iFLOW BUNDLE DIFFER ===');
-    console.log(`Origen (A):  ${result.bundleA.name} | Score: ${result.bundleA.score}/100`);
-    console.log(`Destino (B): ${result.bundleB.name} | Score: ${result.bundleB.score}/100`);
-    const sign = result.scoreDelta > 0 ? `+${result.scoreDelta}` : `${result.scoreDelta}`;
-    console.log(`Delta de Puntuación: ${sign} puntos`);
+    console.log(`Origen (A):  ${result.bundleA.name}`);
+    console.log(`Destino (B): ${result.bundleB.name}`);
 
     console.log(`\n--- RECURSOS MODIFICADOS (${result.filesDiff.modified.length}) / AÑADIDOS (${result.filesDiff.added.length}) / ELIMINADOS (${result.filesDiff.removed.length}) ---`);
     result.filesDiff.added.forEach((f) => console.log(`  + [AÑADIDO] ${f.name} (${f.size} bytes)`));
