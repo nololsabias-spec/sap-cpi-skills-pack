@@ -49,6 +49,13 @@ Si tienes un script Groovy antiguo que usa `message.getBody(String)`, `new JsonS
    node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs ./legacy.groovy --refactored ./refactored.groovy
    ```
    El comando devolverá código de salida `0` únicamente si el script refactorizado alcanza `100/100` con `0` errores.
+4. **Documentar el script refactorizado** ([`rules/sap-cpi-code-documentation.md`](../rules/sap-cpi-code-documentation.md)):
+   ```bash
+   # Esqueleto de cabecera con Entrada/Salida/Errores deducidos del código
+   node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./refactored.groovy --doc-header --groovy 4
+   # Tras completar los TODO, sube @version, añade la entrada de Historial y valida con --docs
+   node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs ./legacy.groovy --refactored ./refactored.groovy --groovy 4 --docs
+   ```
 
 ---
 

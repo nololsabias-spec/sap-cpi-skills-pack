@@ -17,7 +17,8 @@ import os from 'node:os';
 import { writeAuditPdfFile } from './shared/pdf-utils.mjs';
 import { extractBundleFile } from './shared/zip-utils.mjs';
 import { inspectBundle, buildAuditPdfSpec, remediateBundleZip } from './skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs';
-import { lintGroovyScript, generateCanonicalGroovyTemplate } from './skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
+import { lintGroovyScript, generateCanonicalGroovyTemplate, normalizeGroovyVersion } from './skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs';
+import { buildGroovyDocHeader, inferGroovyDocMeta } from './shared/doc-standard.mjs';
 import { compareAuditResults } from './skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs';
 import { inferXsdFromJsonSamples, validateXsdForSapCpi } from './skills/sap-cpi-xsd-studio/scripts/validate-xsd.mjs';
 import { generateMmapXml, validateMmapForSapCpi } from './skills/sap-cpi-xsd-studio/scripts/build-mmap.mjs';
@@ -188,7 +189,9 @@ export const MCP_TOOLS = [
         code: { type: 'string', description: 'Código fuente Groovy a validar (opcional si se indica filePath).' },
         filePath: { type: 'string', description: 'Ruta al archivo .groovy en disco (opcional si se indica code).' },
         fileName: { type: 'string', description: 'Nombre identificador del script (ej. TransformOrder.groovy).' },
-        groovyVersion: { type: 'string', enum: ['2.4', '4'], description: 'Versión de Groovy del paso Script (2.4 o 4). Sin ella, las APIs XML dependientes de versión se reportan como MEDIUM en lugar de error de compilación; no se infiere de la API Message v1/v2.' }
+        groovyVersion: { type: 'string', enum: ['2.4', '4'], description: 'Versión de Groovy del paso Script (2.4 o 4). Sin ella, las APIs XML dependientes de versión se reportan como MEDIUM en lugar de error de compilación; no se infiere de la API Message v1/v2.' },
+        docs: { type: 'boolean', description: 'Aplica también el estándar de documentación (cabecera, Groovydoc de métodos, comentarios sin datos sensibles). Úsalo al generar scripts o cuando el usuario pida comentarios.' },
+        docHeader: { type: 'boolean', description: 'Devuelve además el esqueleto de cabecera estándar deducido del código (campo docHeader) para completarlo.' }
       }
     }
   },
@@ -202,7 +205,8 @@ export const MCP_TOOLS = [
         originalCode: { type: 'string', description: 'Código Groovy original.' },
         refactoredCode: { type: 'string', description: 'Código Groovy refactorizado (opcional).' },
         fileName: { type: 'string', description: 'Nombre del archivo Groovy.' },
-        groovyVersion: { type: 'string', enum: ['2.4', '4'], description: 'Versión de Groovy del paso Script (2.4 o 4). Sin ella, las APIs XML dependientes de versión se reportan como MEDIUM en lugar de error de compilación; no se infiere de la API Message v1/v2.' }
+        groovyVersion: { type: 'string', enum: ['2.4', '4'], description: 'Versión de Groovy del paso Script (2.4 o 4). Sin ella, las APIs XML dependientes de versión se reportan como MEDIUM en lugar de error de compilación; no se infiere de la API Message v1/v2.' },
+        docs: { type: 'boolean', description: 'Aplica también el estándar de documentación (cabecera, Groovydoc de métodos, comentarios sin datos sensibles). Úsalo al generar scripts o cuando el usuario pida comentarios.' }
       },
       required: ['originalCode']
     }
@@ -280,7 +284,8 @@ export const MCP_TOOLS = [
       properties: {
         xsltContent: { type: 'string', description: 'Código XML de la transformación XSLT (o usar filePath).' },
         filePath: { type: 'string', description: 'Ruta al archivo .xsl / .xslt en disco.' },
-        engine: { type: 'string', enum: ['1.0', '2.0', '3.0'], description: 'Versión del motor XSLT.' }
+        engine: { type: 'string', enum: ['1.0', '2.0', '3.0'], description: 'Versión del motor XSLT.' },
+        docs: { type: 'boolean', description: 'Aplica también el estándar de documentación (cabecera <!-- -->, Parámetros, Historial, @version, comentarios sin datos sensibles).' }
       }
     }
   },
@@ -482,7 +487,8 @@ export const MCP_TOOLS = [
         },
         scriptName: { type: 'string', description: 'Nombre del archivo Groovy (ej. EnrichOrder.groovy).' },
         apiVersion: { type: 'string', enum: ['v1', 'v2'], description: 'Versión del API de CPI: v1 (Groovy 2.4 / Camel 2) o v2 (Groovy 4 / Camel 3).' },
-        customComments: { type: 'boolean', description: 'Incluye comentarios explicativos de arquitectura y cumplimiento de directrices SAP.' }
+        groovyVersion: { type: 'string', enum: ['2.4', '4'], description: 'Runtime del paso Script. Por defecto 4 con API v2 y 2.4 con API v1.' },
+        customComments: { type: 'boolean', description: 'Incluye la cabecera estándar de documentación y comentarios en línea; la plantilla se valida con el estándar de documentación.' }
       },
       required: ['pattern']
     }
@@ -554,11 +560,16 @@ export function executeMcpTool(name, args = {}) {
     case 'cpi_validate_groovy': {
       const code = args.code || (args.filePath ? fs.readFileSync(resolveUserPath(args.filePath), 'utf8') : '');
       const fName = args.fileName || (args.filePath ? path.basename(args.filePath) : 'Script.groovy');
-      return lintGroovyScript(code, fName, { groovyVersion: args.groovyVersion });
+      const result = lintGroovyScript(code, fName, { groovyVersion: args.groovyVersion, docs: Boolean(args.docs) });
+      if (args.docHeader) {
+        result.docHeader = buildGroovyDocHeader(inferGroovyDocMeta(code, { groovyVersion: normalizeGroovyVersion(args.groovyVersion) }));
+      }
+      return result;
     }
     case 'cpi_audit_groovy': {
-      const orig = lintGroovyScript(args.originalCode || '', args.fileName || 'Original.groovy', { groovyVersion: args.groovyVersion });
-      const ref = args.refactoredCode ? lintGroovyScript(args.refactoredCode, args.fileName || 'Refactored.groovy', { groovyVersion: args.groovyVersion }) : null;
+      const auditOpts = { groovyVersion: args.groovyVersion, docs: Boolean(args.docs) };
+      const orig = lintGroovyScript(args.originalCode || '', args.fileName || 'Original.groovy', auditOpts);
+      const ref = args.refactoredCode ? lintGroovyScript(args.refactoredCode, args.fileName || 'Refactored.groovy', auditOpts) : null;
       return compareAuditResults(orig, ref);
     }
     case 'cpi_infer_xsd': {
@@ -590,7 +601,7 @@ export function executeMcpTool(name, args = {}) {
     }
     case 'cpi_validate_xslt': {
       const content = args.xsltContent || (args.filePath ? fs.readFileSync(resolveUserPath(args.filePath), 'utf8') : '');
-      return validateXsltStylesheet(content, args.engine || null);
+      return validateXsltStylesheet(content, args.engine || null, { docs: Boolean(args.docs) });
     }
     case 'cpi_test_regex': {
       return validateAndTestCamelRegex({
@@ -784,6 +795,7 @@ export function executeMcpTool(name, args = {}) {
       return generateCanonicalGroovyTemplate(args.pattern, {
         scriptName: args.scriptName,
         apiVersion: args.apiVersion,
+        groovyVersion: args.groovyVersion,
         customComments: args.customComments
       });
     }

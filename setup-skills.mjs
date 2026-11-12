@@ -109,6 +109,10 @@ function buildUnifiedInstructionsMarkdown(baseSkillDir = '.agents') {
     ? fs.readFileSync(path.join(ROOT_DIR, 'rules', 'sap-cpi-privacy-sanitize.md'), 'utf8')
     : '';
 
+  const docRule = fs.existsSync(path.join(ROOT_DIR, 'rules', 'sap-cpi-code-documentation.md'))
+    ? fs.readFileSync(path.join(ROOT_DIR, 'rules', 'sap-cpi-code-documentation.md'), 'utf8')
+    : '';
+
   return `${harnessText.trim()}
 
 ---
@@ -129,7 +133,7 @@ Tienes disponibles tanto el **Servidor MCP local (\`node ${baseSkillDir}/mcp-ser
 ---
 
 ${continuousRule.trim()}
-${privacyRule ? `\n---\n\n${privacyRule.trim()}\n` : ''}`;
+${privacyRule ? `\n---\n\n${privacyRule.trim()}\n` : ''}${docRule ? `\n---\n\n${docRule.trim()}\n` : ''}`;
 }
 
 function installAgentBundle(agentRoot) {

@@ -71,6 +71,21 @@ Todo script parte de **100 puntos** y se restan puntos según la severidad de ca
 - `sql`: Prohibida la interpolación GString `"SELECT ... ${var}"`; exige parámetros `?`.
 - `throwEx`: Exige bloques `try / catch (Exception e)` relanzando `throw new Exception("CPI-ERR: ...")`.
 
+### 2.4. Estándar de Documentación (`--docs`)
+Lo aplican `validate-groovy.mjs`, `audit-groovy.mjs` y `validate-xslt.mjs` con `--docs`, y el MCP con `docs: true`. Está implementado en `shared/doc-standard.mjs`; la especificación completa está en [`rules/sap-cpi-code-documentation.md`](../rules/sap-cpi-code-documentation.md). Sin `--docs` solo se aplican `DOC_SECRET_IN_COMMENT` y `DOC_SENSITIVE_COMMENT`, que son de seguridad y están siempre activas (en XSLT cuentan como error de validación). El resto de reglas `DOC_*` no afecta al score técnico.
+
+| Código | Severidad | Regla |
+| :--- | :--- | :--- |
+| `DOC_MISSING_HEADER` | `MEDIUM` | El script no empieza con la cabecera `/** ... */` (resumen, `Motivo:`, `Paso Script:`, `Entrada:`, `Salida:`, `Errores:`, `Historial:`, `@version`). |
+| `DOC_PLACEHOLDER` | `MEDIUM` | La cabecera tiene `TODO`, `FIXME`, `TBD` o `XXX`: el esqueleto de `--doc-header` está sin completar. |
+| `DOC_RUNTIME_MISMATCH` | `MEDIUM` | `Paso Script:` contradice `--groovy` o el `import` del `Message` (v1/v2). Es `LOW` si no indica versión o API. |
+| `DOC_SECRET_IN_COMMENT` | `CRITICAL` | Password, token, API key o credencial `Bearer`/`Basic` en un comentario. |
+| `DOC_SENSITIVE_COMMENT` | `HIGH` | Email, URL de un host real o IP en un comentario. Se permiten `*.example.com`, `*.invalid`, rangos de documentación y enlaces a `sap.com`, `w3.org` y `apache.org`. |
+| `DOC_HEADER_NOT_FIRST`, `DOC_MISSING_SUMMARY`, `DOC_SUMMARY_FORMAT`, `DOC_MISSING_RUNTIME`, `DOC_MISSING_SECTION`, `DOC_MISSING_VERSION`, `DOC_HISTORY_FORMAT`, `DOC_HISTORY_VERSION_MISMATCH` | `LOW` | Forma de la cabecera: posición, resumen de una frase terminada en punto, secciones obligatorias (`Errores` si hay `throw`), `@version X.Y.Z` y entradas `X.Y.Z  AAAA-MM-DD  texto` con la más reciente primero. |
+| `DOC_MISSING_METHOD_DOC`, `DOC_PARAM_MISMATCH` | `LOW` | Métodos auxiliares sin Groovydoc, o con `@param` que no coinciden con la firma. |
+| `DOC_COMMENTED_OUT_CODE`, `DOC_TODO_LEFT`, `DOC_BANNER_COMMENT`, `DOC_MARKDOWN_DOC_COMMENT` | `LOW` | Código comentado, TODO/FIXME, banners `// ====` o comentarios `///`. |
+| `XSLT_DOC_*` | igual que su equivalente | Las mismas reglas para la cabecera `<!-- -->` de las hojas XSLT, más `XSLT_DOC_PARAM_MISMATCH` (un `xsl:param` sin documentar en `Parámetros:`). |
+
 ---
 
 ## 3. Reglas de Validación XSLT (`validate-xslt.mjs`)

@@ -36,7 +36,7 @@ Cada vez que el usuario utilice una skill y durante las pruebas en SAP CPI apare
    - Actualizar la `SKILL.md` implicada y sus `references/`.
    - Actualizar `docs/VALIDATION_RULES.md` (si hay nueva regla de validación) y registrar la lección aprendida en `docs/LESSONS_LEARNED.md`.
 5. **Ejecutar Verificación y Sincronización**:
-   - Ejecutar `node verify-all.mjs` (debe dar `17/17 PASS`).
+   - Ejecutar `node verify-all.mjs` (debe dar `20/20 PASS`).
    - Ejecutar `node setup-skills.mjs --target <ruta-workspace>` para sincronizar `.agents/` y `.claude/`.
 
 ---
@@ -49,3 +49,14 @@ Regla completa: [`rules/sap-cpi-privacy-sanitize.md`](./rules/sap-cpi-privacy-sa
 2. **Trabajar solo sobre el `.sanitized.zip`** (`sanitize-iflow-zip.mjs` o MCP `cpi_sanitize_zip`). Los alias (`host-001.sanitized.invalid`, `SANITIZED_PARAM_001`, `urn:sanitized:ns-001`…) son sintácticamente válidos y se conservan tal cual al editar.
 3. **Nunca leer, imprimir ni subir** el mapa (`*.sanitize-map.json`, o `sanitize-map.json` con `--out-dir`): contiene los valores originales (ignorado en `.gitignore`).
 4. **Restaurar antes de importar** en SAP CPI (`--restore` o MCP `cpi_restore_zip`). El inspector marca los alias pendientes como `SANITIZED-001` (CRÍTICO) y `build-cpi-package.mjs` se niega a empaquetarlos.
+
+---
+
+## 4. Documentación de Código (Groovy y XSLT)
+
+Regla completa: [`rules/sap-cpi-code-documentation.md`](./rules/sap-cpi-code-documentation.md).
+
+1. **Siempre al generar** un script o una hoja XSLT, y **al refactorizar o comentar** uno existente, usa la cabecera canónica. En Groovy es un bloque `/** */` en la línea 1 y en XSLT un `<!-- -->` antes de `<xsl:stylesheet>`. Contiene, en este orden: resumen, `Motivo:`, `Paso Script:`/`Motor:`, `Entrada:`, `Salida:`, `Errores:`, `Historial:` y `@version`.
+2. Documenta con Groovydoc los métodos auxiliares. Los comentarios `//` explican el porqué. No dejes banners, `///`, código comentado ni TODO, y nunca pongas emails, endpoints, IPs ni secretos en comentarios.
+3. Para un script existente, obtén el esqueleto con `validate-groovy.mjs <script> --doc-header` y completa los `TODO` sin inventar contratos.
+4. Valida con `--docs` (`validate-groovy.mjs`, `audit-groovy.mjs`, `validate-xslt.mjs`; `docs: true` en MCP). El resultado debe tener 0 hallazgos CRITICAL/HIGH/MEDIUM.

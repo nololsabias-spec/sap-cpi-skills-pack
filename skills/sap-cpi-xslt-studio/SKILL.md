@@ -49,11 +49,12 @@ Follow these mandatory SAP CPI rules:
 Save the generated XSLT and run the deterministic validator:
 
 ```bash
-node ./scripts/validate-xslt.mjs <path-to-mapping.xslt> [--engine 2.0|1.0] [--json]
+node ./scripts/validate-xslt.mjs <path-to-mapping.xslt> [--engine 2.0|1.0] [--docs] [--json]
 ```
 
 * Validator script: [validate-xslt.mjs](./scripts/validate-xslt.mjs)
 * Reference scenarios: [xslt-scenarios.md](./references/xslt-scenarios.md)
+* **Documentation Standard ([`rules/sap-cpi-code-documentation.md`](../../rules/sap-cpi-code-documentation.md))**: every generated or commented stylesheet carries an XML comment `<!-- ... -->` between `<?xml ...?>` and `<xsl:stylesheet>`. It contains the summary, `Motor: XSLT x.0 (Xalan|Saxon-HE)`, `Entrada:`, `Parámetros:` (every `xsl:param` except `exchange`), `Salida:`, `Errores:` (if `terminate="yes"`), `Historial:` and `@version`. Never use `<xsl:comment>` for documentation, because it is written to the output message. Validate with `--docs`; the `docs` block must report `passed: true`. Secrets, emails, real endpoints or IPs in any `<!-- -->` comment are validation errors even without `--docs`.
 * **Verification Gate**: Fix any reported anti-hallucination error, engine mismatch, or missing namespace/parameter declaration before delivering the final `.xslt` file.
 
 

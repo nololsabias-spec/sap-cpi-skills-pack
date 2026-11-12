@@ -76,7 +76,7 @@ sap-cpi-skills-pack/
 ├── mcp-server.mjs                      # Servidor MCP local (stdio JSON-RPC 2.0, 22 tools + 9 resources)
 ├── package.json                        # Scripts de verificación (npm test), MCP y demostraciones
 ├── setup-skills.mjs                    # Instalador universal Multi-IDE (Antigravity, Claude, Codex, Cursor, Copilot, Windsurf, Cline)
-├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills (17 módulos) + servidor MCP
+├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills (20 módulos) + servidor MCP
 ├── rules/
 │   ├── sap-cpi-continuous-learning.md  # Regla de auto-evolución continua y privacidad estricta
 │   └── sap-cpi-privacy-sanitize.md     # Regla de limpieza reversible de bundles reales (preguntar, limpiar, restaurar)
@@ -154,7 +154,14 @@ Verifica el cumplimiento de la firma oficial SAP CPI (`com.sap.gateway.ip.core.c
 node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./script.groovy --strict
 node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./carpeta_scripts --strict
 node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./SC_Collection.zip --strict
+
+# Estándar de documentación: cabecera, Groovydoc y comentarios (rules/sap-cpi-code-documentation.md)
+node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./script.groovy --groovy 4 --docs
+# Esqueleto de cabecera deducido del código (Entrada/Salida/Errores); --out escribe el script con la cabecera
+node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs ./script.groovy --doc-header --groovy 4
 ```
+
+Los secretos, emails, endpoints reales e IPs en comentarios se marcan siempre (`DOC_SECRET_IN_COMMENT`, `DOC_SENSITIVE_COMMENT`). El resto de reglas de documentación solo se aplican con `--docs`.
 
 ### 5.3. Auditor de Calidad y Refactorización Groovy (`sap-cpi-code-auditor`)
 
@@ -166,6 +173,9 @@ node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs ./legacy.groovy
 
 # Comparar el script original con el script refactorizado (exige 100/100 en el refactorizado)
 node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs ./legacy.groovy --refactored ./refactored.groovy
+
+# Si el refactor añade o cambia comentarios, exige también el estándar de documentación
+node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs ./legacy.groovy --refactored ./refactored.groovy --groovy 4 --docs
 ```
 
 ### 5.4. Validador de Transformaciones XSLT (`sap-cpi-xslt-studio`)
@@ -174,6 +184,9 @@ Valida hojas de estilo XSLT para motores Xalan (1.0) o Saxon-HE (2.0/3.0), detec
 
 ```bash
 node skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs ./mapping.xslt --version=2.0 --scenario=headers
+
+# Comprueba también la cabecera de documentación <!-- --> (Motor, Entrada, Parámetros, Salida, Historial, @version)
+node skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs ./mapping.xslt --engine 2.0 --docs
 ```
 
 ### 5.5. Sandbox de Expresiones Regulares y Camel Simple (`sap-cpi-regex-studio`)
@@ -285,3 +298,10 @@ Cada vez que el usuario detecta un fallo al importar o ejecutar un artefacto en 
 5. Ejecuta `node verify-all.mjs` y `node setup-skills.mjs` para propagar la mejora.
 
 Además, la regla [`rules/sap-cpi-privacy-sanitize.md`](./rules/sap-cpi-privacy-sanitize.md) hace que el agente **pregunte antes de leer** un `.zip`/`.iflw` exportado de un tenant real si quiere limpiarlo. Si aceptas, trabaja solo sobre una copia `.sanitized.zip` con alias reversibles, nunca lee el mapa de valores originales (`sanitize-map.json`, ignorado por Git) y te recuerda restaurar con `--restore` antes de importar en SAP CPI (el inspector marca `SANITIZED-001` y el empaquetador se niega mientras queden alias).
+
+Por último, la regla [`rules/sap-cpi-code-documentation.md`](./rules/sap-cpi-code-documentation.md) hace que todo script Groovy u hoja XSLT que el agente genere, refactorice o comente siga el mismo formato:
+- Una cabecera canónica con resumen, `Motivo:`, `Paso Script:`/`Motor:`, `Entrada:`, `Salida:`, `Errores:`, `Historial:` y `@version`.
+- Groovydoc en los métodos auxiliares.
+- Comentarios `//` solo para explicar el porqué.
+
+Se comprueba con `--docs`. Se basa en las *Integration Flow Design Guidelines* de SAP (*Keep Readability in Mind*, *Use Scripting Appropriately*) y en las convenciones de Groovydoc.

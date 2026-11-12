@@ -13,12 +13,17 @@
  * 9. Single-argument setBody & no hardcoded credentials
  *
  * Usage:
- *   node validate-groovy.mjs <file.groovy> [--strict] [--json]
+ * 10. (--docs) Estándar de documentación: cabecera Groovydoc, Groovydoc en métodos auxiliares, comentarios sin datos sensibles
+ *
+ * Usage:
+ *   node validate-groovy.mjs <file.groovy> [--strict] [--json] [--docs]
+ *   node validate-groovy.mjs <file.groovy> --doc-header [--groovy 2.4|4] [--out <file>]
  */
 import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readZipEntries } from '../../../shared/zip-utils.mjs';
+import { lintGroovyDocs, lintGroovySensitiveComments, inferGroovyDocMeta, buildGroovyDocHeader, extractGroovyComments } from '../../../shared/doc-standard.mjs';
 
 export function readTextFileSafely(filePath) {
   const buf = fs.readFileSync(filePath);
@@ -638,6 +643,14 @@ export function lintGroovyScript(code, fileName = 'Script.groovy', options = {})
     );
   }
 
+  // 16. Estándar de documentación: rules/sap-cpi-code-documentation.md.
+  // Con --docs, todas las reglas DOC_*. Sin --docs, solo las de seguridad (secretos, emails, endpoints, IPs).
+  if (options.docs) {
+    findings.push(...lintGroovyDocs(code, { groovyVersion: normalizeGroovyVersion(options.groovyVersion) }));
+  } else {
+    findings.push(...lintGroovySensitiveComments(code));
+  }
+
   // Calculate exact SAP CPI Quality Score (Base 100: CRITICAL -30, HIGH -15, MEDIUM -5, LOW -2)
   const deductions = { CRITICAL: 30, HIGH: 15, MEDIUM: 5, LOW: 2 };
   let totalDeduction = 0;
@@ -652,6 +665,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy', options = {})
 
   return {
     fileName,
+    docs: Boolean(options.docs),
     score,
     passed: counts.CRITICAL === 0 && counts.HIGH === 0 && counts.MEDIUM === 0,
     counts,
@@ -667,6 +681,34 @@ export const CANONICAL_PATTERNS = [
   'dynamic-routing-header',
   'base64-attachment'
 ];
+
+// Resumen y motivo de cada plantilla para la cabecera estándar (--comments).
+const TEMPLATE_DOCS = {
+  'xml-slurper': {
+    summary: 'Lee el XML de entrada con XmlSlurper protegido contra XXE y publica el DocumentID.',
+    why: 'Extracción por GPath con valor por defecto "N/A"; un Content Modifier con XPath no ofrece el fallback.'
+  },
+  'mpl-custom-headers': {
+    summary: 'Registra claves de negocio en el Message Processing Log y fija un estado personalizado.',
+    why: 'addCustomHeaderProperty solo está disponible desde script.'
+  },
+  'oauth-token-inject': {
+    summary: 'Comprueba la caducidad del token OAuth 2.0 en caché e inyecta la cabecera Authorization o pide renovarlo.',
+    why: 'La comparación de caducidad con margen de 60 s no se puede expresar en un Content Modifier.'
+  },
+  'dynamic-routing-header': {
+    summary: 'Calcula la dirección ProcessDirect de destino según el sistema indicado en TargetSystem.',
+    why: 'Normaliza alias de sistema (S4/S4HANA, CRM/SALESFORCE) con una ruta por defecto en un solo punto.'
+  },
+  'base64-attachment': {
+    summary: 'Decodifica el documento Base64 de una propiedad y lo deja en el body como binario descargable.',
+    why: 'La decodificación a byte[] sin pasar por String no está disponible en pasos estándar.'
+  },
+  'json-streaming': {
+    summary: 'Enriquece el JSON de entrada con la marca de tiempo UTC y el sistema origen.',
+    why: 'Añadir campos a un JSON arbitrario sin esquema no es posible con un mapeo gráfico.'
+  }
+};
 
 export function generateCanonicalGroovyTemplate(pattern = 'json-streaming', options = {}) {
   if (!CANONICAL_PATTERNS.includes(pattern)) {
@@ -1107,7 +1149,15 @@ Message processData(Message message) {
       break;
   }
 
-  const lint = lintGroovyScript(code, scriptName, { groovyVersion });
+  if (customComments) {
+    // Estándar de documentación: el banner de la plantilla se sustituye por la cabecera canónica.
+    code = code.replace(/^\/\/ =+\n(?:\/\/.*\n)*?\/\/ =+\n/, '');
+    const doc = TEMPLATE_DOCS[pattern];
+    const meta = inferGroovyDocMeta(code, { groovyVersion, summary: doc.summary, why: doc.why, date: options.date });
+    code = buildGroovyDocHeader(meta) + code;
+  }
+
+  const lint = lintGroovyScript(code, scriptName, { groovyVersion, docs: customComments });
   return {
     pattern,
     apiVersion,
@@ -1128,8 +1178,12 @@ if (isMain) {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
     const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
-    console.log('Uso 1 (Validar):  node validate-groovy.mjs <archivo.groovy | carpeta | paquete.zip> [--groovy 2.4|4] [--strict] [--json]');
-    console.log('Uso 2 (Template): node validate-groovy.mjs --template <json-streaming|xml-slurper|mpl-custom-headers|oauth-token-inject|dynamic-routing-header|base64-attachment> [--api v1|v2] [--groovy 2.4|4] [--json]');
+    console.log('Uso 1 (Validar):  node validate-groovy.mjs <archivo.groovy | carpeta | paquete.zip> [--groovy 2.4|4] [--strict] [--json] [--docs]');
+    console.log('Uso 2 (Template): node validate-groovy.mjs --template <json-streaming|xml-slurper|mpl-custom-headers|oauth-token-inject|dynamic-routing-header|base64-attachment> [--api v1|v2] [--groovy 2.4|4] [--comments] [--json]');
+    console.log('Uso 3 (Cabecera): node validate-groovy.mjs <archivo.groovy> --doc-header [--groovy 2.4|4] [--out <archivo.groovy>]');
+    console.log('  --docs        añade las reglas del estándar de documentación (rules/sap-cpi-code-documentation.md)');
+    console.log('  --comments    plantilla con cabecera estándar y comentarios en línea (se valida con --docs)');
+    console.log('  --doc-header  imprime el esqueleto de cabecera deducido del código; con --out escribe el script con la cabecera delante');
     process.exit(args.length === 0 ? 2 : 0);
   }
 
@@ -1183,7 +1237,8 @@ if (isMain) {
 
   const groovyArgIdx = args.indexOf('--groovy');
   // The target is the first positional argument, wherever it appears (`--json f.groovy` works too).
-  const positional = args.filter((a, i) => !a.startsWith('--') && !(groovyArgIdx !== -1 && i === groovyArgIdx + 1));
+  const outArgIdx = args.indexOf('--out');
+  const positional = args.filter((a, i) => !a.startsWith('--') && !(groovyArgIdx !== -1 && i === groovyArgIdx + 1) && !(outArgIdx !== -1 && i === outArgIdx + 1));
   if (positional.length === 0) {
     console.error('Error: falta la ruta del archivo .groovy, carpeta o paquete .zip a validar.');
     process.exit(2);
@@ -1191,10 +1246,35 @@ if (isMain) {
   const targetPath = path.resolve(positional[0]);
   const jsonFlag = args.includes('--json');
   const strictFlag = args.includes('--strict');
-  const lintOptions = { groovyVersion: groovyArgIdx !== -1 ? args[groovyArgIdx + 1] : undefined };
+  const lintOptions = { groovyVersion: groovyArgIdx !== -1 ? args[groovyArgIdx + 1] : undefined, docs: args.includes('--docs') };
   if (groovyArgIdx !== -1 && !normalizeGroovyVersion(lintOptions.groovyVersion)) {
     console.error('Error: --groovy debe ser 2.4 o 4');
     process.exit(1);
+  }
+
+  if (args.includes('--doc-header')) {
+    if (!fs.existsSync(targetPath) || fs.statSync(targetPath).isDirectory() || /\.zip$/i.test(targetPath)) {
+      console.error('Error: --doc-header necesita un único archivo .groovy existente.');
+      process.exit(2);
+    }
+    const code = readTextFileSafely(targetPath);
+    const groovyVersion = normalizeGroovyVersion(lintOptions.groovyVersion);
+    const header = buildGroovyDocHeader(inferGroovyDocMeta(code, { groovyVersion }));
+    const outPath = outArgIdx !== -1 && args[outArgIdx + 1] ? path.resolve(args[outArgIdx + 1]) : null;
+    if (outPath) {
+      const firstDoc = extractGroovyComments(code).find((c) => c.kind === 'doc');
+      const leading = code.slice(0, firstDoc ? firstDoc.start : 0).trim();
+      if (firstDoc && leading === '') {
+        console.error('Error: el script ya empieza con un bloque /** ... */. Edita esa cabecera en lugar de generar otra.');
+        process.exit(1);
+      }
+      fs.mkdirSync(path.dirname(outPath), { recursive: true });
+      fs.writeFileSync(outPath, header + code, 'utf8');
+      console.error(`Cabecera añadida en ${outPath}. Sustituye cada TODO y valida con --docs.`);
+    } else {
+      console.log(header);
+    }
+    process.exit(0);
   }
 
   if (!fs.existsSync(targetPath)) {

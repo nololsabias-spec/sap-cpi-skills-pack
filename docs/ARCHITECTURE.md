@@ -47,6 +47,7 @@ SAP CPI distribuye sus artefactos (Integration Flows y Script Collections) como 
   2. Los namespaces y URIs estándar (W3C, OMG, SAP, Apache, OASIS, `xml.org`…) y los metadatos de adaptador (`cmdVariantUri`, `Vendor`) no se tocan, para no alterar el comportamiento en runtime (p. ej. features de protección XXE). `MANIFEST.MF` se transforma por línea lógica y se vuelve a plegar a 72 bytes; los zips anidados se procesan recursivamente.
   3. El mapa (`*.sanitize-map.json`, o `sanitize-map.json` con `--out-dir`; valores originales) queda solo en local y está ignorado en `.gitignore`. `--restore` (MCP `cpi_restore_zip`) reaplica los valores también en archivos editados, re-añade las muestras retiradas con `--drop-samples` y avisa de alias desaparecidos.
   4. **Guardas**: `inspect-iflow-zip.mjs` marca cualquier alias pendiente (incluso en zips anidados) como `SANITIZED-001` (CRÍTICO) y `build-cpi-package.mjs` devuelve `valid: false`, de modo que un bundle limpio nunca llega al tenant por error.
+- **Estándar de Documentación de Código ([`shared/doc-standard.mjs`](../shared/doc-standard.mjs), [`rules/sap-cpi-code-documentation.md`](../rules/sap-cpi-code-documentation.md))**: una única implementación construye la cabecera canónica de Groovy (`/** */`) y XSLT (`<!-- -->`), deduce el esqueleto del código (`--doc-header`) y audita la documentación (`DOC_*` / `XSLT_DOC_*`). La usan `validate-groovy.mjs`, `audit-groovy.mjs`, `validate-xslt.mjs` y el MCP (`docs`, `docHeader`). Las reglas de secretos y datos sensibles en comentarios están siempre activas; el resto, con `--docs`.
 - **Harness de Auto-Mejora Continua ([`AGENTS.md`](../AGENTS.md) y [`rules/sap-cpi-continuous-learning.md`](../rules/sap-cpi-continuous-learning.md))**: Cada vez que se detecta un error real en SAP CPI o se inspecciona un paquete de referencia, el agente abstrae la regla técnica (sin ningún dato de proyecto privado ni cliente), la programa en el validador CLI correspondiente y la registra en [`docs/LESSONS_LEARNED.md`](./LESSONS_LEARNED.md).
 
 ### 2.4. Arquitectura Dual (Skills Multi-IDE + Servidor MCP Local `stdio`)
@@ -60,6 +61,7 @@ La carpeta `shared/` y `mcp-server.mjs` se ubican al mismo nivel jerárquico que
 │   ├── mcp-server.mjs                       # Servidor MCP local (stdio JSON-RPC 2.0)
 │   ├── rules/sap-cpi-continuous-learning.md # Harness de auto-mejora continua
 │   ├── rules/sap-cpi-privacy-sanitize.md    # Regla de limpieza reversible de bundles reales
+│   ├── rules/sap-cpi-code-documentation.md  # Estándar de documentación de Groovy y XSLT
 │   ├── shared/*.mjs                         # Motores nativos ZIP, PDF 1.4, XML, regex y sanitizador
 │   └── skills/<skill-name>/scripts/*.mjs    # Las 8 skills y sus motores CLI
 ├── .claude/                                 # Simétrico a .agents/ para Claude Code

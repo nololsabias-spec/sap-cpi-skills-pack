@@ -38,7 +38,7 @@ node mcp-server.mjs --self-test  # Autoverificación de las 22 tools y 9 resourc
 El directorio temporal del sistema siempre está permitido. `setup-skills.mjs --mcp` registra el servidor con ruta absoluta, de modo que arranca aunque el IDE se abra desde otro directorio.
 
 ### 1.2. `verify-all.mjs` (Suite de Auto-Verificación)
-Ejecuta pruebas integrales sobre los 17 módulos deterministas y el servidor MCP creando artefactos sintéticos en memoria/temporal y verificando su salida.
+Ejecuta pruebas integrales sobre los 20 módulos deterministas y el servidor MCP creando artefactos sintéticos en memoria/temporal y verificando su salida.
 
 ```bash
 node verify-all.mjs
@@ -103,17 +103,24 @@ Valida estáticamente uno o varios scripts Groovy de SAP CPI (archivo individual
 # Modo 1: Validar script, carpeta o .zip
 node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs <script.groovy | carpeta | paquete.zip> [--groovy 2.4|4] [--strict] [--json]
 # --groovy: versión de Groovy del paso Script (no se infiere de la API Message v1/v2); activa las reglas de compilación de esa versión
+# --docs: añade las reglas del estándar de documentación (rules/sap-cpi-code-documentation.md)
+
+# Modo 3: Esqueleto de cabecera estándar deducido del código (imprime, o escribe el script con --out)
+node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs <script.groovy> --doc-header [--groovy 2.4|4] [--out <nuevo.groovy>]
 
 # Modo 2: Generar plantilla canónica 100/100 para patrones de CPI
 node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs \
   --template <json-streaming|xml-slurper|mpl-custom-headers|oauth-token-inject|dynamic-routing-header|base64-attachment> \
-  [--api v1|v2] [--json]
+  [--api v1|v2] [--groovy 2.4|4] [--comments] [--json]
 ```
 
 - `<script.groovy | carpeta | paquete.zip>`: Ruta a un archivo `.groovy`, a un directorio completo de scripts o a un `.zip` que contenga scripts Groovy.
 - `--template <patrón>`: Emite código fuente Groovy production-ready (100/100) para el patrón arquitectónico indicado.
 - `--api v1|v2`: Versión del API de CPI (`v1` para `com.sap.gateway.ip.core.customdev.util.Message` en Groovy 2.4 o `v2` para `com.sap.it.script.v2.api.Message` en Groovy 4).
 - `--strict`: Exige puntuación perfecta de `100/100` en todos los scripts analizados.
+- `--docs`: Aplica también el estándar de documentación (`DOC_*`): cabecera `/** */` en la línea 1, Groovydoc en métodos auxiliares y comentarios sin datos sensibles.
+- `--comments` (con `--template`): Emite la plantilla con la cabecera estándar y comentarios en línea, validada con `--docs`.
+- `--doc-header`: Imprime el esqueleto de cabecera con Entrada/Salida/Errores deducidos del código; lo no deducible queda como `TODO` (bloqueado por `DOC_PLACEHOLDER`). Con `--out`, escribe el script con la cabecera delante (rechaza scripts que ya empiezan con `/**`).
 - `--json`: Devuelve el resultado individual o en lote en formato JSON.
 
 ---
@@ -122,8 +129,10 @@ node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs \
 Audita la calidad, seguridad y consumo de memoria de un script Groovy calculando su puntuación (`0-100`). Permite además verificar una refactorización comparando el script original con el refactorizado.
 
 ```bash
-node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs <original.groovy> [--refactored <refactorizado.groovy>] [--json]
+node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs <original.groovy> [--refactored <refactorizado.groovy>] [--groovy 2.4|4] [--docs] [--json]
 ```
+
+- `--docs`: Audita también la documentación de ambos scripts con el estándar del pack.
 
 - `<original.groovy>`: Script original a auditar.
 - `--refactored <archivo.groovy>`: (Opcional) Script refactorizado. Si se proporciona, el comando verifica que el script refactorizado alcance una puntuación de `100/100` con `0` hallazgos críticos o altos.
@@ -135,8 +144,10 @@ node skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs <original.groovy> [--r
 Valida hojas de transformación XSLT para SAP CPI según el motor objetivo (`1.0` Xalan o `2.0`/`3.0` Saxon-HE) y el escenario de integración.
 
 ```bash
-node skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs <transformacion.xslt> [--version=1.0|2.0|3.0] [--scenario=standard|grouping|flatten|headers] [--json]
+node skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs <transformacion.xslt> [--version=1.0|2.0|3.0] [--scenario=standard|grouping|flatten|headers] [--docs] [--json]
 ```
+
+- `--docs`: Añade el bloque `docs` (score, `passed`, hallazgos `XSLT_DOC_*`) y devuelve exit 1 si la documentación no cumple el estándar.
 
 - `<transformacion.xslt>`: Ruta al archivo `.xslt` o `.xsl`.
 - `--version`: Versión del motor XSLT (`1.0`, `2.0` o `3.0`).
