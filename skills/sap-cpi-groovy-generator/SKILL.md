@@ -65,12 +65,24 @@ Write the Groovy script adhering to these mandatory SAP Help Portal rules:
    - **`KeystoreService` & `SecureStoreService`**: Keep certificate/key aliases concise (`< 25` chars), never decrypt private keys repeatedly inside message splits, and never log secrets or private keys to the MPL.
    - **`ValueMappingApi`**: Always implement a default fallback value when `getMappedValue(...)` returns `null` or empty.
 9. **Defensive Exception Handling**: Wrap logic in `try / catch (Exception e) / finally` and rethrow as `throw new Exception("CPI-ERR: " + e.getMessage(), e)`.
+10. **Documentation Standard (mandatory, [`rules/sap-cpi-code-documentation.md`](../../rules/sap-cpi-code-documentation.md))**: Every generated script starts at line 1 with the canonical `/** ... */` header, in this exact order:
+    - one-sentence summary ending in a period;
+    - `Motivo:` (why a script and not a standard step);
+    - `Paso Script: Groovy 2.4 (Script step 1.x) | Groovy 4 (Script step 2.x) · API v1|v2`;
+    - `Entrada:` / `Salida:` / `Errores:` lists of `- Tipo Nombre: descripción`;
+    - `Historial:` entries `- X.Y.Z  AAAA-MM-DD  texto`, newest first;
+    - `@version X.Y.Z` as the last line.
+
+    Every helper method other than `processData` gets a Groovydoc block (summary, `@param` per parameter in signature order, `@return`, `@throws`). Inline `//` comments explain *why*, on their own line. No banners `// ====`, no `///`, no commented-out code, no TODO, and never emails, real endpoints, IPs or secrets in comments. Start from `--template <p> --comments` or from `--doc-header` (header inferred from the code) and replace every `TODO`.
 
 ### Step 3: Validate the Generated Script (Single File, Folder, or Script Collection `.zip`)
 Save the generated script(s) and run the deterministic validator script on the `.groovy` file, an entire script folder, or a packaged `.zip`:
 
 ```bash
-node ./scripts/validate-groovy.mjs <path-to-script.groovy | folder | bundle.zip> [--groovy 2.4|4] [--strict] [--json]
+node ./scripts/validate-groovy.mjs <path-to-script.groovy | folder | bundle.zip> [--groovy 2.4|4] [--strict] [--json] [--docs]
+
+# Header skeleton inferred from the code (inputs, outputs, errors); --out writes the script with the header on top
+node ./scripts/validate-groovy.mjs <path-to-script.groovy> --doc-header --groovy 4 [--out <file.groovy>]
 
 # Canonical template for a given runtime
 node ./scripts/validate-groovy.mjs --template xml-slurper --api v2 --groovy 4 --raw
@@ -78,6 +90,7 @@ node ./scripts/validate-groovy.mjs --template xml-slurper --api v2 --groovy 4 --
 
 * Validator script: [validate-groovy.mjs](./scripts/validate-groovy.mjs)
 * **`--groovy 2.4|4`**: enables the hard compile-error rules for that runtime (`GROOVY24_INVALID_XMLSLURPER_IMPORT`, `GROOVY4_REMOVED_GROOVY_UTIL_XML`, `GROOVY4_CAMEL_IMPORT`, `GROOVY4_DATE_EXTENSIONS`). Without it, version-dependent XML APIs are reported as `GROOVY_VERSION_DEPENDENT_XML_API` (MEDIUM).
+* **`--docs`**: adds the documentation-standard rules (`DOC_*`, dimension *Documentación y Comentarios*). **Always pass `--docs` for generated scripts.**
 * **Verification Requirement**: The script must achieve a **100/100 score** with **0 Critical/High/Medium violations** before presenting the final code to the user. If `validate-groovy.mjs` reports any violation (e.g., an unused import, missing `disallow-doctype-decl`, or unclosed `Reader`), fix the Groovy code and re-run `validate-groovy.mjs` until it passes cleanly.
 
 

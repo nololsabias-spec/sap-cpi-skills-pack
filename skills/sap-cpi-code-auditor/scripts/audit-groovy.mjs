@@ -5,7 +5,7 @@
  * and optionally compares against a refactored script to verify 100% remediation.
  *
  * Usage:
- *   node audit-groovy.mjs <original.groovy> [--refactored <refactored.groovy>] [--json]
+ *   node audit-groovy.mjs <original.groovy> [--refactored <refactored.groovy>] [--docs] [--json]
  *   node audit-groovy.mjs --demo
  */
 import { isMainModule } from '../../../shared/cli-utils.mjs';
@@ -40,7 +40,33 @@ def Message processData(Message message) {
     return message
 }`;
 
-export const SAMPLE_REFACTORED_GROOVY = `import com.sap.gateway.ip.core.customdev.util.Message
+export const SAMPLE_REFACTORED_GROOVY = `/**
+ * Marca el pedido JSON como procesado con fecha UTC y lo indexa en el MPL por su OrderId.
+ *
+ * Paso Script: Groovy 2.4 (Script step 1.x) · API v1
+ *
+ * Entrada:
+ *   - Body: JSON (leído como Reader)
+ *   - Property LogAttachments: "Yes" activa el adjunto del payload en el MPL.
+ *   - Header OrderId: clave de negocio; si falta se usa orderId del JSON.
+ * Salida:
+ *   - Body: application/json; charset=utf-8
+ *   - Header ProcessedFlag: "true".
+ *   - Header ProcessedAt: fecha de proceso ISO-8601 en UTC.
+ *   - Property Status: "SUCCESS".
+ *   - MPL custom header BusinessDocID
+ *   - MPL adjunto Order_Payload (solo con LogAttachments = Yes)
+ *   - MPL adjunto Error_Trace (solo en error)
+ * Errores:
+ *   - CPI-ERR: mensaje de la excepción original → Exception Subprocess
+ *
+ * Historial:
+ *   - 2.0.0  2026-11-12  Refactor: streaming, JsonSlurperClassic, UTC y MPL condicional.
+ *   - 1.0.0  2026-11-01  Versión inicial.
+ *
+ * @version 2.0.0
+ */
+import com.sap.gateway.ip.core.customdev.util.Message
 import groovy.json.JsonSlurperClassic
 import groovy.json.JsonBuilder
 import java.io.Reader
@@ -125,7 +151,8 @@ if (isMain) {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
     const console = args.length === 0 ? { log: (...a) => globalThis.console.error(...a) } : globalThis.console;
-    console.log('Uso: node audit-groovy.mjs <original.groovy | --demo> [--refactored <refactored.groovy>] [--groovy 2.4|4] [--json]');
+    console.log('Uso: node audit-groovy.mjs <original.groovy | --demo> [--refactored <refactored.groovy>] [--groovy 2.4|4] [--docs] [--json]');
+    console.log('  --docs  añade las reglas del estándar de documentación (rules/sap-cpi-code-documentation.md)');
     process.exit(args.length === 0 ? 2 : 0);
   }
 
@@ -139,14 +166,14 @@ if (isMain) {
     if (a === '--refactored' || a === '--groovy') {
       if (args[i + 1] === undefined || args[i + 1].startsWith('--')) fail(`${a} requiere un valor.`);
       i++;
-    } else if (a.startsWith('--') && !['--json', '--demo'].includes(a)) {
+    } else if (a.startsWith('--') && !['--json', '--demo', '--docs'].includes(a)) {
       fail(`Argumento desconocido: ${a}. Usa --help.`);
     }
   }
   const gIdx = args.indexOf('--groovy');
   const groovyVersion = gIdx !== -1 ? normalizeGroovyVersion(args[gIdx + 1]) : undefined;
   if (gIdx !== -1 && !groovyVersion) fail('--groovy debe ser 2.4 o 4.');
-  const lintOptions = groovyVersion ? { groovyVersion } : {};
+  const lintOptions = { ...(groovyVersion ? { groovyVersion } : {}), ...(args.includes('--docs') ? { docs: true } : {}) };
   const readGroovyFile = (p, label) => {
     if (!fs.existsSync(p)) {
       console.error(`Archivo ${label} no encontrado: ${p}`);

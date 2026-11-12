@@ -18,6 +18,7 @@ import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseXmlLite, findUndeclaredPrefixes } from '../../../shared/xml-lite.mjs';
+import { lintXsltDocs, scoreFindings } from '../../../shared/doc-standard.mjs';
 
 export const XSL_NS = 'http://www.w3.org/1999/XSL/Transform';
 export const SUPPORTED_ENGINES = ['1.0', '2.0', '3.0'];
@@ -123,7 +124,15 @@ function buildNsIndex(root) {
   return map;
 }
 
-export function validateXsltStylesheet(xml, requestedEngine = null) {
+export function validateXsltStylesheet(xml, requestedEngine = null, options = {}) {
+  const result = validateXsltCore(xml, requestedEngine);
+  if (!options.docs) return result;
+  const docFindings = lintXsltDocs(xml, result.engine);
+  const doc = scoreFindings(docFindings);
+  return { ...result, docs: { score: doc.score, passed: doc.passed, counts: doc.counts, findings: docFindings } };
+}
+
+function validateXsltCore(xml, requestedEngine) {
   const errors = [];
   const warnings = [];
   const trimmed = String(xml || '').replace(/^﻿/, '').trim();
@@ -379,6 +388,22 @@ export function validateXsltStylesheet(xml, requestedEngine = null) {
 }
 
 export const DEMO_VALID_XSLT = `<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Agrupa los registros planos por OrderId en pedidos con sus líneas y el sistema emisor.
+
+  Motor: XSLT 2.0 (Saxon-HE)
+
+  Entrada:
+    - Body: XML con elementos //Record (OrderId, ItemId, Quantity).
+    - Header SAP_Sender: sistema emisor (vía cpi:getHeader).
+  Salida:
+    - Body: XML BatchedOrders/Order/Items/Item.
+
+  Historial:
+    - 1.0.0  2026-11-12  Versión inicial.
+
+  @version 1.0.0
+-->
 <xsl:stylesheet version="2.0"
     xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
     xmlns:cpi="com.sap.it.rt.adapter.xpath.api.XmlExtFunctions"
@@ -409,7 +434,7 @@ export const DEMO_VALID_XSLT = `<?xml version="1.0" encoding="UTF-8"?>
 // CLI Runner
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
-  const USAGE = 'Uso: node validate-xslt.mjs <mapping.xslt | --demo> [--engine 1.0|2.0|3.0] [--json]';
+  const USAGE = 'Uso: node validate-xslt.mjs <mapping.xslt | --demo> [--engine 1.0|2.0|3.0] [--docs] [--json]';
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     // CLI contract: no arguments = usage error (stderr, exit 2); --help = usage on stdout, exit 0.
     (args.length === 0 ? console.error : console.log)(USAGE);
@@ -421,6 +446,7 @@ if (isMainModule(import.meta.url)) {
   };
 
   let jsonFlag = false;
+  let docsFlag = false;
   let demo = false;
   let requestedEngine = null;
   let scenario = null;
@@ -431,6 +457,7 @@ if (isMainModule(import.meta.url)) {
     const flag = a.startsWith('--') && eq !== -1 ? a.slice(0, eq) : a;
     const inline = a.startsWith('--') && eq !== -1 ? a.slice(eq + 1) : undefined;
     if (flag === '--json') jsonFlag = true;
+    else if (flag === '--docs') docsFlag = true;
     else if (flag === '--demo') demo = true;
     else if (['--engine', '--version', '--scenario'].includes(flag)) {
       const v = inline !== undefined ? inline : args[i + 1];
@@ -466,7 +493,7 @@ if (isMainModule(import.meta.url)) {
     xmlContent = decodeXmlBuffer(fs.readFileSync(filePath));
   }
 
-  const result = validateXsltStylesheet(xmlContent, requestedEngine);
+  const result = validateXsltStylesheet(xmlContent, requestedEngine, { docs: docsFlag });
   if (jsonFlag) {
     console.log(JSON.stringify(result, null, 2));
   } else {
@@ -481,7 +508,11 @@ if (isMainModule(import.meta.url)) {
       console.log('\nAdvertencias / Recomendaciones:');
       result.warnings.forEach((w) => console.log(`  [WARN]  ${w}`));
     }
+    if (result.docs) {
+      console.log(`\nDocumentación: ${result.docs.score}/100 (${result.docs.passed ? 'CUMPLE el estándar' : 'NO CUMPLE el estándar'})`);
+      result.docs.findings.forEach((f) => console.log(`  [${f.severity}] ${f.ruleId} (línea ${f.line ?? '-'}): ${f.title}. ${f.remediation}`));
+    }
   }
 
-  if (!result.valid) process.exit(1);
+  if (!result.valid || (result.docs && !result.docs.passed)) process.exit(1);
 }

@@ -161,6 +161,34 @@ const CHECKS = [
     }
   },
   {
+    skill: 'Estándar de documentación (plantilla Groovy --comments + --docs)',
+    script: 'skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs',
+    args: ['--template', 'xml-slurper', '--api', 'v2', '--groovy', '4', '--comments', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.score === 100 && data.passed === true && data.code.startsWith('/**\n') && /@version 1\.0\.0/.test(data.code);
+    }
+  },
+  {
+    skill: 'Estándar de documentación (auditor --docs: refactor documentado 100/100)',
+    script: 'skills/sap-cpi-code-auditor/scripts/audit-groovy.mjs',
+    args: ['--demo', '--docs', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      const docRules = data.original.findings.filter((f) => f.ruleId.startsWith('DOC_')).map((f) => f.ruleId);
+      return data.refactored.score === 100 && docRules.includes('DOC_MISSING_HEADER') && data.original.docs === true;
+    }
+  },
+  {
+    skill: 'Estándar de documentación (XSLT --docs)',
+    script: 'skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs',
+    args: ['--demo', '--docs', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.valid === true && data.docs?.passed === true && data.docs.score === 100;
+    }
+  },
+  {
     skill: 'mcp-server.mjs (Local JSON-RPC 2.0 MCP Server - 22 Tools)',
     script: 'mcp-server.mjs',
     args: ['--self-test', '--json'],

@@ -76,7 +76,7 @@ sap-cpi-skills-pack/
 ├── mcp-server.mjs                      # Servidor MCP local (stdio JSON-RPC 2.0, 22 tools + 9 resources)
 ├── package.json                        # Scripts de verificación (npm test), MCP y demostraciones
 ├── setup-skills.mjs                    # Instalador universal Multi-IDE (Antigravity, Claude, Codex, Cursor, Copilot, Windsurf, Cline)
-├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills (17 módulos) + servidor MCP
+├── verify-all.mjs                      # Suite de pruebas integrales de las 8 skills (20 módulos) + servidor MCP
 ├── rules/
 │   ├── sap-cpi-continuous-learning.md  # Regla de auto-evolución continua y privacidad estricta
 │   └── sap-cpi-privacy-sanitize.md     # Regla de limpieza reversible de bundles reales (preguntar, limpiar, restaurar)
