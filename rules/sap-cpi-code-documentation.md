@@ -216,6 +216,8 @@ Cada cambio añade una entrada **al principio** de `Historial:` y actualiza `@ve
 
 Las reglas comparten la fórmula de score del pack (−30, −15, −5 y −2). La implementación está en `shared/doc-standard.mjs`.
 
+**Siempre activas:** `DOC_SECRET_IN_COMMENT` y `DOC_SENSITIVE_COMMENT` (y sus equivalentes `XSLT_*`) se aplican **también sin `--docs`**: en `validate-groovy.mjs`, `audit-groovy.mjs`, el inspector de `.zip` y `validate-xslt.mjs`, donde cuentan como error. Son reglas de seguridad, no de estilo. El resto de reglas `DOC_*` solo se aplican con `--docs`, para no penalizar scripts heredados que se auditan por motivos técnicos.
+
 ---
 
 ## 9. Fuentes consultadas

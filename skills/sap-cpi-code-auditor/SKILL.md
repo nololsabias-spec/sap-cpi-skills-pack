@@ -58,6 +58,7 @@ Save the refactored script and run `audit-groovy.mjs` comparing the original and
 node ./scripts/audit-groovy.mjs <original-script.groovy> --refactored <refactored-script.groovy> [--groovy 2.4|4] [--docs]
 ```
 
+* Secrets, emails, real endpoints or IPs in comments are always reported (`DOC_SECRET_IN_COMMENT` / `DOC_SENSITIVE_COMMENT`), with or without `--docs`.
 * **`--docs`**: also enforces the documentation standard on both scripts. Use it when the refactor touches comments or the user asked for documentation; the refactored script must still reach 100/100.
 
 * **Validation Gate**: Confirm that the refactored script achieves `Score Refactored: 100/100 (APROBADO)`.

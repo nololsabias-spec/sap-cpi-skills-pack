@@ -18,7 +18,7 @@ import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseXmlLite, findUndeclaredPrefixes } from '../../../shared/xml-lite.mjs';
-import { lintXsltDocs, scoreFindings } from '../../../shared/doc-standard.mjs';
+import { lintXsltDocs, lintXsltSensitiveComments, scoreFindings } from '../../../shared/doc-standard.mjs';
 
 export const XSL_NS = 'http://www.w3.org/1999/XSL/Transform';
 export const SUPPORTED_ENGINES = ['1.0', '2.0', '3.0'];
@@ -125,7 +125,12 @@ function buildNsIndex(root) {
 }
 
 export function validateXsltStylesheet(xml, requestedEngine = null, options = {}) {
-  const result = validateXsltCore(xml, requestedEngine);
+  const core = validateXsltCore(xml, requestedEngine);
+  // Secretos, emails, endpoints e IPs en comentarios son errores siempre, con o sin --docs.
+  const sensitive = core.engine === 'unknown' ? [] : lintXsltSensitiveComments(xml);
+  const result = sensitive.length
+    ? { ...core, valid: false, errors: [...core.errors, ...sensitive.map((f) => `[Línea ${f.line}] ${f.ruleId}: ${f.title}. ${f.remediation}`)] }
+    : core;
   if (!options.docs) return result;
   const docFindings = lintXsltDocs(xml, result.engine);
   const doc = scoreFindings(docFindings);

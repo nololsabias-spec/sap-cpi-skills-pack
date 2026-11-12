@@ -72,7 +72,7 @@ Todo script parte de **100 puntos** y se restan puntos según la severidad de ca
 - `throwEx`: Exige bloques `try / catch (Exception e)` relanzando `throw new Exception("CPI-ERR: ...")`.
 
 ### 2.4. Estándar de Documentación (`--docs`)
-Lo aplican `validate-groovy.mjs`, `audit-groovy.mjs` y `validate-xslt.mjs` con `--docs`, y el MCP con `docs: true`. Está implementado en `shared/doc-standard.mjs`; la especificación completa está en [`rules/sap-cpi-code-documentation.md`](../rules/sap-cpi-code-documentation.md). Sin `--docs`, el score técnico no cambia.
+Lo aplican `validate-groovy.mjs`, `audit-groovy.mjs` y `validate-xslt.mjs` con `--docs`, y el MCP con `docs: true`. Está implementado en `shared/doc-standard.mjs`; la especificación completa está en [`rules/sap-cpi-code-documentation.md`](../rules/sap-cpi-code-documentation.md). Sin `--docs` solo se aplican `DOC_SECRET_IN_COMMENT` y `DOC_SENSITIVE_COMMENT`, que son de seguridad y están siempre activas (en XSLT cuentan como error de validación). El resto de reglas `DOC_*` no afecta al score técnico.
 
 | Código | Severidad | Regla |
 | :--- | :--- | :--- |

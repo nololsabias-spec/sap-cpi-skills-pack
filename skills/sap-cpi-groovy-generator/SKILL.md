@@ -90,7 +90,7 @@ node ./scripts/validate-groovy.mjs --template xml-slurper --api v2 --groovy 4 --
 
 * Validator script: [validate-groovy.mjs](./scripts/validate-groovy.mjs)
 * **`--groovy 2.4|4`**: enables the hard compile-error rules for that runtime (`GROOVY24_INVALID_XMLSLURPER_IMPORT`, `GROOVY4_REMOVED_GROOVY_UTIL_XML`, `GROOVY4_CAMEL_IMPORT`, `GROOVY4_DATE_EXTENSIONS`). Without it, version-dependent XML APIs are reported as `GROOVY_VERSION_DEPENDENT_XML_API` (MEDIUM).
-* **`--docs`**: adds the documentation-standard rules (`DOC_*`, dimension *Documentación y Comentarios*). **Always pass `--docs` for generated scripts.**
+* **`--docs`**: adds the documentation-standard rules (`DOC_*`, dimension *Documentación y Comentarios*). **Always pass `--docs` for generated scripts.** The security rules `DOC_SECRET_IN_COMMENT` (CRITICAL) and `DOC_SENSITIVE_COMMENT` (HIGH: emails, real endpoints and IPs in comments) run always, even without `--docs`.
 * **Verification Requirement**: The script must achieve a **100/100 score** with **0 Critical/High/Medium violations** before presenting the final code to the user. If `validate-groovy.mjs` reports any violation (e.g., an unused import, missing `disallow-doctype-decl`, or unclosed `Reader`), fix the Groovy code and re-run `validate-groovy.mjs` until it passes cleanly.
 
 

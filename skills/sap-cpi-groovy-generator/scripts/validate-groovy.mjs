@@ -23,7 +23,7 @@ import { isMainModule } from '../../../shared/cli-utils.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readZipEntries } from '../../../shared/zip-utils.mjs';
-import { lintGroovyDocs, inferGroovyDocMeta, buildGroovyDocHeader, extractGroovyComments } from '../../../shared/doc-standard.mjs';
+import { lintGroovyDocs, lintGroovySensitiveComments, inferGroovyDocMeta, buildGroovyDocHeader, extractGroovyComments } from '../../../shared/doc-standard.mjs';
 
 export function readTextFileSafely(filePath) {
   const buf = fs.readFileSync(filePath);
@@ -643,9 +643,12 @@ export function lintGroovyScript(code, fileName = 'Script.groovy', options = {})
     );
   }
 
-  // 16. Estándar de documentación (solo con options.docs / --docs): rules/sap-cpi-code-documentation.md
+  // 16. Estándar de documentación: rules/sap-cpi-code-documentation.md.
+  // Con --docs, todas las reglas DOC_*. Sin --docs, solo las de seguridad (secretos, emails, endpoints, IPs).
   if (options.docs) {
     findings.push(...lintGroovyDocs(code, { groovyVersion: normalizeGroovyVersion(options.groovyVersion) }));
+  } else {
+    findings.push(...lintGroovySensitiveComments(code));
   }
 
   // Calculate exact SAP CPI Quality Score (Base 100: CRITICAL -30, HIGH -15, MEDIUM -5, LOW -2)

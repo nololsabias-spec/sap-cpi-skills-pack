@@ -649,6 +649,40 @@ export function buildXsltDocHeader(meta) {
   return `<!--\n${body.map((l) => (l ? `  ${l}` : '')).join('\n')}\n-->\n`;
 }
 
+// ---------------------------------------------------------------------------
+// Reglas de seguridad siempre activas (con o sin --docs)
+// ---------------------------------------------------------------------------
+
+/** Reglas de comentarios que son de seguridad, no de estilo: se aplican siempre. */
+export const ALWAYS_ON_COMMENT_RULES = ['DOC_SECRET_IN_COMMENT', 'DOC_SENSITIVE_COMMENT'];
+
+/**
+ * Solo las reglas de seguridad de comentarios (secretos, emails, endpoints, IPs) de un script Groovy.
+ * validate-groovy las ejecuta siempre; con --docs ya vienen incluidas en lintGroovyDocs.
+ *
+ * @param code código fuente Groovy
+ * @return hallazgos DOC_SECRET_IN_COMMENT / DOC_SENSITIVE_COMMENT
+ */
+export function lintGroovySensitiveComments(code) {
+  const findings = [];
+  const add = makeAdder(findings);
+  for (const c of extractGroovyComments(code)) checkCommentText(c, add, '', { allowTodo: true });
+  return findings.filter((f) => ALWAYS_ON_COMMENT_RULES.includes(f.ruleId));
+}
+
+/**
+ * Igual que lintGroovySensitiveComments, para los comentarios <!-- --> de una hoja XSLT.
+ *
+ * @param xml contenido de la hoja
+ * @return hallazgos XSLT_DOC_SECRET_IN_COMMENT / XSLT_DOC_SENSITIVE_COMMENT
+ */
+export function lintXsltSensitiveComments(xml) {
+  const findings = [];
+  const add = makeAdder(findings);
+  for (const c of extractXmlComments(xml)) checkCommentText({ text: c.inner, startLine: c.startLine }, add, 'XSLT_', { allowTodo: true });
+  return findings.filter((f) => ALWAYS_ON_COMMENT_RULES.includes(f.ruleId.replace(/^XSLT_/, '')));
+}
+
 /** Puntuación 0-100 con la misma fórmula que el resto del pack. */
 export function scoreFindings(findings) {
   const deductions = { CRITICAL: 30, HIGH: 15, MEDIUM: 5, LOW: 2 };
