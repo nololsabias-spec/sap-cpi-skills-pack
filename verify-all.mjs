@@ -21,7 +21,9 @@ const CHECKS = [
         data.heuristics.hasExceptionSubprocess === false &&
         data.heuristics.unencryptedChannels.length === 1 &&
         Array.isArray(data.heuristics.manifestIssues) &&
-        data.heuristics.manifestIssues.length === 0
+        data.heuristics.manifestIssues.length === 0 &&
+        data.heuristics.odataQueryWithoutDollar?.length === 1 &&
+        data.heuristics.orphanLocalProcesses?.length === 1
       );
     }
   },
@@ -177,6 +179,15 @@ const CHECKS = [
       const data = JSON.parse(out);
       const docRules = data.original.findings.filter((f) => f.ruleId.startsWith('DOC_')).map((f) => f.ruleId);
       return data.refactored.score === 100 && docRules.includes('DOC_MISSING_HEADER') && data.original.docs === true;
+    }
+  },
+  {
+    skill: 'Estándar de documentación (idioma: los comentarios van en inglés)',
+    script: 'shared/doc-standard.selftest.mjs',
+    args: [],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.spanishFlagged && data.englishClean && data.spanishDetected && data.englishDetected;
     }
   },
   {

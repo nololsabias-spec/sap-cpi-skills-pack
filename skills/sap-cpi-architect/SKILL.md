@@ -74,6 +74,7 @@ node ./scripts/build-cpi-package.mjs <spec.json | --demo> --out-dir ./dist-packa
 
 * OSGi Packager & Validator script: [build-cpi-package.mjs](./scripts/build-cpi-package.mjs)
 * OSGi Bundle Specification: [osgi-bundle-spec.md](./references/osgi-bundle-spec.md)
+* SAP S/4HANA API documentation (how to read the official pages and what to check before calling an API): [s4hana-api-docs.md](./references/s4hana-api-docs.md)
 * **Verification Gate & OSGi Manifest Compliance**:
   - `build-cpi-package.mjs` validates both the `.iflw` BPMN2 XML and every Groovy script before producing `<iflowName>.zip`, `<scriptCollectionName>.zip`, and `Paquete_<iflowName>.zip`.
   - Places `.project` and `META-INF/MANIFEST.MF` **directly at the root of the `.zip`** (never nested inside a top-level wrapper folder) and wraps all `MANIFEST.MF` lines at **72 bytes UTF-8** with `\r\n ` continuations so SAP CPI never fails with `The project must contain a valid manifest file`.

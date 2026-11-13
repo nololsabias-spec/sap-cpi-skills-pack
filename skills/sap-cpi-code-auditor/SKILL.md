@@ -44,11 +44,11 @@ Following the findings from Step 1 and the canonical One-Shot pattern in [one-sh
 7. Ensure single-argument `message.setBody(output)` and set `message.setHeader("Content-Type", "...; charset=utf-8")`.
 8. In `catch (Exception e)`, log error trace attachment and rethrow `throw new Exception("CPI-ERR: " + e.getMessage(), e)`.
 9. **Comments & documentation** ([`rules/sap-cpi-code-documentation.md`](../../rules/sap-cpi-code-documentation.md)): whenever the refactor adds or changes comments, or the user asks for the script to be commented/documented, apply the canonical standard.
-   - Line-1 `/** ... */` header with summary, `Motivo:`, `Paso Script:`, `Entrada:`, `Salida:`, `Errores:`, `Historial:` and `@version`.
+   - Line-1 `/** ... */` header with summary, `Why:`, `Script step:`, `Input:`, `Output:`, `Errors:`, `History:` and `@version`.
    - Groovydoc on helper methods.
    - Inline `//` comments only for the *why*.
    - Remove banners, commented-out code and TODOs, plus any email, endpoint, IP or secret found in comments (report the last two as security findings).
-   - Bump `@version` and add a `Historial:` entry describing the refactor.
+   - Bump `@version` and add a `History:` entry describing the refactor.
    - Get the skeleton with `node ../sap-cpi-groovy-generator/scripts/validate-groovy.mjs <script> --doc-header --groovy <v>` and never invent contracts you cannot read from the code; ask instead.
 
 ### Step 3: Verify the Refactored Script & Generate the Comparative Matrix (Stage 2)
