@@ -65,13 +65,15 @@ Transformación y enriquecimiento estructurado de payloads JSON por streaming co
 ## Pattern E: Custom Base64 / HMAC-SHA256 & SecureStore (`Security / Crypto`)
 Obtención de secretos mediante `ITApiFactory` + `SecureStoreService` y firma criptográfica `HmacSHA256` en `Base64`.
 
-## Pattern F: Upsert POST/PATCH sobre OData V4 (`Plan en Groovy + batch en XSLT`)
-Cuando el origen puede reenviar una entidad que ya existe en el destino y hay que crearla solo si falta:
+## Pattern F: Upsert POST/PATCH sobre OData V4 (`decidir, leer claves, un PATCH por línea`)
+Cuando el origen puede reenviar una entidad que ya existe en el destino y hay que crearla solo si falta. Validado en un tenant: la forma anidada del PATCH **no** funciona.
 
-1. **Consulta** (HTTP o adaptador OData) por la clave de cabecera con `$expand` hacia las posiciones: `$filter=<CampoCabecera> eq '${property.Clave}'&$expand=<NavegaciónPosiciones>`. Guarda el XML original en una propiedad antes de llamar (el body se sustituye por la respuesta). Asigna `Clave` con un Content Modifier XPath **antes** de la consulta.
-2. **Script de plan** (Groovy, `XmlSlurper` + `StreamingMarkupBuilder`, nunca `XmlParser`): indexa la respuesta por clave de posición normalizada (sin ceros a la izquierda), con el documento más reciente por `LastChangeDateTime` como ganador. Para cada posición del mensaje: si está indexada, va a `<Update id="documento">`; si no, a un único `<Create>`. Si hay documentos pero ninguno trae las posiciones, lanza `CPI-ERR` (nunca crees a ciegas). Sin posiciones en el mensaje, conserva el comportamiento anterior (un `Create` con la cabecera).
-3. **XSLT 1.0**: una pareja `batchChangeSetN/batchChangeSetPartN` por operación; `Create` → `POST <EntitySet>` y `Update` → `PATCH <EntitySet>('<id>')` con `If-Match: *`. Reutiliza las plantillas de mapeo de campos del POST sin cambios.
-4. **Comprobaciones**: con todo nuevo, el batch debe ser idéntico al del XSLT anterior (regresión por canonicalización); el PATCH debe probarse en DEV (¿sustituye la línea o la añade? ¿acepta `If-Match: *`?).
-5. **Respuesta**: reutiliza el script de detección de errores del POST si ya reconoce los códigos 200 y 201.
+1. **Guardar el XML original** en una propiedad antes de cualquier llamada (la respuesta sustituye al body).
+2. **Decidir con una consulta ligera**: `$filter=<CampoCabecera> eq '${property.Clave}'&$select=<Clave>,<FechaUltimoCambio>`, sin `$expand`. Un script (Groovy, `JsonSlurperClassic`) pone una propiedad para el Router y elige el documento con la fecha de cambio más reciente. Nombra la propiedad de modo que su `true` signifique lo que el Router espera.
+3. **Router**: ruta *crear* (POST con el batch de siempre) y ruta *modificar* como Default.
+4. **Leer las claves por clave**: GET `<EntidadCabecera>('<id>')` con `$expand=<NavPosiciones>($expand=<NavLineas>)`. Es la única llamada que trae los números internos de posición y línea. No lo hagas filtrando por pedido sobre todos los documentos: puede agotar el timeout.
+5. **Script de PATCH** (Groovy, `XmlSlurper` con XXE desactivado, `StreamingMarkupBuilder`, lectura por `Reader`): acepta la respuesta en JSON o XML; empareja cada posición del mensaje con la del documento por clave de negocio normalizada (sin ceros a la izquierda) y genera **un `batchChangeSetN/batchChangeSetPartN` por línea** con una URI de clave nombrada, `<EntidadLinea>(Campo1='a',Campo2='b',Campo3='c')`, y un cuerpo plano con solo los campos que cambian. Si ninguna posición existe, pon `...Skipped='true'` con el motivo y devuelve el XML original para que un Router decida (error o crear); si el documento no trae posiciones, falla con `CPI-ERR`.
+6. **Respuesta**: recorre todos los `statusCode` de las partes del `$batch` (el 200 externo no basta); un aviso con severidad 3 no es un error.
+7. **Comprobaciones**: con todo nuevo, el batch debe ser idéntico al anterior; el PATCH debe probarse en DEV (¿sustituye la línea o la añade? ¿pide `If-Match`? ¿admite un cambio a una fecha pasada?). Un caso mixto (algunas posiciones no existen) hay que decidirlo de forma explícita: error o crear solo esas.
 
-Probar la lógica del script en local con Groovy 2.4 (`apt-get install groovy` instala la 2.4.x) y un `Message` simulado con el mismo nombre de clase, y el XSLT con el procesador de la JDK (`javax.xml.transform`).
+Probar la lógica de los scripts en local con Groovy 2.4 (`apt-get install groovy` instala la 2.4.x) y un `Message` simulado con el mismo nombre de clase, con casos de error: sin id, clave con comilla, cuerpo vacío, XML mal formado y XXE.
