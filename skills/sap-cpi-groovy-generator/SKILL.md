@@ -67,13 +67,13 @@ Write the Groovy script adhering to these mandatory SAP Help Portal rules:
 9. **Defensive Exception Handling**: Wrap logic in `try / catch (Exception e) / finally` and rethrow as `throw new Exception("CPI-ERR: " + e.getMessage(), e)`.
 10. **Documentation Standard (mandatory, [`rules/sap-cpi-code-documentation.md`](../../rules/sap-cpi-code-documentation.md))**: Every generated script starts at line 1 with the canonical `/** ... */` header, in this exact order:
     - one-sentence summary ending in a period;
-    - `Motivo:` (why a script and not a standard step);
-    - `Paso Script: Groovy 2.4 (Script step 1.x) | Groovy 4 (Script step 2.x) · API v1|v2`;
-    - `Entrada:` / `Salida:` / `Errores:` lists of `- Tipo Nombre: descripción`;
-    - `Historial:` entries `- X.Y.Z  AAAA-MM-DD  texto`, newest first;
+    - `Why:` (why a script and not a standard step);
+    - `Script step: Groovy 2.4 (Script step 1.x) | Groovy 4 (Script step 2.x) · API v1|v2`;
+    - `Input:` / `Output:` / `Errors:` lists of `- Type Name: description`;
+    - `History:` entries `- X.Y.Z  YYYY-MM-DD  text`, newest first;
     - `@version X.Y.Z` as the last line.
 
-    Every helper method other than `processData` gets a Groovydoc block (summary, `@param` per parameter in signature order, `@return`, `@throws`). Inline `//` comments explain *why*, on their own line. No banners `// ====`, no `///`, no commented-out code, no TODO, and never emails, real endpoints, IPs or secrets in comments. Start from `--template <p> --comments` or from `--doc-header` (header inferred from the code) and replace every `TODO`.
+    Every helper method other than `processData` gets a Groovydoc block (summary, `@param` per parameter in signature order, `@return`, `@throws`). All comments, labels included, are written in English whatever the language of the conversation. Inline `//` comments explain *why*, on their own line. No banners `// ====`, no `///`, no commented-out code, no TODO, and never emails, real endpoints, IPs or secrets in comments. Start from `--template <p> --comments` or from `--doc-header` (header inferred from the code) and replace every `TODO`.
 
 ### Step 3: Validate the Generated Script (Single File, Folder, or Script Collection `.zip`)
 Save the generated script(s) and run the deterministic validator script on the `.groovy` file, an entire script folder, or a packaged `.zip`:
