@@ -27,7 +27,7 @@ Identify from the user's request:
 2. **Output Targets**: Body (`message.setBody(output)` + `message.setHeader('Content-Type', '...; charset=utf-8')`), Exchange Properties (`message.setProperty(k, v)`), or Conditional MPL Attachments, plus Output Headers/Properties.
 3. **Applicable Modular Directives & Patterns**:
    - Consult [directives-catalog.md](./references/directives-catalog.md) for the 10 modular directives (`xmlSlurper`, `jsonProcessing`, `explicitTimezone`, `mplGovernance`, `upgradeReadiness`, `headersProperties`, `secureStore`, `valueMapping`, `attachments`, `exceptionHandling`) and 13 BTP cybersecurity conditions.
-   - Consult [canonical-patterns.md](./references/canonical-patterns.md) if the request matches one of the 5 architectural patterns (Pattern A: XML Streaming, Pattern B: Headers/Properties, Pattern C: MPL Logging, Pattern D: JSON Manipulation, Pattern E: HMAC/Crypto & SecureStore).
+   - Consult [canonical-patterns.md](./references/canonical-patterns.md) if the request matches one of the 5 architectural patterns (Pattern A: XML Streaming, Pattern B: Headers/Properties, Pattern C: MPL Logging, Pattern D: JSON Manipulation, Pattern E: HMAC/Crypto & SecureStore). Pattern F covers create-or-update (POST/PATCH) against an OData V4 API; before scripting against any SAP S/4HANA API read its official page as described in [s4hana-api-docs.md](../sap-cpi-architect/references/s4hana-api-docs.md).
 
 ### Step 2: Author the Canonical Groovy Script
 Write the Groovy script adhering to these mandatory SAP Help Portal rules:
