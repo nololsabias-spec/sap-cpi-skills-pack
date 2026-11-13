@@ -262,11 +262,38 @@ function checkCommentText(c, add, prefix, { allowTodo = false } = {}) {
       'El comentario parece contener una credencial, token o clave.',
       'Bórralo y rota la credencial. Los secretos van en Security Material (SecureStoreService), nunca en el código.', c.startLine);
   }
+  if (looksSpanish(body)) {
+    add('MEDIUM', `${prefix}DOC_COMMENT_LANGUAGE`, 'Comentario en español',
+      'Los comentarios de código (cabecera, Groovydoc, // y <!-- -->) se escriben siempre en inglés.',
+      'Reescribe el comentario en inglés. Los mensajes de las excepciones y los textos para el usuario final no son comentarios y pueden seguir el idioma del proyecto.', c.startLine);
+  }
   if (!allowTodo && PLACEHOLDER_RE.test(body)) {
     add('LOW', `${prefix}DOC_TODO_LEFT`, 'TODO/FIXME en código entregable',
       'Un TODO/FIXME indica trabajo pendiente en un artefacto que se va a desplegar.',
       'Resuélvelo antes de entregar o regístralo fuera del código (ticket) y borra el comentario.', c.startLine);
   }
+}
+
+// Palabras frecuentes que casi nunca aparecen en un comentario técnico en inglés (y viceversa).
+const ES_WORDS = new Set(['el', 'la', 'los', 'las', 'de', 'del', 'que', 'para', 'con', 'por', 'una', 'se', 'es', 'en', 'al', 'como', 'esta', 'este', 'cuando', 'sin', 'sobre', 'entre', 'desde', 'hasta', 'pero', 'tambien', 'también', 'porque', 'si', 'ya', 'son', 'hay', 'falta', 'devuelve', 'lee', 'escribe', 'mensaje', 'cabecera']);
+const EN_WORDS = new Set(['the', 'of', 'and', 'to', 'for', 'with', 'is', 'are', 'in', 'on', 'it', 'this', 'that', 'when', 'if', 'not', 'from', 'as', 'by', 'be', 'or', 'an', 'at', 'was', 'must', 'may', 'does', 'will']);
+
+/**
+ * Indica si un comentario parece escrito en español (los comentarios van siempre en inglés).
+ *
+ * @param text texto del comentario sin delimitadores
+ * @return true si domina el vocabulario español
+ */
+export function looksSpanish(text) {
+  const words = text.toLowerCase().replace(/[`'"{}()\[\]<>@$*\/\\]/g, ' ').split(/[^a-záéíóúñü]+/).filter(Boolean);
+  let es = 0;
+  let en = 0;
+  for (const w of words) {
+    if (ES_WORDS.has(w)) es++;
+    if (EN_WORDS.has(w)) en++;
+  }
+  const accents = /[áéíóúñ¿¡]/i.test(text);
+  return (es >= 2 && es > en) || (accents && es >= 1 && es >= en);
 }
 
 function makeAdder(findings) {

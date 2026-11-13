@@ -182,6 +182,15 @@ const CHECKS = [
     }
   },
   {
+    skill: 'Estándar de documentación (idioma: los comentarios van en inglés)',
+    script: 'shared/doc-standard.selftest.mjs',
+    args: [],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.spanishFlagged && data.englishClean && data.spanishDetected && data.englishDetected;
+    }
+  },
+  {
     skill: 'Estándar de documentación (XSLT --docs)',
     script: 'skills/sap-cpi-xslt-studio/scripts/validate-xslt.mjs',
     args: ['--demo', '--docs', '--json'],

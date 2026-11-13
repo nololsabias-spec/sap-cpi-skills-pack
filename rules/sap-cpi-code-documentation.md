@@ -69,7 +69,7 @@ import com.sap.it.script.v2.api.Message
 
 Reglas adicionales:
 - **Idioma: todo comentario va en inglés**, sea cual sea el idioma de la conversación o del proyecto: etiquetas de la cabecera (`Why`, `Script step`/`Engine`, `Input`, `Output`, `Parameters`, `Errors`, `History`), resumen, descripciones, Groovydoc y comentarios `//` o `<!-- -->`. Los mensajes de las excepciones y los textos que ve el usuario final no son comentarios y siguen el idioma del proyecto.
-- Las etiquetas en español (`Motivo`, `Paso Script`, `Entrada`, `Salida`, `Errores`, `Historial`, `Motor`, `Parámetros`) siguen **aceptadas** para no penalizar scripts heredados, pero lo que se genera o se refactoriza se escribe en inglés. No se mezclan los dos idiomas en un mismo archivo.
+- Las etiquetas en español (`Motivo`, `Paso Script`, `Entrada`, `Salida`, `Errores`, `Historial`, `Motor`, `Parámetros`) siguen **reconocidas** para poder leer scripts heredados, pero lo que se genera o se refactoriza se escribe en inglés y `DOC_COMMENT_LANGUAGE` marca el texto en español cuando se valida con `--docs`. No se mezclan los dos idiomas en un mismo archivo.
 - **Autoría**: si se pide, `@author` con un rol o equipo ("Integration Team"), nunca un email ni un nombre de cliente.
 - No pongas valores de `.prop`, URLs reales, IPs, usuarios ni alias de credenciales de producción. Describe el sistema por su rol ("ERP orders API").
 
@@ -199,6 +199,7 @@ Cada cambio añade una entrada **al principio** de `History:` y actualiza `@vers
 | `DOC_MISSING_HEADER` / `XSLT_DOC_MISSING_HEADER` | MEDIUM | No hay cabecera al principio del archivo. |
 | `DOC_PLACEHOLDER` / `XSLT_DOC_PLACEHOLDER` | MEDIUM | La cabecera tiene `TODO`, `FIXME`, `TBD` o `XXX`. |
 | `DOC_RUNTIME_MISMATCH` / `XSLT_DOC_RUNTIME_MISMATCH` | MEDIUM (LOW si está incompleto) | `Paso Script:` o `Motor:` no coinciden con el código o con `--groovy`/`--engine`. |
+| `DOC_COMMENT_LANGUAGE` / `XSLT_DOC_COMMENT_LANGUAGE` | MEDIUM | Comentario escrito en español (los comentarios van siempre en inglés). |
 | `DOC_SECRET_IN_COMMENT` | CRITICAL | Password, token, API key o `Bearer`/`Basic` con valor en un comentario. |
 | `DOC_SENSITIVE_COMMENT` | HIGH | Email, URL de un host real o IP en un comentario. |
 | `DOC_HEADER_NOT_FIRST` | LOW | La cabecera existe pero no está en la línea 1. |

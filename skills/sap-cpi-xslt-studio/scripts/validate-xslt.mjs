@@ -394,18 +394,18 @@ function validateXsltCore(xml, requestedEngine) {
 
 export const DEMO_VALID_XSLT = `<?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Agrupa los registros planos por OrderId en pedidos con sus líneas y el sistema emisor.
+  Groups the flat records by OrderId into orders with their lines and the sending system.
 
-  Motor: XSLT 2.0 (Saxon-HE)
+  Engine: XSLT 2.0 (Saxon-HE)
 
-  Entrada:
-    - Body: XML con elementos //Record (OrderId, ItemId, Quantity).
-    - Header SAP_Sender: sistema emisor (vía cpi:getHeader).
-  Salida:
+  Input:
+    - Body: XML with //Record elements (OrderId, ItemId, Quantity).
+    - Header SAP_Sender: sending system (via cpi:getHeader).
+  Output:
     - Body: XML BatchedOrders/Order/Items/Item.
 
-  Historial:
-    - 1.0.0  2026-11-12  Versión inicial.
+  History:
+    - 1.0.0  2026-11-12  Initial version.
 
   @version 1.0.0
 -->

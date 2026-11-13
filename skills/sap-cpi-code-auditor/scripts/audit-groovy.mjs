@@ -41,28 +41,28 @@ def Message processData(Message message) {
 }`;
 
 export const SAMPLE_REFACTORED_GROOVY = `/**
- * Marca el pedido JSON como procesado con fecha UTC y lo indexa en el MPL por su OrderId.
+ * Marks the JSON order as processed with a UTC date and indexes it in the MPL by its OrderId.
  *
- * Paso Script: Groovy 2.4 (Script step 1.x) · API v1
+ * Script step: Groovy 2.4 (Script step 1.x) · API v1
  *
- * Entrada:
- *   - Body: JSON (leído como Reader)
- *   - Property LogAttachments: "Yes" activa el adjunto del payload en el MPL.
- *   - Header OrderId: clave de negocio; si falta se usa orderId del JSON.
- * Salida:
+ * Input:
+ *   - Body: JSON (read as Reader)
+ *   - Property LogAttachments: "Yes" enables the payload attachment in the MPL.
+ *   - Header OrderId: business key; when missing the orderId of the JSON is used.
+ * Output:
  *   - Body: application/json; charset=utf-8
  *   - Header ProcessedFlag: "true".
- *   - Header ProcessedAt: fecha de proceso ISO-8601 en UTC.
+ *   - Header ProcessedAt: ISO-8601 processing date in UTC.
  *   - Property Status: "SUCCESS".
  *   - MPL custom header BusinessDocID
- *   - MPL adjunto Order_Payload (solo con LogAttachments = Yes)
- *   - MPL adjunto Error_Trace (solo en error)
- * Errores:
- *   - CPI-ERR: mensaje de la excepción original → Exception Subprocess
+ *   - MPL attachment Order_Payload (only with LogAttachments = Yes)
+ *   - MPL attachment Error_Trace (only on error)
+ * Errors:
+ *   - CPI-ERR: message of the original exception → Exception Subprocess
  *
- * Historial:
- *   - 2.0.0  2026-11-12  Refactor: streaming, JsonSlurperClassic, UTC y MPL condicional.
- *   - 1.0.0  2026-11-01  Versión inicial.
+ * History:
+ *   - 2.0.0  2026-11-12  Refactor: streaming, JsonSlurperClassic, UTC and conditional MPL.
+ *   - 1.0.0  2026-11-01  Initial version.
  *
  * @version 2.0.0
  */

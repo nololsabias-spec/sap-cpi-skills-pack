@@ -85,6 +85,7 @@ Lo aplican `validate-groovy.mjs`, `audit-groovy.mjs` y `validate-xslt.mjs` con `
 | `DOC_SENSITIVE_COMMENT` | `HIGH` | Email, URL de un host real o IP en un comentario. Se permiten `*.example.com`, `*.invalid`, rangos de documentación y enlaces a `sap.com`, `w3.org` y `apache.org`. |
 | `DOC_HEADER_NOT_FIRST`, `DOC_MISSING_SUMMARY`, `DOC_SUMMARY_FORMAT`, `DOC_MISSING_RUNTIME`, `DOC_MISSING_SECTION`, `DOC_MISSING_VERSION`, `DOC_HISTORY_FORMAT`, `DOC_HISTORY_VERSION_MISMATCH` | `LOW` | Forma de la cabecera: posición, resumen de una frase terminada en punto, secciones obligatorias (`Errores` si hay `throw`), `@version X.Y.Z` y entradas `X.Y.Z  AAAA-MM-DD  texto` con la más reciente primero. |
 | `DOC_MISSING_METHOD_DOC`, `DOC_PARAM_MISMATCH` | `LOW` | Métodos auxiliares sin Groovydoc, o con `@param` que no coinciden con la firma. |
+| `DOC_COMMENT_LANGUAGE` / `XSLT_DOC_COMMENT_LANGUAGE` | `MEDIUM` | Un comentario (cabecera, Groovydoc, `//` o `<!-- -->`) está escrito en español: los comentarios van siempre en inglés. Heurística por vocabulario frecuente; los mensajes de excepción y los textos al usuario final no cuentan. Solo con `--docs`. |
 | `DOC_COMMENTED_OUT_CODE`, `DOC_TODO_LEFT`, `DOC_BANNER_COMMENT`, `DOC_MARKDOWN_DOC_COMMENT` | `LOW` | Código comentado, TODO/FIXME, banners `// ====` o comentarios `///`. |
 | `XSLT_DOC_*` | igual que su equivalente | Las mismas reglas para la cabecera `<!-- -->` de las hojas XSLT, más `XSLT_DOC_PARAM_MISMATCH` (un `xsl:param` sin documentar en `Parámetros:`). |
 
