@@ -21,7 +21,9 @@ const CHECKS = [
         data.heuristics.hasExceptionSubprocess === false &&
         data.heuristics.unencryptedChannels.length === 1 &&
         Array.isArray(data.heuristics.manifestIssues) &&
-        data.heuristics.manifestIssues.length === 0
+        data.heuristics.manifestIssues.length === 0 &&
+        data.heuristics.odataQueryWithoutDollar?.length === 1 &&
+        data.heuristics.orphanLocalProcesses?.length === 1
       );
     }
   },

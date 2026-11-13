@@ -64,3 +64,14 @@ Transformación y enriquecimiento estructurado de payloads JSON por streaming co
 
 ## Pattern E: Custom Base64 / HMAC-SHA256 & SecureStore (`Security / Crypto`)
 Obtención de secretos mediante `ITApiFactory` + `SecureStoreService` y firma criptográfica `HmacSHA256` en `Base64`.
+
+## Pattern F: Upsert POST/PATCH sobre OData V4 (`Plan en Groovy + batch en XSLT`)
+Cuando el origen puede reenviar una entidad que ya existe en el destino y hay que crearla solo si falta:
+
+1. **Consulta** (HTTP o adaptador OData) por la clave de cabecera con `$expand` hacia las posiciones: `$filter=<CampoCabecera> eq '${property.Clave}'&$expand=<NavegaciónPosiciones>`. Guarda el XML original en una propiedad antes de llamar (el body se sustituye por la respuesta). Asigna `Clave` con un Content Modifier XPath **antes** de la consulta.
+2. **Script de plan** (Groovy, `XmlSlurper` + `StreamingMarkupBuilder`, nunca `XmlParser`): indexa la respuesta por clave de posición normalizada (sin ceros a la izquierda), con el documento más reciente por `LastChangeDateTime` como ganador. Para cada posición del mensaje: si está indexada, va a `<Update id="documento">`; si no, a un único `<Create>`. Si hay documentos pero ninguno trae las posiciones, lanza `CPI-ERR` (nunca crees a ciegas). Sin posiciones en el mensaje, conserva el comportamiento anterior (un `Create` con la cabecera).
+3. **XSLT 1.0**: una pareja `batchChangeSetN/batchChangeSetPartN` por operación; `Create` → `POST <EntitySet>` y `Update` → `PATCH <EntitySet>('<id>')` con `If-Match: *`. Reutiliza las plantillas de mapeo de campos del POST sin cambios.
+4. **Comprobaciones**: con todo nuevo, el batch debe ser idéntico al del XSLT anterior (regresión por canonicalización); el PATCH debe probarse en DEV (¿sustituye la línea o la añade? ¿acepta `If-Match: *`?).
+5. **Respuesta**: reutiliza el script de detección de errores del POST si ya reconoce los códigos 200 y 201.
+
+Probar la lógica del script en local con Groovy 2.4 (`apt-get install groovy` instala la 2.4.x) y un `Message` simulado con el mismo nombre de clase, y el XSLT con el procesador de la JDK (`javax.xml.transform`).
