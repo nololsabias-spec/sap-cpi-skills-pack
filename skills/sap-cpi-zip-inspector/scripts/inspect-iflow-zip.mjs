@@ -293,6 +293,45 @@ export function analyzeIflwLocally(iflwXml) {
     }
   }
 
+  // 5f. OData system query options written without "$" (IFLW-009): the service ignores or rejects them.
+  const odataQueryWithoutDollar = [];
+  {
+    const odataOptionRx = /(^|&)(expand|filter|select|orderby|top|skip|count|search|inlinecount)=/i;
+    const odataFlowRx = /<bpmn2:messageFlow\b([^>]*)>([\s\S]*?)<\/bpmn2:messageFlow>/gi;
+    let odataFlow;
+    while ((odataFlow = odataFlowRx.exec(iflwXml)) !== null) {
+      const flowAttrs = parseXmlAttributes(odataFlow[1]);
+      const flowProps = readChannelProps(odataFlow[2] || '');
+      const prop = (k) => (flowProps.find((x) => x.key === k) || {}).val || '';
+      const address = prop('httpAddressWithoutQuery') || prop('address');
+      const query = prop('httpAddressQuery').replace(/&amp;/g, '&');
+      if (!query || !/odata/i.test(address)) continue; // only channels that talk to an OData service
+      const hit = odataOptionRx.exec(query);
+      if (hit) {
+        odataQueryWithoutDollar.push({ id: flowAttrs.id || 'MessageFlow', name: flowAttrs.name || flowAttrs.id || 'Channel', option: hit[2].toLowerCase() });
+      }
+    }
+  }
+
+  // 5g. Local integration processes nobody calls (IFLW-010): no Process Call step and no sender/timer start.
+  const orphanLocalProcesses = [];
+  {
+    const calledProcessIds = new Set(properties.filter((x) => x.key === 'processId' && x.val).map((x) => x.val));
+    const processRx = /<bpmn2:process\b([^>]*)>([\s\S]*?)<\/bpmn2:process>/gi;
+    let proc;
+    while ((proc = processRx.exec(iflwXml)) !== null) {
+      const procAttrs = parseXmlAttributes(proc[1]);
+      if (!procAttrs.id || calledProcessIds.has(procAttrs.id)) continue;
+      const procInner = proc[2] || '';
+      const startIds = [...procInner.matchAll(/<bpmn2:startEvent\b[^>]*\bid="([^"]+)"/gi)].map((x) => x[1]);
+      const startedByChannel = startIds.some((sid) => messageFlowsByRef.has(sid));
+      const startedByTimer = /<bpmn2:timerEventDefinition\b/i.test(procInner);
+      if (!startedByChannel && !startedByTimer) {
+        orphanLocalProcesses.push({ id: procAttrs.id, name: procAttrs.name || procAttrs.id });
+      }
+    }
+  }
+
   const channelsCount = (iflwXml.match(/<bpmn2:messageFlow\b/gi) || []).length;
   const routersCount = (iflwXml.match(/<bpmn2:exclusiveGateway\b/gi) || []).length;
   const groovyCalls = properties.filter(
@@ -345,6 +384,8 @@ export function analyzeIflwLocally(iflwXml) {
     syncTasksWithoutTimeout,
     splittersWithoutStreaming,
     routersWithoutDefaultRoute,
+    odataQueryWithoutDollar,
+    orphanLocalProcesses,
     basicAuthChannels,
     csrfDisabledChannels,
     contentModifiersReadingBodyToProperty,
@@ -376,7 +417,17 @@ export function buildDemoBundleZipBuffer() {
         <ifl:property key="address" value="http://erp-gateway.internal.corp/cpi/orders"/>
       </bpmn2:extensionElements>
     </bpmn2:messageFlow>
+    <bpmn2:messageFlow id="MessageFlow_2" name="OData_Receiver" sourceRef="ServiceTask_SyncCall" targetRef="Participant_2">
+      <bpmn2:extensionElements>
+        <ifl:property key="httpAddressWithoutQuery" value="https://{{Host}}/sap/opu/odata4/sap/demo_service/0001/Items"/>
+        <ifl:property key="httpAddressQuery" value="$filter=Id eq 1&amp;expand=Children"/>
+      </bpmn2:extensionElements>
+    </bpmn2:messageFlow>
   </bpmn2:collaboration>
+  <bpmn2:process id="Process_Orphan" name="Local Never Called" isExecutable="true">
+    <bpmn2:startEvent id="StartEvent_Orphan" name="Start"/>
+    <bpmn2:endEvent id="EndEvent_Orphan" name="End"/>
+  </bpmn2:process>
   <bpmn2:process id="Process_1" name="Integration Process" isExecutable="true">
     <bpmn2:startEvent id="StartEvent_1" name="Start"/>
     <bpmn2:callActivity id="CallActivity_Mod" name="Store Full Body">
@@ -524,6 +575,8 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
         syncTasksWithoutTimeout: [],
         splittersWithoutStreaming: [],
         routersWithoutDefaultRoute: [],
+        odataQueryWithoutDollar: [],
+        orphanLocalProcesses: [],
         basicAuthChannels: [],
         csrfDisabledChannels: [],
         contentModifiersReadingBodyToProperty: [],
@@ -551,6 +604,8 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
         syncTasksWithoutTimeout: [],
         splittersWithoutStreaming: [],
         routersWithoutDefaultRoute: [],
+        odataQueryWithoutDollar: [],
+        orphanLocalProcesses: [],
         basicAuthChannels: [],
         csrfDisabledChannels: [],
         contentModifiersReadingBodyToProperty: [],
@@ -1128,6 +1183,10 @@ if (isMain) {
         (h.splittersWithoutStreaming || []).forEach((s) => console.log(`   - [ALTA] Splitter: ${s.name} (${s.id})`));
         console.log(`5e. Routers sin ruta por defecto: ${(h.routersWithoutDefaultRoute || []).length} detectado(s)`);
         (h.routersWithoutDefaultRoute || []).forEach((r) => console.log(`   - [MEDIA] Router: ${r.name} (${r.id})`));
+        console.log(`5f. Consultas OData con opciones sin '$' (se ignoran): ${(h.odataQueryWithoutDollar || []).length} detectado(s)`);
+        (h.odataQueryWithoutDollar || []).forEach((q) => console.log(`   - [AVISO] Canal ${q.name} (${q.id}): "${q.option}=" debe ser "$${q.option}="`));
+        console.log(`5g. Procesos locales que nadie invoca: ${(h.orphanLocalProcesses || []).length} detectado(s)`);
+        (h.orphanLocalProcesses || []).forEach((o) => console.log(`   - [AVISO] Proceso "${o.name}" (${o.id}): ningún paso lo llama; revisa si falta enlazarlo`));
         if (report.heuristics.referencedScriptCollections?.length > 0 || report.heuristics.referencedScripts?.length > 0) {
           console.log(`6. Dependencias de Scripts:`);
           if (report.heuristics.referencedScriptCollections?.length > 0) {

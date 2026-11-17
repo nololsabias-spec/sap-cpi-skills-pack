@@ -262,11 +262,38 @@ function checkCommentText(c, add, prefix, { allowTodo = false } = {}) {
       'El comentario parece contener una credencial, token o clave.',
       'Bórralo y rota la credencial. Los secretos van en Security Material (SecureStoreService), nunca en el código.', c.startLine);
   }
+  if (looksSpanish(body)) {
+    add('MEDIUM', `${prefix}DOC_COMMENT_LANGUAGE`, 'Comentario en español',
+      'Los comentarios de código (cabecera, Groovydoc, // y <!-- -->) se escriben siempre en inglés.',
+      'Reescribe el comentario en inglés. Los mensajes de las excepciones y los textos para el usuario final no son comentarios y pueden seguir el idioma del proyecto.', c.startLine);
+  }
   if (!allowTodo && PLACEHOLDER_RE.test(body)) {
     add('LOW', `${prefix}DOC_TODO_LEFT`, 'TODO/FIXME en código entregable',
       'Un TODO/FIXME indica trabajo pendiente en un artefacto que se va a desplegar.',
       'Resuélvelo antes de entregar o regístralo fuera del código (ticket) y borra el comentario.', c.startLine);
   }
+}
+
+// Palabras frecuentes que casi nunca aparecen en un comentario técnico en inglés (y viceversa).
+const ES_WORDS = new Set(['el', 'la', 'los', 'las', 'de', 'del', 'que', 'para', 'con', 'por', 'una', 'se', 'es', 'en', 'al', 'como', 'esta', 'este', 'cuando', 'sin', 'sobre', 'entre', 'desde', 'hasta', 'pero', 'tambien', 'también', 'porque', 'si', 'ya', 'son', 'hay', 'falta', 'devuelve', 'lee', 'escribe', 'mensaje', 'cabecera']);
+const EN_WORDS = new Set(['the', 'of', 'and', 'to', 'for', 'with', 'is', 'are', 'in', 'on', 'it', 'this', 'that', 'when', 'if', 'not', 'from', 'as', 'by', 'be', 'or', 'an', 'at', 'was', 'must', 'may', 'does', 'will']);
+
+/**
+ * Indica si un comentario parece escrito en español (los comentarios van siempre en inglés).
+ *
+ * @param text texto del comentario sin delimitadores
+ * @return true si domina el vocabulario español
+ */
+export function looksSpanish(text) {
+  const words = text.toLowerCase().replace(/[`'"{}()\[\]<>@$*\/\\]/g, ' ').split(/[^a-záéíóúñü]+/).filter(Boolean);
+  let es = 0;
+  let en = 0;
+  for (const w of words) {
+    if (ES_WORDS.has(w)) es++;
+    if (EN_WORDS.has(w)) en++;
+  }
+  const accents = /[áéíóúñ¿¡]/i.test(text);
+  return (es >= 2 && es > en) || (accents && es >= 1 && es >= en);
 }
 
 function makeAdder(findings) {
@@ -474,41 +501,41 @@ export function inferGroovyDocMeta(code, options = {}) {
 
   const input = [];
   const bodyRead = /\.getBody\s*\(\s*(?:java\.io\.)?(Reader|InputStream|String|byte\[\])/.exec(noComments);
-  if (bodyRead) input.push(`Body: ${fmt || 'TODO formato'} (leído como ${bodyRead[1]})`);
+  if (bodyRead) input.push(`Body: ${fmt || 'TODO format'} (read as ${bodyRead[1]})`);
   for (const p of literalNames(noComments, /\.getProperty\s*\(\s*["']([^"']+)["']/g)) input.push(`Property ${p}`);
   const headersIn = [
     ...literalNames(noComments, /\.getHeader\s*\(\s*["']([^"']+)["']/g),
     ...literalNames(noComments, /getHeaders\s*\(\s*\)\s*(?:\??\.get\s*\(\s*|\[)\s*["']([^"']+)["']/g)
   ];
   for (const h of [...new Set(headersIn)]) input.push(`Header ${h}`);
-  if (/\.getAttachments\s*\(/.test(noComments)) input.push('Adjuntos del mensaje (getAttachments)');
-  for (const a of literalNames(noComments, /\.getUserCredential\s*\(\s*["']([^"']+)["']/g)) input.push(`Security Material: credencial ${a}`);
+  if (/\.getAttachments\s*\(/.test(noComments)) input.push('Message attachments (getAttachments)');
+  for (const a of literalNames(noComments, /\.getUserCredential\s*\(\s*["']([^"']+)["']/g)) input.push(`Security Material: credential ${a}`);
   if (/SecureStoreService/.test(noComments) && !/getUserCredential\s*\(\s*["']/.test(noComments)) input.push('Security Material: TODO alias');
-  if (/ValueMappingApi/.test(noComments)) input.push('Value Mapping: TODO agencia/identificador');
+  if (/ValueMappingApi/.test(noComments)) input.push('Value Mapping: TODO agency/identifier');
 
   const output = [];
   if (/\.setBody\s*\(/.test(noComments)) {
     const ct = /\.setHeader\s*\(\s*["']Content-Type["']\s*,\s*["']([^"']+)["']/.exec(noComments);
     const ctVar = /\.setHeader\s*\(\s*["']Content-Type["']\s*,\s*([A-Za-z_]\w*)\s*\)/.exec(noComments);
-    output.push(`Body: ${ct ? ct[1] : ctVar ? `Content-Type según ${ctVar[1]}` : fmt || 'TODO formato'}`);
+    output.push(`Body: ${ct ? ct[1] : ctVar ? `Content-Type from ${ctVar[1]}` : fmt || 'TODO format'}`);
   }
   for (const h of literalNames(noComments, /\.setHeader\s*\(\s*["']([^"']+)["']/g)) if (h !== 'Content-Type') output.push(`Header ${h}`);
   for (const p of literalNames(noComments, /\.setProperty\s*\(\s*["']([^"']+)["']/g)) output.push(`Property ${p}`);
   for (const k of literalNames(noComments, /addCustomHeaderProperty\s*\(\s*["']([^"']+)["']/g)) output.push(`MPL custom header ${k}`);
-  for (const k of literalNames(noComments, /addAttachmentAs\w*\s*\(\s*["']([^"']+)["']/g)) output.push(`MPL adjunto ${k}`);
+  for (const k of literalNames(noComments, /addAttachmentAs\w*\s*\(\s*["']([^"']+)["']/g)) output.push(`MPL attachment ${k}`);
 
   const errors = [];
   for (const m of noComments.matchAll(/throw\s+new\s+(\w+)\s*\(\s*["']([^"']*)["']/g)) {
     const msg = m[2].trim();
     const item = msg.startsWith('CPI-ERR:')
       ? `${msg === 'CPI-ERR:' ? 'CPI-ERR: mensaje de la excepción original' : msg} → Exception Subprocess`
-      : `${m[1]}: ${msg || 'sin mensaje'}`;
+      : `${m[1]}: ${msg || 'no message'}`;
     if (!errors.includes(item)) errors.push(item);
   }
-  if (errors.length === 0 && /\bthrow\s+/.test(noComments)) errors.push('TODO describir las excepciones que se relanzan');
+  if (errors.length === 0 && /\bthrow\s+/.test(noComments)) errors.push('TODO describe the exceptions that are rethrown');
 
   return {
-    summary: options.summary || 'TODO: qué hace el script, en una frase terminada en punto.',
+    summary: options.summary || 'TODO: what the script does, in one sentence ending with a period.',
     why: options.why || null,
     groovyVersion: options.groovyVersion || null,
     api,
@@ -533,14 +560,14 @@ function listBlock(label, items, empty) {
 export function buildGroovyDocHeader(meta) {
   const runtime = meta.groovyVersion ? groovyRuntimeLabel(meta.groovyVersion) : 'TODO Groovy 2.4 (Script step 1.x) | Groovy 4 (Script step 2.x)';
   const body = [meta.summary, ''];
-  if (meta.why) body.push(`Motivo: ${meta.why}`, '');
-  body.push(`Paso Script: ${runtime} · API ${meta.api || 'v1'}`, '');
-  body.push(...listBlock('Entrada', meta.input || [], 'Ninguna.'));
-  body.push(...listBlock('Salida', meta.output || [], 'Sin cambios en el mensaje.'));
-  if ((meta.errors || []).length) body.push(...listBlock('Errores', meta.errors, 'Ninguno.'));
+  if (meta.why) body.push(`Why: ${meta.why}`, '');
+  body.push(`Script step: ${runtime} · API ${meta.api || 'v1'}`, '');
+  body.push(...listBlock('Input', meta.input || [], 'None.'));
+  body.push(...listBlock('Output', meta.output || [], 'No changes to the message.'));
+  if ((meta.errors || []).length) body.push(...listBlock('Errors', meta.errors, 'None.'));
   body.push('');
-  const history = meta.history?.length ? meta.history : [{ version: '1.0.0', date: todayIso(), note: 'Versión inicial.' }];
-  body.push(...listBlock('Historial', history.map((h) => `${h.version}  ${h.date}  ${h.note}`), ''));
+  const history = meta.history?.length ? meta.history : [{ version: '1.0.0', date: todayIso(), note: 'Initial version.' }];
+  body.push(...listBlock('History', history.map((h) => `${h.version}  ${h.date}  ${h.note}`), ''));
   body.push('', `@version ${history[0].version}`);
   return `/**\n${body.map((l) => (l ? ` * ${l}` : ' *')).join('\n')}\n */\n`;
 }
@@ -636,15 +663,15 @@ export function lintXsltDocs(xml, engine) {
 export function buildXsltDocHeader(meta) {
   const engine = meta.engine || '2.0';
   const body = [meta.summary, ''];
-  if (meta.why) body.push(`Motivo: ${meta.why}`, '');
-  body.push(`Motor: XSLT ${engine} (${engine === '1.0' ? 'Xalan' : 'Saxon-HE'})`, '');
-  body.push(...listBlock('Entrada', meta.input || [], 'Ninguna.'));
-  if ((meta.params || []).length) body.push(...listBlock('Parámetros', meta.params, 'Ninguno.'));
-  body.push(...listBlock('Salida', meta.output || [], 'Ninguna.'));
-  if ((meta.errors || []).length) body.push(...listBlock('Errores', meta.errors, 'Ninguno.'));
+  if (meta.why) body.push(`Why: ${meta.why}`, '');
+  body.push(`Engine: XSLT ${engine} (${engine === '1.0' ? 'Xalan' : 'Saxon-HE'})`, '');
+  body.push(...listBlock('Input', meta.input || [], 'None.'));
+  if ((meta.params || []).length) body.push(...listBlock('Parameters', meta.params, 'None.'));
+  body.push(...listBlock('Output', meta.output || [], 'None.'));
+  if ((meta.errors || []).length) body.push(...listBlock('Errors', meta.errors, 'None.'));
   body.push('');
-  const history = meta.history?.length ? meta.history : [{ version: '1.0.0', date: todayIso(), note: 'Versión inicial.' }];
-  body.push(...listBlock('Historial', history.map((h) => `${h.version}  ${h.date}  ${h.note}`), ''));
+  const history = meta.history?.length ? meta.history : [{ version: '1.0.0', date: todayIso(), note: 'Initial version.' }];
+  body.push(...listBlock('History', history.map((h) => `${h.version}  ${h.date}  ${h.note}`), ''));
   body.push('', `@version ${history[0].version}`);
   return `<!--\n${body.map((l) => (l ? `  ${l}` : '')).join('\n')}\n-->\n`;
 }

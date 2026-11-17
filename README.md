@@ -300,7 +300,7 @@ Cada vez que el usuario detecta un fallo al importar o ejecutar un artefacto en 
 Además, la regla [`rules/sap-cpi-privacy-sanitize.md`](./rules/sap-cpi-privacy-sanitize.md) hace que el agente **pregunte antes de leer** un `.zip`/`.iflw` exportado de un tenant real si quiere limpiarlo. Si aceptas, trabaja solo sobre una copia `.sanitized.zip` con alias reversibles, nunca lee el mapa de valores originales (`sanitize-map.json`, ignorado por Git) y te recuerda restaurar con `--restore` antes de importar en SAP CPI (el inspector marca `SANITIZED-001` y el empaquetador se niega mientras queden alias).
 
 Por último, la regla [`rules/sap-cpi-code-documentation.md`](./rules/sap-cpi-code-documentation.md) hace que todo script Groovy u hoja XSLT que el agente genere, refactorice o comente siga el mismo formato:
-- Una cabecera canónica con resumen, `Motivo:`, `Paso Script:`/`Motor:`, `Entrada:`, `Salida:`, `Errores:`, `Historial:` y `@version`.
+- Una cabecera canónica con resumen, `Why:`, `Script step:`/`Engine:`, `Input:`, `Output:`, `Errors:`, `History:` y `@version`, todo en inglés.
 - Groovydoc en los métodos auxiliares.
 - Comentarios `//` solo para explicar el porqué.
 

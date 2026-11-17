@@ -57,6 +57,6 @@ Regla completa: [`rules/sap-cpi-privacy-sanitize.md`](./rules/sap-cpi-privacy-sa
 Regla completa: [`rules/sap-cpi-code-documentation.md`](./rules/sap-cpi-code-documentation.md).
 
 1. **Siempre al generar** un script o una hoja XSLT, y **al refactorizar o comentar** uno existente, usa la cabecera canónica. En Groovy es un bloque `/** */` en la línea 1 y en XSLT un `<!-- -->` antes de `<xsl:stylesheet>`. Contiene, en este orden: resumen, `Motivo:`, `Paso Script:`/`Motor:`, `Entrada:`, `Salida:`, `Errores:`, `Historial:` y `@version`.
-2. Documenta con Groovydoc los métodos auxiliares. Los comentarios `//` explican el porqué. No dejes banners, `///`, código comentado ni TODO, y nunca pongas emails, endpoints, IPs ni secretos en comentarios.
+2. **Todos los comentarios van en inglés** (etiquetas de la cabecera, Groovydoc, `//` y `<!-- -->`), sea cual sea el idioma de la conversación; `DOC_COMMENT_LANGUAGE` lo comprueba con `--docs`. Documenta con Groovydoc los métodos auxiliares. Los comentarios `//` explican el porqué. No dejes banners, `///`, código comentado ni TODO, y nunca pongas emails, endpoints, IPs ni secretos en comentarios.
 3. Para un script existente, obtén el esqueleto con `validate-groovy.mjs <script> --doc-header` y completa los `TODO` sin inventar contratos.
 4. Valida con `--docs` (`validate-groovy.mjs`, `audit-groovy.mjs`, `validate-xslt.mjs`; `docs: true` en MCP). El resultado debe tener 0 hallazgos CRITICAL/HIGH/MEDIUM.

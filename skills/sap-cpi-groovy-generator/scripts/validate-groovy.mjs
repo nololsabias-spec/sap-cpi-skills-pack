@@ -682,31 +682,31 @@ export const CANONICAL_PATTERNS = [
   'base64-attachment'
 ];
 
-// Resumen y motivo de cada plantilla para la cabecera estándar (--comments).
+// Summary and reason of each template for the standard header (--comments).
 const TEMPLATE_DOCS = {
   'xml-slurper': {
-    summary: 'Lee el XML de entrada con XmlSlurper protegido contra XXE y publica el DocumentID.',
-    why: 'Extracción por GPath con valor por defecto "N/A"; un Content Modifier con XPath no ofrece el fallback.'
+    summary: 'Reads the input XML with an XXE-protected XmlSlurper and publishes the DocumentID.',
+    why: 'GPath extraction with a default value of "N/A"; a Content Modifier with XPath offers no fallback.'
   },
   'mpl-custom-headers': {
-    summary: 'Registra claves de negocio en el Message Processing Log y fija un estado personalizado.',
-    why: 'addCustomHeaderProperty solo está disponible desde script.'
+    summary: 'Records business keys in the Message Processing Log and sets a custom status.',
+    why: 'addCustomHeaderProperty is only available from a script.'
   },
   'oauth-token-inject': {
-    summary: 'Comprueba la caducidad del token OAuth 2.0 en caché e inyecta la cabecera Authorization o pide renovarlo.',
-    why: 'La comparación de caducidad con margen de 60 s no se puede expresar en un Content Modifier.'
+    summary: 'Checks the expiry of the cached OAuth 2.0 token and injects the Authorization header or requests a refresh.',
+    why: 'An expiry comparison with a 60 s margin cannot be expressed in a Content Modifier.'
   },
   'dynamic-routing-header': {
-    summary: 'Calcula la dirección ProcessDirect de destino según el sistema indicado en TargetSystem.',
-    why: 'Normaliza alias de sistema (S4/S4HANA, CRM/SALESFORCE) con una ruta por defecto en un solo punto.'
+    summary: 'Computes the target ProcessDirect address from the system given in TargetSystem.',
+    why: 'Normalizes system aliases (S4/S4HANA, CRM/SALESFORCE) with a default route in a single place.'
   },
   'base64-attachment': {
-    summary: 'Decodifica el documento Base64 de una propiedad y lo deja en el body como binario descargable.',
-    why: 'La decodificación a byte[] sin pasar por String no está disponible en pasos estándar.'
+    summary: 'Decodes the Base64 document of a property and leaves it in the body as a downloadable binary.',
+    why: 'Decoding to byte[] without going through a String is not available in standard steps.'
   },
   'json-streaming': {
-    summary: 'Enriquece el JSON de entrada con la marca de tiempo UTC y el sistema origen.',
-    why: 'Añadir campos a un JSON arbitrario sin esquema no es posible con un mapeo gráfico.'
+    summary: 'Enriches the input JSON with the UTC timestamp and the source system.',
+    why: 'Adding fields to an arbitrary schema-less JSON is not possible with a graphical mapping.'
   }
 };
 
@@ -730,12 +730,12 @@ export function generateCanonicalGroovyTemplate(pattern = 'json-streaming', opti
     case 'xml-slurper':
       code = customComments
         ? `// ============================================================================
-// PATRÓN: XML Slurper con Protección XXE Integral
-// Cumplimiento de Directrices SAP CPI:
-// 1. Prevención XXE: Deshabilitación obligatoria de DOCTYPE y entidades externas.
-// 2. Streaming anti-OOM: Reader directo del body sin materializar a String en Heap.
-// 3. GPath defensivo: Navegación segura con operador ?. y fallback.
-// 4. Observabilidad: addCustomHeaderProperty condicional en Message Processing Log.
+// PATTERN: XML Slurper with full XXE protection
+// SAP CPI guideline compliance:
+// 1. XXE prevention: DOCTYPE and external entities must be disabled.
+// 2. Anti-OOM streaming: read the body as a Reader without materializing a String on the heap.
+// 3. Defensive GPath: safe navigation with the ?. operator and a fallback.
+// 4. Observability: conditional addCustomHeaderProperty on the Message Processing Log.
 // ============================================================================
 ${messageImport}
 ${xmlSlurperImport}
@@ -747,30 +747,30 @@ import java.time.format.DateTimeFormatter
 @Field final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneId.of("UTC"))
 
 Message processData(Message message) {
-    // 1. Obtener Reader para streaming de XML sin sobrecargar la memoria heap
+    // 1. Get a Reader to stream the XML without overloading the heap
     Reader bodyReader = message.getBody(java.io.Reader)
     try {
         if (bodyReader == null) {
             throw new IllegalArgumentException("Cuerpo XML vacio en el mensaje.")
         }
-        // 2. Endurecimiento estricto contra vulnerabilidades XXE y XML Entity Expansion
+        // 2. Strict hardening against XXE and XML entity expansion
         def parser = new XmlSlurper(false, false)
         parser.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
         parser.setFeature("http://xml.org/sax/features/external-general-entities", false)
         parser.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
 
-        // 3. Parseo defensivo y extracción con operador de navegación segura
+        // 3. Defensive parsing and extraction with the safe-navigation operator
         def rootNode = parser.parse(bodyReader)
         def documentId = rootNode.'Header'?.'DocumentID'?.text() ?: "N/A"
 
         message.setProperty("DocumentID", documentId)
         message.setHeader("Content-Type", "application/xml; charset=utf-8")
 
-        // 4. Clave de búsqueda en MPL para auditoría y correlación en el Monitor CPI
+        // 4. Search key in the MPL for audit and correlation in the CPI monitor
         def messageLog = messageLogFactory?.getMessageLog(message)
         messageLog?.addCustomHeaderProperty("DocumentID", documentId)
     } finally {
-        // 5. Cierre garantizado del Reader para liberar el descriptor de E/S
+        // 5. Guaranteed Reader close to release the I/O descriptor
         bodyReader?.close()
     }
     return message
@@ -815,12 +815,12 @@ Message processData(Message message) {
     case 'mpl-custom-headers':
       code = customComments
         ? `// ============================================================================
-// PATRÓN: Gobernanza de Message Processing Log (MPL) y Observabilidad
-// Cumplimiento de Directrices SAP CPI:
-// 1. Acceso seguro a MessageLogFactory mediante operador safe-navigation.
-// 2. Identificación de negocio mediante addCustomHeaderProperty para búsqueda en Monitor.
-// 3. Estado personalizado del MPL para visibilidad operativa (COMPLETED_WITH_WARNINGS).
-// 4. Adjuntos condicionantes: addAttachmentAsString condicionado para evitar saturar base de datos.
+// PATTERN: Message Processing Log (MPL) governance and observability
+// SAP CPI guideline compliance:
+// 1. Safe access to MessageLogFactory through the safe-navigation operator.
+// 2. Business identification with addCustomHeaderProperty for monitor search.
+// 3. Custom MPL status for operational visibility (COMPLETED_WITH_WARNINGS).
+// 4. Conditional attachments: addAttachmentAsString guarded to avoid saturating the database.
 // ============================================================================
 ${messageImport}
 import groovy.transform.Field
@@ -828,20 +828,20 @@ import groovy.transform.Field
 @Field final String STATUS_WARNING = "COMPLETED_WITH_WARNINGS"
 
 Message processData(Message message) {
-    // 1. Obtención segura del MessageLog para el exchange actual
+    // 1. Safely obtain the MessageLog for the current exchange
     def messageLog = messageLogFactory?.getMessageLog(message)
     if (messageLog != null) {
-        // 2. Extracción de clave de negocio con fallback
+        // 2. Extract the business key with a fallback
         def businessId = message.getHeader("SAP_ApplicationID") ?: message.getProperty("BusinessKey") ?: "N/A"
         messageLog.addCustomHeaderProperty("BusinessKey", businessId.toString())
 
-        // 3. Configuración de estado visual de advertencia si existen alertas funcionales
+        // 3. Set a visual warning status when there are functional alerts
         def hasWarnings = message.getProperty("HasValidationWarnings") == "true"
         if (hasWarnings) {
             message.setHeader("SAP_MessageProcessingLogCustomStatus", STATUS_WARNING)
         }
 
-        // 4. Adjunto de traza condicionado para evitar crecimiento descontrolado de la BD
+        // 4. Conditional trace attachment to avoid uncontrolled database growth
         def logPayload = message.getProperty("EnablePayloadAttachment") == "true"
         if (logPayload) {
             def snapshot = message.getProperty("ErrorSnapshot") ?: "Snapshot de ejecucion"
@@ -881,11 +881,11 @@ Message processData(Message message) {
     case 'oauth-token-inject':
       code = customComments
         ? `// ============================================================================
-// PATRÓN: Inyección y Verificación Proactiva de Token OAuth 2.0
-// Cumplimiento de Directrices SAP CPI:
-// 1. Verificación proactiva de caducidad con margen de seguridad (60 segundos).
-// 2. Control de flujo de integración mediante la propiedad RequiresTokenRefresh.
-// 3. Inyección segura de cabecera Authorization Bearer sin exponer secretos en trazas.
+// PATTERN: Proactive OAuth 2.0 token check and injection
+// SAP CPI guideline compliance:
+// 1. Proactive expiry check with a safety margin (60 seconds).
+// 2. Integration flow control through the RequiresTokenRefresh property.
+// 3. Safe injection of the Authorization Bearer header without exposing secrets in traces.
 // ============================================================================
 ${messageImport}
 import groovy.transform.Field
@@ -894,19 +894,19 @@ import java.time.Instant
 @Field final String BEARER_PREFIX = "Bearer "
 
 Message processData(Message message) {
-    // 1. Recuperar token en caché y marca temporal de caducidad
+    // 1. Retrieve the cached token and its expiry timestamp
     def accessToken = message.getProperty("OAuth_AccessToken")
     def expiresAt = message.getProperty("OAuth_ExpiresAt")
 
-    // 2. Comparación en epoch seconds con 60s de margen para renovar antes del vencimiento
+    // 2. Compare in epoch seconds with a 60 s margin to renew before expiry
     long now = Instant.now().getEpochSecond()
     long expiryTime = expiresAt ? Long.parseLong(expiresAt.toString()) : 0L
 
     if (!accessToken || now >= (expiryTime - 60)) {
-        // Token caducado o ausente: activar flag para invocar subproceso de refresco OAuth
+        // Expired or missing token: raise the flag to call the OAuth refresh subprocess
         message.setProperty("RequiresTokenRefresh", "true")
     } else {
-        // Token válido: inyectar cabecera Authorization Bearer
+        // Valid token: inject the Authorization Bearer header
         message.setHeader("Authorization", BEARER_PREFIX + accessToken.toString().trim())
         message.setProperty("RequiresTokenRefresh", "false")
     }
@@ -940,11 +940,11 @@ Message processData(Message message) {
     case 'dynamic-routing-header':
       code = customComments
         ? `// ============================================================================
-// PATRÓN: Enrutamiento Dinámico por Cabeceras (ProcessDirect)
-// Cumplimiento de Directrices SAP CPI:
-// 1. Enrutamiento desacoplado mediante la cabecera CamelProcessDirectAddress.
-// 2. Fallback determinista para evitar fallos de enrutamiento no contemplados.
-// 3. Trazabilidad completa registrando TargetRouteAddress en properties.
+// PATTERN: Dynamic routing by headers (ProcessDirect)
+// SAP CPI guideline compliance:
+// 1. Decoupled routing through the CamelProcessDirectAddress header.
+// 2. Deterministic fallback to avoid unhandled routing failures.
+// 3. Full traceability by recording TargetRouteAddress in properties.
 // ============================================================================
 ${messageImport}
 import groovy.transform.Field
@@ -954,11 +954,11 @@ import groovy.transform.Field
 @Field final String ROUTE_CRM = "/cpi/route/crm"
 
 Message processData(Message message) {
-    // 1. Obtener identificador del sistema destino desde Header o Property
+    // 1. Get the target system identifier from a Header or Property
     def targetSystem = message.getHeader("TargetSystem") ?: message.getProperty("TargetSystem") ?: ""
     String destinationAddress
 
-    // 2. Mapeo determinista con ruta fallback por defecto
+    // 2. Deterministic mapping with a default fallback route
     switch (targetSystem.toString().toUpperCase()) {
         case "S4":
         case "S4HANA":
@@ -973,7 +973,7 @@ Message processData(Message message) {
             break
     }
 
-    // 3. Asignar dirección ProcessDirect para el adaptador dinámico Camel
+    // 3. Assign the ProcessDirect address for the dynamic Camel adapter
     message.setHeader("CamelProcessDirectAddress", destinationAddress)
     message.setProperty("TargetRouteAddress", destinationAddress)
     return message
@@ -1014,11 +1014,11 @@ Message processData(Message message) {
     case 'base64-attachment':
       code = customComments
         ? `// ============================================================================
-// PATRÓN: Decodificación y Gestión de Adjuntos Binarios Base64
-// Cumplimiento de Directrices SAP CPI:
-// 1. Decodificación nativa con java.util.Base64 de alto rendimiento y bajo consumo heap.
-// 2. Inyección de byte[] en el cuerpo sin corrupción de codificación de caracteres.
-// 3. Configuración explícita de cabeceras MIME y Content-Disposition para downstream.
+// PATTERN: Base64 binary attachment decoding and handling
+// SAP CPI guideline compliance:
+// 1. Native decoding with java.util.Base64, fast and light on heap.
+// 2. byte[] injection into the body without character-encoding corruption.
+// 3. Explicit MIME and Content-Disposition headers for downstream consumers.
 // ============================================================================
 ${messageImport}
 import groovy.transform.Field
@@ -1028,10 +1028,10 @@ import java.util.Base64
 @Field final String ATTACHMENT_MIME = "application/pdf"
 
 Message processData(Message message) {
-    // 1. Obtener contenido codificado en Base64 desde el exchange
+    // 1. Get the Base64-encoded content from the exchange
     def base64Content = message.getProperty("Base64Document") ?: ""
     if (base64Content) {
-        // 2. Decodificar directamente a byte[] nativo
+        // 2. Decode straight to a native byte[]
         byte[] decodedBytes = Base64.getDecoder().decode(base64Content.toString().trim())
         message.setBody(decodedBytes)
         message.setHeader("Content-Type", ATTACHMENT_MIME)
@@ -1064,12 +1064,12 @@ Message processData(Message message) {
     default:
       code = customComments
         ? `// ============================================================================
-// PATRÓN: JSON Streaming con JsonSlurperClassic y JsonOutput
-// Cumplimiento de Directrices SAP CPI:
-// 1. Streaming anti-OOM: Reader directo del body sin materializar a String en Heap.
-// 2. Parser seguro: JsonSlurperClassic evita fugas de memoria y proxies no serializables.
-// 3. Manejo de tiempo: ZoneId UTC explícito para neutralizar desvíos de reloj.
-// 4. Observabilidad: addCustomHeaderProperty condicional con comprobación de nulidad.
+// PATTERN: JSON streaming with JsonSlurperClassic and JsonOutput
+// SAP CPI guideline compliance:
+// 1. Anti-OOM streaming: read the body as a Reader without materializing a String on the heap.
+// 2. Safe parser: JsonSlurperClassic avoids memory leaks and non-serializable proxies.
+// 3. Time handling: explicit UTC ZoneId to neutralize clock drift.
+// 4. Observability: conditional addCustomHeaderProperty with a null check.
 // ============================================================================
 ${messageImport}
 import groovy.json.JsonSlurperClassic
@@ -1084,28 +1084,28 @@ import java.time.format.DateTimeFormatter
 @Field final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneId.of("UTC"))
 
 Message processData(Message message) {
-    // 1. Obtener Reader para streaming sin cargar el payload completo en memoria heap
+    // 1. Get a Reader to stream without loading the whole payload into heap memory
     Reader bodyReader = message.getBody(java.io.Reader)
     try {
         if (bodyReader == null) {
             throw new IllegalArgumentException("Payload vacio recibido en el mensaje.")
         }
-        // 2. Parseo seguro con JsonSlurperClassic compatible con Java Collections
+        // 2. Safe parsing with JsonSlurperClassic, compatible with Java collections
         def parsedJson = new JsonSlurperClassic().parse(bodyReader)
         parsedJson.processedAt = ISO_FORMATTER.format(Instant.now())
         parsedJson.source = SOURCE_SYSTEM
 
-        // 3. Serialización de salida segura y asignación de Content-Type
+        // 3. Safe output serialization and Content-Type assignment
         message.setBody(JsonOutput.toJson(parsedJson))
         message.setHeader("Content-Type", "application/json; charset=utf-8")
 
-        // 4. Observabilidad en MPL con comprobación de MessageLogFactory
+        // 4. MPL observability with a MessageLogFactory check
         def messageLog = messageLogFactory?.getMessageLog(message)
         if (messageLog != null && parsedJson.orderId != null) {
             messageLog.addCustomHeaderProperty("OrderId", parsedJson.orderId.toString())
         }
     } finally {
-        // 5. Cierre defensivo del Stream para liberar descriptores de E/S
+        // 5. Defensive stream close to release I/O descriptors
         bodyReader?.close()
     }
     return message
@@ -1150,7 +1150,7 @@ Message processData(Message message) {
   }
 
   if (customComments) {
-    // Estándar de documentación: el banner de la plantilla se sustituye por la cabecera canónica.
+    // Documentation standard: the template banner is replaced by the canonical header.
     code = code.replace(/^\/\/ =+\n(?:\/\/.*\n)*?\/\/ =+\n/, '');
     const doc = TEMPLATE_DOCS[pattern];
     const meta = inferGroovyDocMeta(code, { groovyVersion, summary: doc.summary, why: doc.why, date: options.date });

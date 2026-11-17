@@ -98,7 +98,7 @@ If `inspect-iflow-zip.mjs` detects Groovy scripts in `src/main/resources/script/
 - `diff-iflow-zip.mjs` compara por **hash de contenido**, no por tamaño: un cambio de igual longitud (timeout 1000→2000) se reporta. Lista pasos añadidos/eliminados, parámetros eliminados y la versión del manifest en consola, `--json` y PDF.
 - La remediación `--fix timeouts` encuentra el canal receptor tanto por `sourceRef` como por `targetRef`, y es idempotente.
 - `parseManifestContent` devuelve `symbolicName` sin directivas y `symbolicNameDirectives` (p. ej. `['singleton:=true']`).
-- La consola muestra también Basic Auth/CSRF (`IFLW-008`), splitters y routers. Vía MCP, `extractDir` escribe los `.prop` redactados.
+- La consola muestra también Basic Auth/CSRF (`IFLW-008`), splitters, routers, opciones OData sin `$` (`IFLW-009`) y procesos locales que nadie invoca (`IFLW-010`). Vía MCP, `extractDir` escribe los `.prop` redactados.
 - `cpi_get_iflow_endpoints` (MCP) devuelve los endpoints sender/receiver sin valores de `parameters.prop`.
 - `sanitize-iflow-zip.mjs` (LL-027) sustituye URLs, hosts, emails, IPv4, URNs privados, alias de credenciales, secretos y valores de `.prop` (también donde se reutilizan en Groovy, XSD, `.iflw` o `MANIFEST.MF`) por alias consistentes entre varios zips. `--restore` devuelve cada archivo byte a byte (el `MANIFEST.MF`, equivalente semánticamente). `--check` falla si el bundle aún contiene alias.
 

@@ -29,25 +29,25 @@ Va en la **línea 1**, antes de los `import`, para que se vea nada más abrir el
 
 ```groovy
 /**
- * Calcula el importe total del pedido y lo publica en la propiedad TotalAmount.
+ * Calculates the order total and publishes it in the TotalAmount property.
  *
- * Motivo: el redondeo por línea con BigDecimal no se puede hacer en un Content Modifier.
+ * Why: per-line BigDecimal rounding cannot be done in a Content Modifier.
  *
- * Paso Script: Groovy 4 (Script step 2.x) · API v2
+ * Script step: Groovy 4 (Script step 2.x) · API v2
  *
- * Entrada:
- *   - Body: XML Order/Item con @qty y @price (leído como Reader)
- *   - Property SAP_ApplicationID: clave de negocio (opcional).
- * Salida:
+ * Input:
+ *   - Body: XML Order/Item with @qty and @price (read as Reader)
+ *   - Property SAP_ApplicationID: business key (optional).
+ * Output:
  *   - Body: application/xml; charset=utf-8 — OrderSummary
- *   - Property TotalAmount: importe total con 2 decimales.
+ *   - Property TotalAmount: total amount with 2 decimals.
  *   - MPL custom header TotalItems
- * Errores:
- *   - CPI-ERR: payload vacío o no parseable → Exception Subprocess
+ * Errors:
+ *   - CPI-ERR: empty or unparseable payload → Exception Subprocess
  *
- * Historial:
- *   - 1.1.0  2026-11-12  Redondeo HALF_UP por línea.
- *   - 1.0.0  2026-10-01  Versión inicial.
+ * History:
+ *   - 1.1.0  2026-11-12  HALF_UP rounding per line.
+ *   - 1.0.0  2026-10-01  Initial version.
  *
  * @version 1.1.0
  */
@@ -59,19 +59,19 @@ import com.sap.it.script.v2.api.Message
 | Campo | Obligatorio | Formato |
 | :--- | :--- | :--- |
 | Resumen | Sí | Una frase en presente, ≤ 140 caracteres, terminada en punto. Dice **qué** hace, no cómo. |
-| `Motivo:` | Recomendado | Por qué hace falta un script y no un paso estándar. |
-| `Paso Script:` | Sí | `Groovy 2.4 (Script step 1.x)` o `Groovy 4 (Script step 2.x)`, más `· API v1` o `· API v2`. Debe coincidir con `--groovy` y con el `import` del `Message`. |
-| `Entrada:` | Sí | Lista `- Tipo Nombre: descripción`. Tipos: `Body`, `Header`, `Property`, `Adjuntos`, `Security Material`, `Value Mapping`, `Partner Directory`. `- Ninguna.` si no aplica. |
-| `Salida:` | Sí | Igual que Entrada. Tipos: `Body` (con su Content-Type), `Header`, `Property`, `MPL custom header`, `MPL adjunto`. `- Sin cambios en el mensaje.` si no aplica. |
-| `Errores:` | Si el código lanza excepciones | `- CPI-ERR: causa → Exception Subprocess` o `- Excepción: causa`. |
-| `Historial:` | Sí | `- X.Y.Z  AAAA-MM-DD  Qué cambió.` La **más reciente primero**. |
+| `Why:` | Recomendado | Por qué hace falta un script y no un paso estándar. |
+| `Script step:` | Sí | `Groovy 2.4 (Script step 1.x)` o `Groovy 4 (Script step 2.x)`, más `· API v1` o `· API v2`. Debe coincidir con `--groovy` y con el `import` del `Message`. |
+| `Input:` | Sí | Lista `- Type Name: description`. Tipos: `Body`, `Header`, `Property`, `Attachments`, `Security Material`, `Value Mapping`, `Partner Directory`. `- None.` si no aplica. |
+| `Output:` | Sí | Igual que Input. Tipos: `Body` (con su Content-Type), `Header`, `Property`, `MPL custom header`, `MPL attachment`. `- No changes to the message.` si no aplica. |
+| `Errors:` | Si el código lanza excepciones | `- CPI-ERR: cause → Exception Subprocess` o `- Exception: cause`. |
+| `History:` | Sí | `- X.Y.Z  YYYY-MM-DD  What changed.` La **más reciente primero**. |
 | `@version` | Sí | Última línea. `X.Y.Z`, igual a la primera entrada del historial. |
 
 Reglas adicionales:
-- Las etiquetas van en español (`Entrada`, `Salida`…). También se aceptan sus equivalentes en inglés (`Input`, `Output`, `Errors`, `History`, `Script step`), pero no se mezclan los dos idiomas en un mismo archivo.
-- El texto libre va en el idioma del proyecto o del usuario. Usa siempre el mismo dentro del archivo.
-- **Autoría**: si se pide, `@author` con un rol o equipo ("Equipo Integración"), nunca un email ni un nombre de cliente.
-- No pongas valores de `.prop`, URLs reales, IPs, usuarios ni alias de credenciales de producción. Describe el sistema por su rol ("API de pedidos del ERP").
+- **Idioma: todo comentario va en inglés**, sea cual sea el idioma de la conversación o del proyecto: etiquetas de la cabecera (`Why`, `Script step`/`Engine`, `Input`, `Output`, `Parameters`, `Errors`, `History`), resumen, descripciones, Groovydoc y comentarios `//` o `<!-- -->`. Los mensajes de las excepciones y los textos que ve el usuario final no son comentarios y siguen el idioma del proyecto.
+- Las etiquetas en español (`Motivo`, `Paso Script`, `Entrada`, `Salida`, `Errores`, `Historial`, `Motor`, `Parámetros`) siguen **reconocidas** para poder leer scripts heredados, pero lo que se genera o se refactoriza se escribe en inglés y `DOC_COMMENT_LANGUAGE` marca el texto en español cuando se valida con `--docs`. No se mezclan los dos idiomas en un mismo archivo.
+- **Autoría**: si se pide, `@author` con un rol o equipo ("Integration Team"), nunca un email ni un nombre de cliente.
+- No pongas valores de `.prop`, URLs reales, IPs, usuarios ni alias de credenciales de producción. Describe el sistema por su rol ("ERP orders API").
 
 ### Esqueleto automático
 
@@ -82,7 +82,7 @@ node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs <script.groovy>
 node skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs <script.groovy> --doc-header --groovy 4 --out <nuevo.groovy>
 ```
 
-El esqueleto rellena `Entrada`, `Salida` y `Errores` con lo que encuentra en el código (`getProperty`, `getHeader`, `getBody`, `setBody` + `Content-Type`, `setProperty`, `setHeader`, `addCustomHeaderProperty`, `addAttachmentAsString`, `getUserCredential`, `throw`). Lo que no puede deducir lo deja como `TODO`, y `--docs` no aprueba la cabecera hasta que se completa (`DOC_PLACEHOLDER`). Añade tú la descripción de cada elemento y el `Motivo:`.
+El esqueleto rellena `Input`, `Output` y `Errors` con lo que encuentra en el código (`getProperty`, `getHeader`, `getBody`, `setBody` + `Content-Type`, `setProperty`, `setHeader`, `addCustomHeaderProperty`, `addAttachmentAsString`, `getUserCredential`, `throw`). Lo que no puede deducir lo deja como `TODO`, y `--docs` no aprueba la cabecera hasta que se completa (`DOC_PLACEHOLDER`). Añade tú la descripción de cada elemento y el `Why:`.
 
 ---
 
@@ -92,12 +92,12 @@ Todo método declarado en el script, salvo `processData`, lleva un bloque `/** .
 
 ```groovy
 /**
- * Recorta un valor a una longitud máxima sin fallar con null.
+ * Truncates a value to a maximum length without failing on null.
  *
- * @param value texto de entrada (puede ser null)
- * @param max   longitud máxima
- * @return el texto recortado, o null si value es null
- * @throws IllegalArgumentException si max es negativo
+ * @param value input text (may be null)
+ * @param max   maximum length
+ * @return the truncated text, or null if value is null
+ * @throws IllegalArgumentException if max is negative
  */
 String truncate(String value, int max) {
 ```
@@ -111,12 +111,12 @@ String truncate(String value, int max) {
 ## 4. Comentarios en línea (`//`)
 
 **Sí:**
-- Explican el **porqué**: una regla de negocio, una limitación de CPI o un valor elegido. Ejemplo: `// 60 s de margen: el token caduca en el receptor antes que aquí.`
+- Explican el **porqué**: una regla de negocio, una limitación de CPI o un valor elegido. Ejemplo: `// 60 s of margin: the token expires at the receiver before it does here.`
 - Van en su propia línea, encima del código, con la misma sangría que el código.
 - Los pasos numerados (`// 1. ...`, `// 2. ...`) están permitidos en scripts largos para seguir el flujo.
 
 **No:**
-- Repetir el código (`// asigna la propiedad` encima de `setProperty`).
+- Repetir el código (`// sets the property` encima de `setProperty`).
 - Dejar código comentado (`DOC_COMMENTED_OUT_CODE`). El historial ya está en Git y en las versiones del artefacto.
 - Dejar `TODO` o `FIXME` en lo que se entrega (`DOC_TODO_LEFT`).
 - Usar banners decorativos `// =====` (`DOC_BANNER_COMMENT`). Esa información va en la cabecera.
@@ -132,29 +132,29 @@ Es un comentario XML entre `<?xml ...?>` y `<xsl:stylesheet>`. **No** uses `<xsl
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Agrupa los registros por OrderId y añade el sistema emisor.
+  Groups the records by OrderId and adds the sending system.
 
-  Motor: XSLT 2.0 (Saxon-HE)
+  Engine: XSLT 2.0 (Saxon-HE)
 
-  Entrada:
-    - Body: XML con //Record (OrderId, ItemId, Quantity).
-  Parámetros:
-    - exchange: inyectado por CPI.
-    - targetCurrency: property TargetCurrency, moneda de salida.
-  Salida:
+  Input:
+    - Body: XML with //Record (OrderId, ItemId, Quantity).
+  Parameters:
+    - exchange: injected by CPI.
+    - targetCurrency: property TargetCurrency, output currency.
+  Output:
     - Body: XML BatchedOrders/Order/Items/Item.
 
-  Historial:
-    - 1.0.0  2026-11-12  Versión inicial.
+  History:
+    - 1.0.0  2026-11-12  Initial version.
 
   @version 1.0.0
 -->
 <xsl:stylesheet version="2.0" ...>
 ```
 
-- `Motor:` debe coincidir con el atributo `version` de la hoja (o con `--engine`): `XSLT 1.0 (Xalan)` o `XSLT 2.0/3.0 (Saxon-HE)`.
-- `Parámetros:` es obligatorio si hay algún `xsl:param` además de `exchange`, y debe nombrarlos todos.
-- `Errores:` es obligatorio si se usa `<xsl:message terminate="yes">`.
+- `Engine:` debe coincidir con el atributo `version` de la hoja (o con `--engine`): `XSLT 1.0 (Xalan)` o `XSLT 2.0/3.0 (Saxon-HE)`.
+- `Parameters:` es obligatorio si hay algún `xsl:param` además de `exchange`, y debe nombrarlos todos.
+- `Errors:` es obligatorio si se usa `<xsl:message terminate="yes">`.
 - Las plantillas complejas llevan un `<!-- ... -->` de una línea encima que explique el porqué. No dejes plantillas comentadas.
 
 ---
@@ -166,7 +166,7 @@ Es un comentario XML entre `<?xml ...?>` y `<xsl:stylesheet>`. **No** uses `<xsl
 - **MINOR**: funcionalidad nueva compatible, como una salida opcional nueva.
 - **MAJOR**: cambio de contrato, por ejemplo una entrada nueva obligatoria, un formato de body distinto o una propiedad que se elimina.
 
-Cada cambio añade una entrada **al principio** de `Historial:` y actualiza `@version`. Si el iFlow tiene versión propia, puedes citarla en la entrada del historial.
+Cada cambio añade una entrada **al principio** de `History:` y actualiza `@version`. Si el iFlow tiene versión propia, puedes citarla en la entrada del historial.
 
 ---
 
@@ -199,6 +199,7 @@ Cada cambio añade una entrada **al principio** de `Historial:` y actualiza `@ve
 | `DOC_MISSING_HEADER` / `XSLT_DOC_MISSING_HEADER` | MEDIUM | No hay cabecera al principio del archivo. |
 | `DOC_PLACEHOLDER` / `XSLT_DOC_PLACEHOLDER` | MEDIUM | La cabecera tiene `TODO`, `FIXME`, `TBD` o `XXX`. |
 | `DOC_RUNTIME_MISMATCH` / `XSLT_DOC_RUNTIME_MISMATCH` | MEDIUM (LOW si está incompleto) | `Paso Script:` o `Motor:` no coinciden con el código o con `--groovy`/`--engine`. |
+| `DOC_COMMENT_LANGUAGE` / `XSLT_DOC_COMMENT_LANGUAGE` | MEDIUM | Comentario escrito en español (los comentarios van siempre en inglés). |
 | `DOC_SECRET_IN_COMMENT` | CRITICAL | Password, token, API key o `Bearer`/`Basic` con valor en un comentario. |
 | `DOC_SENSITIVE_COMMENT` | HIGH | Email, URL de un host real o IP en un comentario. |
 | `DOC_HEADER_NOT_FIRST` | LOW | La cabecera existe pero no está en la línea 1. |
