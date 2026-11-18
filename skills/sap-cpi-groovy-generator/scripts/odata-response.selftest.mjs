@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Self-test for the OData response rules of validate-groovy.mjs (LL-030, LL-034).
+// Self-test for the OData response rules of validate-groovy.mjs (LL-030, LL-035).
 // Prints one JSON object that verify-all.mjs checks.
 import { lintGroovyScript } from './validate-groovy.mjs';
 

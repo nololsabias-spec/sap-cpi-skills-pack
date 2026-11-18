@@ -600,7 +600,7 @@ export function lintGroovyScript(code, fileName = 'Script.groovy', options = {})
     );
   }
 
-  // 12c. OData success detected only by literal 200/201 (LL-034, MEDIUM -5): PATCH and DELETE answer 204.
+  // 12c. OData success detected only by literal 200/201 (LL-035, MEDIUM -5): PATCH and DELETE answer 204.
   const literalSuccess = /HTTP\/1\.1 20[01]\b|<statusCode>\s*20[01]\s*<\/statusCode>/;
   const anyTwoXx = /204|2\\d\\d|2\[0-9\]|startsWith\s*\(\s*["']2["']\s*\)|\b(?:200|2\d\d)\s*\.\.\s*(?:299|2\d\d)\b/;
   if (literalSuccess.test(cleanCode) && !anyTwoXx.test(cleanCode)) {
