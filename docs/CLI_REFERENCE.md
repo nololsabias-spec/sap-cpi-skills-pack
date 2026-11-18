@@ -79,6 +79,21 @@ node skills/sap-cpi-zip-inspector/scripts/diff-iflow-zip.mjs --demo [--pdf <diff
 - `--show-prop-values`: Muestra los valores reales de los parámetros (por defecto `[REDACTED]`).
 - `--json`: Salida estructurada de cambios topológicos, archivos y parámetros.
 
+### 2.1b2. `check-script-dependencies.mjs` (`sap-cpi-zip-inspector`)
+Antes de transportar una versión nueva de una Script Collection, comprueba que todos los iFlows que la usan siguen teniendo sus scripts.
+
+```bash
+node skills/sap-cpi-zip-inspector/scripts/check-script-dependencies.mjs --sc <collection.zip> --iflow <a.zip> [--iflow <b.zip> ...] [--baseline <collection-anterior.zip>] [--json]
+node skills/sap-cpi-zip-inspector/scripts/check-script-dependencies.mjs --demo [--json]
+```
+
+- `MISSING` (CRITICAL): un paso Script apunta a un script que la collection no tiene; el despliegue falla.
+- `REMOVED` (CRITICAL, con `--baseline`): el script estaba en la versión anterior, se ha quitado y algún iFlow lo sigue usando.
+- `CHANGED` (WARNING, con `--baseline`): el script cambia entre versiones; hay que probar los iFlows que lo usan. Los finales de línea y los espacios al final no cuentan como cambio.
+- `UNUSED` (INFO): ningún iFlow de los indicados lo usa; candidato a limpiar (comprueba antes que no lo usa otro iFlow que no hayas pasado).
+- Solo se cruzan los pasos cuyo `scriptBundleId` coincide con el `Bundle-SymbolicName` de la collection; los scripts locales y los de otras collections se listan aparte.
+- Exit 1 si hay `MISSING` o `REMOVED`; exit 0 en otro caso (siempre 0 con `--demo`, que incluye fallos a propósito). Trabaja igual sobre bundles limpiados con `sanitize-iflow-zip.mjs`.
+
 ### 2.1c. `sanitize-iflow-zip.mjs` (`sap-cpi-zip-inspector`)
 
 Limpieza reversible de bundles reales antes de compartirlos con un agente IA:

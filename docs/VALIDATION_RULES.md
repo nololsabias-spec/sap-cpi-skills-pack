@@ -162,6 +162,18 @@ Aplicadas por `export-api-client.mjs`:
 | `XSLT-001` | `CRITICAL` | **XSLT bien formado y prefijos declarados** | Parser XML real. La raíz debe ser `xsl:stylesheet`/`xsl:transform` con el namespace XSL y `version`. Los prefijos usados en elementos y en XPath deben estar declarados (se ignoran literales y ejes). |
 | `XSLT-002` | `HIGH` | **Construcciones por motor (`--engine 1.0/2.0/3.0`)** | En 1.0: elementos 2.0/3.0, `as`, `#all`, funciones XPath 2.0, `if/then/else`, `for`, `some/every`, `instance of`, `xs:*()`, `*:name`, `to/except/intersect` (cada uno una vez y con línea). En 2.0: elementos solo 3.0. `json-to-xml()` y otras funciones 3.0 exigen 3.0. |
 | `XSLT-003` | `HIGH` | **Variables y parámetros** | `$var` sin declarar (teniendo en cuenta `for`/`let`/`some`/`every`) y `xsl:param`/`xsl:variable` duplicados en el mismo ámbito son errores. `<xsl:param name="exchange"/>` debe ser de nivel superior. |
+| `MESSAGE_GETMESSAGELOG` | `HIGH` | **`message.getMessageLog()` no existe** | La interfaz `Message` no tiene ese método: lanza `MissingMethodException` y, si un catch la silencia, los custom headers del MPL no se escriben nunca. Usa `messageLogFactory?.getMessageLog(message)` (LL-030). |
+| `ODATA_SUCCESS_ONLY_200_201` | `MEDIUM` | **Éxito OData solo con 200/201** | Un script que da por buena la respuesta solo si contiene `HTTP/1.1 200/201` o `<statusCode>200/201</statusCode>`, sin contemplar 204 ni 2xx, trata como error un PATCH o DELETE correcto. Recoge todos los códigos y exige que todos sean 2xx (LL-035). |
 | `GROOVY-LIT-001` | `MEDIUM` | **Literales ignorados** | Las reglas estructurales de `validate-groovy` se evalúan sobre el código con los literales String enmascarados (`stripStringLiterals`), así que un patrón prohibido dentro de un texto no se marca. |
 | `DOC-001` | `MEDIUM` | **Secciones con contenido** | `--validate-doc` exige las 8 secciones con contenido real: una sección vacía o con TBD, todo, pendiente o n/a es un error (exit 1). |
 | `CLI-001` | `LOW` | **Contrato CLI uniforme** | `--help` → exit 0. Sin argumentos, o con flag desconocido o sin valor → exit 2 y uso en stderr. Entrada inválida → exit 1 con mensaje, nunca stack trace. Importar el módulo no imprime nada. |
+
+## 9. Dependencias de Script Collections compartidas (`check-script-dependencies.mjs`, LL-037)
+
+| Código | Severidad | Regla | Descripción Técnica |
+| :--- | :--- | :--- | :--- |
+| `DEP-MISSING` | `CRITICAL` | **Script que la collection no tiene** | Un paso Script con `scriptBundleId` igual al `Bundle-SymbolicName` de la collection apunta a un fichero que no está en `src/main/resources/script/`. El despliegue del iFlow falla. |
+| `DEP-REMOVED` | `CRITICAL` | **Script quitado que se sigue usando** | Con `--baseline`: el script existía en la versión anterior, se ha quitado y algún iFlow lo sigue llamando. |
+| `DEP-CHANGED` | `WARNING` | **Script cambiado** | Con `--baseline`: el contenido cambia (sin contar finales de línea ni espacios al final). Cada iFlow que lo usa debe probarse con la versión nueva. |
+| `DEP-UNUSED` | `INFO` | **Script sin uso** | Ningún iFlow de los indicados lo llama. Antes de quitarlo, comprueba que no lo usa otro iFlow que no se haya pasado. |
+

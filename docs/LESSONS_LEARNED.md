@@ -4,6 +4,40 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 
 ---
 
+## Cómo registrar una lección
+
+Una lección sirve para que el mismo error no vuelva a ocurrir. Debe poder leerse sin conocer el proyecto de origen:
+- **Anonimiza siempre**: ni nombres de clientes o proyectos, ni URLs, hosts o cuentas reales, ni credenciales, ni valores de `.prop`, ni identificadores de documentos. Usa marcadores genéricos (`<Objeto>`, `<host-virtual>`).
+- Abstrae el principio técnico, no el caso. Si la regla se puede comprobar por código, codifícala en el script CLI correspondiente y cita su identificador.
+- Cuando cambie una regla vigente, corrige también las lecciones antiguas que la contradigan.
+
+```markdown
+### `LL-XXX` — <Título corto del error o patrón>
+- **Síntoma**: <mensaje de error exacto o comportamiento observado>
+- **Causa Raíz Técnica**: <por qué ocurre en SAP CPI o en el sistema conectado>
+- **Solución Codificada**: <regla o patrón añadido y dónde; si no se puede codificar, la lista de comprobación>
+- **Reglas generales**: <qué hacer la próxima vez, en una o dos frases por regla>
+- **Archivos**: <archivos del pack actualizados>
+```
+
+---
+
+## Índice por temas
+
+Las entradas `LL-004` a `LL-015` son registros históricos de funcionalidad (qué se añadió al pack y por qué), no errores concretos, y se conservan tal cual. Las cifras que citan (herramientas MCP, skills, reglas) son las de la fecha de cada entrada.
+
+| Tema | Lecciones |
+| :--- | :--- |
+| Empaquetado OSGi, ZIP y bundles | `LL-001`, `LL-016`, `LL-018`, `LL-021`, `LL-022`, `LL-025`, `LL-027`, `LL-037` |
+| Scripts Groovy: compilación, runtime y estilo | `LL-002`, `LL-003`, `LL-014`, `LL-017`, `LL-026`, `LL-028`, `LL-030`, `LL-031`, `LL-035` |
+| XSD, XSLT, mapeos `.mmap` y expresiones regulares | `LL-004`, `LL-005`, `LL-020`, `LL-023`, `LL-024`, `LL-026` |
+| Servidor MCP y contrato de las herramientas CLI | `LL-006`, `LL-009`, `LL-010`, `LL-011`, `LL-012`, `LL-013`, `LL-019` |
+| Datos de prueba (mock) | `LL-007`, `LL-015`, `LL-025` |
+| APIs, OData, Salesforce y mover un iFlow de entorno | `LL-029`, `LL-030`, `LL-032`, `LL-033`, `LL-034`, `LL-035`, `LL-036`, `LL-038` |
+| Privacidad y datos sensibles | `LL-016`, `LL-027` |
+
+---
+
 ## Registro de Lecciones Aprendidas
 
 ### `LL-001` — Error de Importación OSGi: `Upload the artifact failed. The project must contain a valid manifest file`
@@ -21,7 +55,8 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 - **Síntoma en SAP CPI**: El iFlow falla en ejecución (`MissingMethodException`) dentro de un script Groovy al invocar `bodyReader.getText('UTF-8')` tras hacer `message.getBody(java.io.Reader)`.
 - **Causa Raíz Técnica**: En Java y Groovy 2.4, las clases `Reader`, `BufferedReader` y `StringReader` ya son flujos de caracteres decodificados y su método `.getText()` **no acepta argumentos de charset** (a diferencia de `InputStream.getText('UTF-8')`).
 - **Solución Codificada**:
-  - Usar `bodyReader.getText()` sin argumentos, pasar el `Reader` directamente a `new JsonSlurper().parse(bodyReader)` / `new XmlSlurper().parse(bodyReader)`, o usar `message.getBody(String)`.
+  - Usar `bodyReader.getText()` sin argumentos, o pasar el `Reader` directamente a `new JsonSlurperClassic().parse(bodyReader)` / `new XmlSlurper(false, false).parse(bodyReader)`.
+  - **Actualización**: ya no se recomienda `message.getBody(String)` (`HEAP_OOM_GETBODY_STRING`, CRITICAL) ni `JsonSlurper` estándar (`JSONSLURPER_STANDARD_LEAK`, HIGH): el validador los rechaza. Ver `docs/VALIDATION_RULES.md`.
   - Se añadió la regla `READER_GETTEXT_CHARSET_ERROR` (`CRITICAL -30`) en `skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs`.
 
 ---
@@ -31,7 +66,7 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 - **Nota (corregida en `LL-017`)**: desde el Script step 2.0, SAP CPI también ofrece **Groovy 4**, donde ocurre justo lo contrario. La versión no se infiere: se indica con `--groovy 2.4|4`.
 - **Causa Raíz Técnica**: El runtime Groovy 2.4 de SAP CPI, donde `XmlSlurper` y `XmlParser` pertenecen al paquete **`groovy.util.XmlSlurper`** y **`groovy.util.XmlParser`** (`groovy.xml.XmlSlurper` no existe en Groovy 2.4; Groovy 3 añadió `groovy.xml.*` manteniendo `groovy.util.*` como obsoleto, y Groovy 4 eliminó `groovy.util.Xml*`).
 - **Solución Codificada**:
-  - Importar siempre `groovy.util.XmlSlurper` y `groovy.util.XmlParser`.
+  - Con Groovy 2.4, importar `groovy.util.XmlSlurper` y `groovy.util.XmlParser`. Con Groovy 4 es `groovy.xml.XmlSlurper` (ver `LL-017`); la versión se indica con `--groovy 2.4|4`, no se infiere.
   - Se añadió la regla `GROOVY24_INVALID_XMLSLURPER_IMPORT` (`CRITICAL -30`) en `skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs`.
 
 ---
@@ -43,17 +78,6 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
   2. **Handler Central de Tokens (`Timer` + `LocalIntegrationProcess` + Global `Data Store`)**: Refresco programado de credenciales OAuth almacenadas en un `DataStoreOperations` con `<value>global</value>` y `<value>true</value>` en `encrypt`.
   3. **XSD Envelope Tolerante**: En esquemas `.xsd` para Message Mapping de payloads dinámicos o logs, usar `minOccurs="0" nillable="true"` en campos hoja para evitar que la ausencia de un nodo aborte el mapeo.
   4. **Detección de `scriptBundleId`, `.mmap` y `.xsd`**: `inspect-iflow-zip.mjs` cataloga ahora mapeos gráficos (`.mmap`), esquemas (`.xsd`), colecciones externas referenciadas mediante `scriptBundleId` y posibles variables sin `def`/tipo en Groovy (`UNDECLARED_BINDING_VARIABLE`).
-
----
-
-## Plantilla para Nuevas Lecciones
-
-```markdown
-### `LL-XXX` — <Título corto del error o patrón>
-- **Síntoma en SAP CPI**: <Mensaje de error exacto o comportamiento observado>
-- **Causa Raíz Técnica**: <Explicación técnica de por qué ocurre en SAP CPI>
-- **Solución Codificada**: <Regla añadida en los scripts CLI y archivos actualizados>
-```
 
 ---
 
@@ -118,6 +142,7 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 ---
 
 ### `LL-011` — Expansión MCP a 20 Herramientas Granulares: Mock Suite Packaging, Matriz de Endpoints Inbound/Outbound, Lector de Archivos en Memoria y Plantillas Canónicas Groovy 100/100
+- **Nota**: «20 herramientas» es la cifra de la fecha de esta entrada; el número actual figura en el `README` y lo imprime `verify-all.mjs`.
 - **Contexto**: Solicitud de granularidad técnica avanzada en el servidor MCP local para responder a consultas específicas de desarrollo e integración sin requerir flujos de trabajo monolíticos.
 - **Aprendizajes y Correcciones Codificadas**:
   1. **Empaquetador de Suites de Mock Data en MCP (`cpi_pack_mock_suite`)**: Se completó la cobertura 100% de las 8 skills en MCP exponiendo la generación de suites de prueba E2E con correlación de identificadores cruzados (Request, Response, Lookup, Error) en archivos `.zip` o JSON.
@@ -285,6 +310,7 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 ### `LL-030` — Un `$batch` OData devuelve 200 aunque falle una operación, y detalles del API de scripts
 - **Síntoma**: un iFlow termina en verde tras un `$batch` cuyas operaciones han fallado con 4xx; el error solo se ve dentro del cuerpo de la respuesta. Un script de comprobación pensado para un POST suelto no registra nada en el monitor porque llama a un método que no existe.
 - **Causa Raíz Técnica**: (1) el envoltorio HTTP del `$batch` es 200 y cada operación lleva su propio `statusCode`; (2) los avisos de negocio viajan en la cabecera `sap-messages` con `numericSeverity` 3 (aviso) o 4 (error) y no son un fallo; (3) `message.getMessageLog()` no existe: el log se obtiene con `messageLogFactory?.getMessageLog(message)`; (4) la respuesta de un GET puede llegar en XML aunque se esperase JSON, según la cabecera `Accept` y el adaptador; (5) las propiedades que lee un Router se comparan como texto (`'true'`), y un nombre ambiguo hace que el flujo vaya a la rama contraria.
+- **Solución Codificada**: patrón F de `canonical-patterns.md` (paso de comprobación de la respuesta del `$batch`) y lista de comprobación de esta lección; el validador de Groovy ya cubre el uso de `JsonSlurperClassic` y la lectura del body por `Reader`.
 - **Reglas generales**: recorre **todos** los `statusCode` de las partes y falla si alguno es ≥ 400; no trates un aviso (severidad 3) como error; deja en el MPL cuántas operaciones fueron correctas; parsea la respuesta aceptando JSON y XML; usa nombres de propiedad cuyo `true` signifique lo que el Router espera y comprueba la condición de cada ruta en una prueba con los dos valores; un caso «no encontrado» que debe decidir un Router se señala con una propiedad (`...Skipped`, motivo) y devolviendo el cuerpo original, no con una excepción.
 - **Archivos**: `skills/sap-cpi-groovy-generator/references/canonical-patterns.md`.
 
@@ -309,3 +335,45 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 - **Reglas generales**: antes de mover un iFlow, inventaria productor, consumidor y Script Collection compartida; usa `http://host-virtual:puerto` con proxy On-Premise y comprueba en el Cloud Connector la entrada exacta (host, puerto, ruta con subrutas) y el Location ID; copia el nombre del bucket completo; elimina de los scripts los valores por defecto que apunten al entorno antiguo (que falle si falta el parámetro); antes de reanudar, vacía las colas JMS y los Data Stores de payloads y cuarentena, y decide de forma explícita si se conserva la marca de última consulta; pausa el productor antes que el consumidor y reanuda al revés; prueba con un modo de prueba que no haga el POST para revisar las referencias generadas.
 - **Archivos**: `docs/LESSONS_LEARNED.md`.
 
+### `LL-034` — `No such column` en un campo propio de Salesforce: el campo, el permiso o el entorno
+- **Síntoma**: una consulta SOQL lanzada desde el adaptador de Salesforce falla con `INVALID_FIELD ... No such column '<Campo>__c' on entity '<Objeto>'`, aunque el nombre está bien escrito y otros campos del mismo objeto funcionan.
+- **Causa Raíz Técnica**: Salesforce usa el mismo mensaje para cuatro situaciones distintas: (1) el campo aún no está creado en **esa** org (los campos no se sincronizan solos entre desarrollo, QA y producción); (2) el campo existe pero el usuario de integración no tiene acceso de lectura por *Field-Level Security*; (3) el canal conecta con una org distinta de la que se cree (otra URL de instancia u otras credenciales); (4) el nombre de API no coincide (falta el sufijo `__c` o hay una errata). Además, el adaptador **omite los campos vacíos** en el XML de salida, así que la ausencia de un campo en una respuesta no prueba que no exista.
+- **Solución Codificada**: no es detectable por código; se deja la lista de comprobación de las reglas generales.
+- **Reglas generales**: (1) confirma primero contra qué org conecta el canal (URL de instancia y credenciales); (2) haz una consulta de control sobre un campo que ya funciona y otra con el campo nuevo: si solo falla la segunda, el resto de la conexión está bien; (3) lista los campos que ve el usuario con la operación de petición personalizada: `GET /services/data/v<versión>/sobjects/<Objeto>/describe` devuelve cada campo con su tipo y sus indicadores `createable` y `updateable`; (4) para distinguir «vacío» de «inexistente» usa `SELECT ... WHERE <Campo> != null`: sin error y con cero filas significa que existe y aún no tiene datos; (5) antes de escribirlo, comprueba en la descripción que `updateable` es `true` y su tipo (fecha o fecha y hora), que decide el formato; (6) no añadas un campo nuevo a la consulta del flujo hasta confirmar que existe y es visible para el usuario de integración: mientras tanto, deja la consulta anterior para no romper cada ejecución.
+- **Archivos**: `docs/LESSONS_LEARNED.md`.
+
+### `LL-035` — Upsert por OData V4 probado en un tenant: campos de solo lectura, 204 y rutas de error que acaban en COMPLETED
+- **Síntoma**: (1) un `$batch` con un PATCH a la posición y otro a la línea responde 422 `RAP_RUNTIME/028 «Read-only fields must not be changed»` y no se aplica ninguna de las dos partes; (2) un script que solo reconocía 200/201 como éxito iba a tratar como error un PATCH o DELETE correcto (204) y no escribía nunca sus custom headers; (3) los errores de negocio terminaban con estado COMPLETED y a veces salían dos mails; (4) en pruebas, un pedido tenía ya muchos documentos creados por la versión anterior, que solo hacía POST.
+- **Causa Raíz Técnica**: (1) un número de acuse de la posición solo se puede informar al crear: en un PATCH es de solo lectura y RAP rechaza el change set entero; (2) la comprobación buscaba los textos `200`/`201` y llamaba a `message.getMessageLog()`, que no existe; (3) las rutas de error de negocio llamaban al proceso de mail y terminaban en un End normal, y después de volver del proceso local se evaluaba otra vez la respuesta, que ya no era OData; (4) elegir el documento más reciente no limpia los anteriores.
+- **Solución Codificada**: `validate-groovy.mjs` añade `MESSAGE_GETMESSAGELOG` (HIGH) y `ODATA_SUCCESS_ONLY_200_201` (MEDIUM), con autotest `odata-response.selftest.mjs` en `verify-all.mjs`; Pattern F de `canonical-patterns.md` amplía la respuesta (todos 2xx), los campos de solo lectura, el emparejado de líneas y los documentos repetidos.
+- **Reglas generales**: en un PATCH envía solo campos actualizables y prueba cada entidad por separado antes de juntarlas en un change set; da éxito solo si todas las partes son 2xx; ordena las líneas existentes por clave antes de emparejarlas y agrupa las entradas repetidas de una misma posición; cuando un proceso local ya notificó un error, márcalo con una propiedad y haz que el Router del proceso que lo llamó la mire **primero**; las condiciones de un Router no deben solaparse (usa un código, `NOT_FOUND`/`NO_CHANGES`, en vez de un booleano compartido); un estado COMPLETED no prueba que el mensaje fuera bien: mira el custom status; antes de activar un upsert en productivo, cuenta cuántos documentos por clave de negocio dejó la versión anterior.
+- **Archivos**: `skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs`, `skills/sap-cpi-groovy-generator/scripts/odata-response.selftest.mjs`, `verify-all.mjs`, `skills/sap-cpi-groovy-generator/SKILL.md`, `skills/sap-cpi-groovy-generator/references/canonical-patterns.md`, `docs/VALIDATION_RULES.md`.
+
+### `LL-036` — Upsert OData V4: crear posiciones y líneas por navegación, borrar líneas sobrantes y reintentar bloqueos
+- **Síntoma**: (1) los mensajes con posiciones que el documento no tenía o con menos líneas que las del sistema solo se podían avisar como actualización parcial; (2) S/4 respondió 423 «You can't edit this instance at the moment. It's currently locked» y el mensaje terminó como error definitivo con mail; (3) una ruta nueva del Router no se ejecutaba porque otra ruta anterior tenía una condición que también se cumplía.
+- **Causa Raíz Técnica**: (1) la API permite crear hijos por la propiedad de navegación del padre y borrar líneas, pero el patrón solo generaba PATCH; (2) un 423 es un bloqueo temporal (otra sesión, o el intento anterior del mismo mensaje) y no un error de datos; (3) el Router evalúa las rutas por orden y la primera condición verdadera gana.
+- **Solución Codificada**: Pattern F de `canonical-patterns.md` amplía el patrón con la creación por navegación (cabecera → posición con líneas anidadas, posición → línea), el DELETE de líneas, el reintento por JMS de los errores temporales y las condiciones de Router excluyentes.
+- **Reglas generales**: crea lo que falta en el mismo change set que los PATCH con `POST Padre(clave)/NavHijos` y el envoltorio del set del hijo; no envíes la clave interna del hijo (la asigna el sistema); en la creación puedes enviar campos que en la modificación son de solo lectura; trata 423, 429, 503 y 504 como reintentables y termina en Error End para que JMS reintente; antes de crear, vuelve a leer el documento en cada intento para que un reintento no duplique; escribe condiciones de Router que se excluyan entre sí; si no puedes probar en un sistema real, simula los scripts con Groovy 2.4 y un `Message` simulado, con las condiciones de los Routers reproducidas.
+- **Archivos**: `skills/sap-cpi-groovy-generator/references/canonical-patterns.md`, `docs/LESSONS_LEARNED.md`.
+
+### `LL-037` — Script Collection compartida: comprobar todos los iFlows antes de transportar
+- **Síntoma**: una versión nueva de una Script Collection cambiaba y quitaba scripts; otro iFlow del mismo paquete usaba la misma collection y había que confirmar a mano, paso por paso, que no usaba ninguno de esos scripts.
+- **Causa Raíz Técnica**: una Script Collection se despliega una vez y la usan todos los iFlows que la referencian (`scriptBundleId`). Si se quita un script que otro iFlow llama, su despliegue falla; si se cambia, ese iFlow cambia de comportamiento sin haberse tocado. El inspector listaba los scripts de un iFlow, pero no los cruzaba con la collection ni con su versión anterior.
+- **Solución Codificada**: `check-script-dependencies.mjs` (`--sc`, `--iflow` repetible, `--baseline`, `--json`, `--demo`) con los hallazgos `MISSING`/`REMOVED` (CRITICAL, exit 1), `CHANGED` y `UNUSED`; autotest en `verify-all.mjs`; reglas `DEP-*` en `VALIDATION_RULES.md`.
+- **Reglas generales**: antes de transportar una collection, pide los exports de todos los iFlows que la usan y pasa la versión anterior como `--baseline`; transporta la collection antes que los iFlows; un script `UNUSED` solo se quita si ningún otro iFlow lo usa; los finales de línea que cambia el editor no son un cambio.
+- **Archivos**: `skills/sap-cpi-zip-inspector/scripts/check-script-dependencies.mjs`, `verify-all.mjs`, `skills/sap-cpi-zip-inspector/SKILL.md`, `docs/CLI_REFERENCE.md`, `docs/VALIDATION_RULES.md`, `README.md`.
+
+### `LL-038` — Detalles de operación de un upsert OData V4 que solo se ven en el tenant
+- **Síntoma**: durante las pruebas aparecieron comportamientos que no estaban en el diseño: custom headers repetidos en el MPL, un Content Modifier de prueba que siguió creando datos en cada reintento, unidades distintas entre lo enviado y lo leído, un mensaje entero sin aplicar por una sola posición y parámetros que, vacíos, cambiaban el comportamiento sin avisar.
+- **Causa Raíz Técnica y reglas generales**:
+  1. `addCustomHeaderProperty` **añade**, no sustituye: si dos pasos escriben la misma cabecera, el MPL muestra las dos. Cada cabecera la escribe un solo paso; quita los pasos cuyo resultado se descarta.
+  2. Un mensaje COMPLETED no prueba que haya ido bien cuando las rutas de error de negocio terminan en un End normal: monitoriza por `SAP_MessageProcessingLogCustomStatus`.
+  3. Los avisos de S/4 llegan en la cabecera `sap-messages` con `numericSeverity` 1 (éxito), 2 (información), 3 (aviso) o 4 (error); solo el 4, con un `statusCode` 4xx, es un fallo.
+  4. Un change set es atómico: si una parte falla (por ejemplo, una posición nueva sin precio en el pedido), no se aplica nada del mensaje. Es coherente con un alta, pero hay que decirlo a negocio.
+  5. La unidad se envía en ISO (`EA`) y S/4 la devuelve en su código interno (`UN`): no se pueden comparar sin tabla de conversión. Si una línea se envía siempre, aunque no cambie, se actualiza la fecha de último cambio del documento.
+  6. Para probar una operación nueva en desarrollo basta un Content Modifier con el batch fijo justo antes del receptor (se puede usar `${property.X}` en la URI). Mientras esté puesto, cada mensaje y cada reintento ejecutan esa operación: quítalo en cuanto termines y revisa los datos que haya creado.
+  7. Un valor de Content Modifier se externaliza escribiendo `{{Parametro}}` en el valor y se configura en *Configure → More*. Si el parámetro queda vacío, el script aplica su valor por defecto sin avisar: configúralo en cada tenant o haz que el script exija el valor.
+  8. Un Content Modifier sin nada en *Message Body* no cambia el body. La ruta por defecto de un Router se evalúa siempre la última, aunque en la tabla esté en medio.
+  9. Una decisión de negocio puede cambiar el diseño: si el origen confirma siempre por el total, lo que llega sustituye a lo que hay y las líneas sobrantes se borran en vez de solo avisarlas. Pregunta a negocio con ejemplos concretos (cantidades y fechas), no con términos técnicos.
+- **Solución Codificada**: guía `skills/sap-cpi-groovy-generator/references/local-testing.md` (simulación local de scripts y Routers con Groovy 2.4) y las reglas anteriores en esta lección.
+- **Archivos**: `skills/sap-cpi-groovy-generator/references/local-testing.md`, `skills/sap-cpi-groovy-generator/references/canonical-patterns.md`, `docs/LESSONS_LEARNED.md`.

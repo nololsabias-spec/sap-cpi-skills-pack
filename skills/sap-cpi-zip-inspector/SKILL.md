@@ -52,6 +52,7 @@ node ./scripts/inspect-iflow-zip.mjs <path-to-iflow.zip> --remediate <manifest,h
   - Automatically detects outer `.zip` deliveries containing nested `.zip` bundles (`nestedBundles`) and inspects each inner bundle.
   - Distinguishes `SAP-BundleType: ScriptCollection` bundles from `IntegrationFlow` bundles, verifying `Provide-Capability` and cataloged `.groovy` scripts instead of penalizing for the absence of an `.iflw` file.
   - Extracts external `scriptCollection` and `.groovy` script dependencies referenced inside `<ifl:property>` blocks of an `.iflw` file.
+* **Shared Script Collections (LL-037)**: before transporting a new version of a Script Collection, run `node ./scripts/check-script-dependencies.mjs --sc <new-sc.zip> --baseline <old-sc.zip> --iflow <every iFlow that uses it>`. It reports scripts that are missing or were removed but are still used (CRITICAL, deploy would fail), scripts that changed and must be retested in each iFlow, and scripts no iFlow uses. Ask the user for the exports of every iFlow that uses the collection, not only the one being changed.
 
 ### Step 2: Validate the 5 Critical Architecture Control Points
 Review the deterministic output from `inspect-iflow-zip.mjs` across these 5 mandatory SAP CPI architectural dimensions:
