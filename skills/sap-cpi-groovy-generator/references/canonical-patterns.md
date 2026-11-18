@@ -84,4 +84,4 @@ Cuando el origen puede reenviar una entidad que ya existe en el destino y hay qu
 
 Antes de diseñar el patrón para otra API, lee su página oficial (restricciones, claves y *Necessity* de cada campo): `skills/sap-cpi-architect/references/s4hana-api-docs.md` explica cómo leer la ayuda de SAP sin navegador y resume lo aplicable a todas las APIs.
 
-Probar la lógica de los scripts en local con Groovy 2.4 (`apt-get install groovy` instala la 2.4.x) y un `Message` simulado con el mismo nombre de clase, con casos de error: sin id, clave con comilla, cuerpo vacío, XML mal formado y XXE.
+Probar la lógica de los scripts en local con Groovy 2.4 (`apt-get install groovy` instala la 2.4.x) y un `Message` simulado con el mismo nombre de clase, con casos de error: sin id, clave con comilla, cuerpo vacío, XML mal formado y XXE. Cuando el tenant no tiene datos para un caso (precio cero, sin posiciones repetidas, sin bloqueos), simula el recorrido completo: los scripts en orden y las condiciones de cada Router reproducidas en el runner. La guía y el `Message` simulado están en `local-testing.md`.

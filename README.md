@@ -93,7 +93,7 @@ sap-cpi-skills-pack/
 │   └── LESSONS_LEARNED.md              # Base de conocimiento viva con lecciones reales de SAP CPI anonimizadas
 └── skills/
     ├── sap-cpi-zip-inspector/          # 1. Inspector .zip, auditor BPMN2, differ semántico, PDF y remediador
-    │   └── scripts/                    #    (inspect-iflow-zip.mjs, diff-iflow-zip.mjs, sanitize-iflow-zip.mjs)
+    │   └── scripts/                    #    (inspect-iflow-zip.mjs, diff-iflow-zip.mjs, sanitize-iflow-zip.mjs, check-script-dependencies.mjs)
     ├── sap-cpi-groovy-generator/       # 2. Generador Groovy 2.4 / 4 y linter estático (validate-groovy.mjs)
     ├── sap-cpi-code-auditor/           # 3. Auditor de calidad/seguridad Groovy (Score 0-100, audit-groovy.mjs)
     ├── sap-cpi-xslt-studio/            # 4. Validador y generador XSLT 1.0/2.0/3.0 (validate-xslt.mjs)
@@ -112,7 +112,7 @@ sap-cpi-skills-pack/
 
 | # | Skill | Funcionalidad Principal | Script CLI |
 | :- | :--- | :--- | :--- |
-| **1** | `sap-cpi-zip-inspector` | Descomprime artefactos `.zip` (`IntegrationFlow`, `ScriptCollection` o paquetes anidados), redacta `.prop` por privacidad, inventaría recursos, audita riesgos BPMN 2.0 y CPILint, genera informes PDF ejecutivos y **compara semánticamente dos versiones de paquetes iFlow** eliminando el ruido BPMNDI. | `inspect-iflow-zip.mjs`<br>`diff-iflow-zip.mjs`<br>`sanitize-iflow-zip.mjs` |
+| **1** | `sap-cpi-zip-inspector` | Descomprime artefactos `.zip` (`IntegrationFlow`, `ScriptCollection` o paquetes anidados), redacta `.prop` por privacidad, inventaría recursos, audita riesgos BPMN 2.0 y CPILint, genera informes PDF ejecutivos y **compara semánticamente dos versiones de paquetes iFlow** eliminando el ruido BPMNDI. | `inspect-iflow-zip.mjs`<br>`diff-iflow-zip.mjs`<br>`sanitize-iflow-zip.mjs`<br>`check-script-dependencies.mjs` |
 | **2** | `sap-cpi-groovy-generator` | Genera y valida scripts Groovy (Script v1 y Groovy 4 v2 API) individualmente o en lote (carpetas/`.zip`), aplicando prevención de OOM, anti-XXE, `@Field final` y *Ensure Upgrade Readiness*. | `validate-groovy.mjs` |
 | **3** | `sap-cpi-code-auditor` | Audita scripts Groovy calculando una puntuación determinista (`0-100`), desglosa vulnerabilidades por severidad y verifica refactorizaciones. | `audit-groovy.mjs` |
 | **4** | `sap-cpi-xslt-studio` | Genera y valida transformaciones XSLT 1.0 (Xalan) y XSLT 2.0/3.0 (Saxon-HE), incluyendo `json-to-xml()`, `<xsl:param>` e interacción con cabeceras/propiedades del Exchange (`cpi:*` / `sapci:*`). | `validate-xslt.mjs` |

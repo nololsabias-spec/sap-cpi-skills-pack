@@ -167,3 +167,13 @@ Aplicadas por `export-api-client.mjs`:
 | `GROOVY-LIT-001` | `MEDIUM` | **Literales ignorados** | Las reglas estructurales de `validate-groovy` se evalúan sobre el código con los literales String enmascarados (`stripStringLiterals`), así que un patrón prohibido dentro de un texto no se marca. |
 | `DOC-001` | `MEDIUM` | **Secciones con contenido** | `--validate-doc` exige las 8 secciones con contenido real: una sección vacía o con TBD, todo, pendiente o n/a es un error (exit 1). |
 | `CLI-001` | `LOW` | **Contrato CLI uniforme** | `--help` → exit 0. Sin argumentos, o con flag desconocido o sin valor → exit 2 y uso en stderr. Entrada inválida → exit 1 con mensaje, nunca stack trace. Importar el módulo no imprime nada. |
+
+## 9. Dependencias de Script Collections compartidas (`check-script-dependencies.mjs`, LL-036)
+
+| Código | Severidad | Regla | Descripción Técnica |
+| :--- | :--- | :--- | :--- |
+| `DEP-MISSING` | `CRITICAL` | **Script que la collection no tiene** | Un paso Script con `scriptBundleId` igual al `Bundle-SymbolicName` de la collection apunta a un fichero que no está en `src/main/resources/script/`. El despliegue del iFlow falla. |
+| `DEP-REMOVED` | `CRITICAL` | **Script quitado que se sigue usando** | Con `--baseline`: el script existía en la versión anterior, se ha quitado y algún iFlow lo sigue llamando. |
+| `DEP-CHANGED` | `WARNING` | **Script cambiado** | Con `--baseline`: el contenido cambia (sin contar finales de línea ni espacios al final). Cada iFlow que lo usa debe probarse con la versión nueva. |
+| `DEP-UNUSED` | `INFO` | **Script sin uso** | Ningún iFlow de los indicados lo llama. Antes de quitarlo, comprueba que no lo usa otro iFlow que no se haya pasado. |
+

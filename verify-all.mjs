@@ -127,6 +127,17 @@ const CHECKS = [
     }
   },
   {
+    skill: 'sap-cpi-zip-inspector (Dependencias de Script Collection)',
+    script: 'skills/sap-cpi-zip-inspector/scripts/check-script-dependencies.mjs',
+    args: ['--demo', '--json'],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      const types = data.findings.map((f) => f.type + ':' + f.script);
+      return data.passed === false && types.includes('MISSING:NotThere.groovy') && types.includes('REMOVED:Old.groovy') &&
+        types.includes('CHANGED:Response.groovy') && types.includes('UNUSED:Spare.groovy') && !types.some((t) => t.includes('Shared.groovy'));
+    }
+  },
+  {
     skill: 'sap-cpi-zip-inspector (Reversible Sanitizer)',
     script: 'skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs',
     args: ['--demo', '--json'],
