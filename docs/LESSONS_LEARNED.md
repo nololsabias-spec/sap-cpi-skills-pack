@@ -4,6 +4,40 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 
 ---
 
+## Cómo registrar una lección
+
+Una lección sirve para que el mismo error no vuelva a ocurrir. Debe poder leerse sin conocer el proyecto de origen:
+- **Anonimiza siempre**: ni nombres de clientes o proyectos, ni URLs, hosts o cuentas reales, ni credenciales, ni valores de `.prop`, ni identificadores de documentos. Usa marcadores genéricos (`<Objeto>`, `<host-virtual>`).
+- Abstrae el principio técnico, no el caso. Si la regla se puede comprobar por código, codifícala en el script CLI correspondiente y cita su identificador.
+- Cuando cambie una regla vigente, corrige también las lecciones antiguas que la contradigan.
+
+```markdown
+### `LL-XXX` — <Título corto del error o patrón>
+- **Síntoma**: <mensaje de error exacto o comportamiento observado>
+- **Causa Raíz Técnica**: <por qué ocurre en SAP CPI o en el sistema conectado>
+- **Solución Codificada**: <regla o patrón añadido y dónde; si no se puede codificar, la lista de comprobación>
+- **Reglas generales**: <qué hacer la próxima vez, en una o dos frases por regla>
+- **Archivos**: <archivos del pack actualizados>
+```
+
+---
+
+## Índice por temas
+
+Las entradas `LL-004` a `LL-015` son registros históricos de funcionalidad (qué se añadió al pack y por qué), no errores concretos, y se conservan tal cual. Las cifras que citan (herramientas MCP, skills, reglas) son las de la fecha de cada entrada.
+
+| Tema | Lecciones |
+| :--- | :--- |
+| Empaquetado OSGi, ZIP y bundles | `LL-001`, `LL-016`, `LL-018`, `LL-021`, `LL-022`, `LL-025`, `LL-027` |
+| Scripts Groovy: compilación, runtime y estilo | `LL-002`, `LL-003`, `LL-014`, `LL-017`, `LL-026`, `LL-028`, `LL-030`, `LL-031` |
+| XSD, XSLT, mapeos `.mmap` y expresiones regulares | `LL-004`, `LL-005`, `LL-020`, `LL-023`, `LL-024`, `LL-026` |
+| Servidor MCP y contrato de las herramientas CLI | `LL-006`, `LL-009`, `LL-010`, `LL-011`, `LL-012`, `LL-013`, `LL-019` |
+| Datos de prueba (mock) | `LL-007`, `LL-015`, `LL-025` |
+| APIs, OData, Salesforce y mover un iFlow de entorno | `LL-029`, `LL-030`, `LL-032`, `LL-033`, `LL-034` |
+| Privacidad y datos sensibles | `LL-016`, `LL-027` |
+
+---
+
 ## Registro de Lecciones Aprendidas
 
 ### `LL-001` — Error de Importación OSGi: `Upload the artifact failed. The project must contain a valid manifest file`
@@ -21,7 +55,8 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 - **Síntoma en SAP CPI**: El iFlow falla en ejecución (`MissingMethodException`) dentro de un script Groovy al invocar `bodyReader.getText('UTF-8')` tras hacer `message.getBody(java.io.Reader)`.
 - **Causa Raíz Técnica**: En Java y Groovy 2.4, las clases `Reader`, `BufferedReader` y `StringReader` ya son flujos de caracteres decodificados y su método `.getText()` **no acepta argumentos de charset** (a diferencia de `InputStream.getText('UTF-8')`).
 - **Solución Codificada**:
-  - Usar `bodyReader.getText()` sin argumentos, pasar el `Reader` directamente a `new JsonSlurper().parse(bodyReader)` / `new XmlSlurper().parse(bodyReader)`, o usar `message.getBody(String)`.
+  - Usar `bodyReader.getText()` sin argumentos, o pasar el `Reader` directamente a `new JsonSlurperClassic().parse(bodyReader)` / `new XmlSlurper(false, false).parse(bodyReader)`.
+  - **Actualización**: ya no se recomienda `message.getBody(String)` (`HEAP_OOM_GETBODY_STRING`, CRITICAL) ni `JsonSlurper` estándar (`JSONSLURPER_STANDARD_LEAK`, HIGH): el validador los rechaza. Ver `docs/VALIDATION_RULES.md`.
   - Se añadió la regla `READER_GETTEXT_CHARSET_ERROR` (`CRITICAL -30`) en `skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs`.
 
 ---
@@ -31,7 +66,7 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 - **Nota (corregida en `LL-017`)**: desde el Script step 2.0, SAP CPI también ofrece **Groovy 4**, donde ocurre justo lo contrario. La versión no se infiere: se indica con `--groovy 2.4|4`.
 - **Causa Raíz Técnica**: El runtime Groovy 2.4 de SAP CPI, donde `XmlSlurper` y `XmlParser` pertenecen al paquete **`groovy.util.XmlSlurper`** y **`groovy.util.XmlParser`** (`groovy.xml.XmlSlurper` no existe en Groovy 2.4; Groovy 3 añadió `groovy.xml.*` manteniendo `groovy.util.*` como obsoleto, y Groovy 4 eliminó `groovy.util.Xml*`).
 - **Solución Codificada**:
-  - Importar siempre `groovy.util.XmlSlurper` y `groovy.util.XmlParser`.
+  - Con Groovy 2.4, importar `groovy.util.XmlSlurper` y `groovy.util.XmlParser`. Con Groovy 4 es `groovy.xml.XmlSlurper` (ver `LL-017`); la versión se indica con `--groovy 2.4|4`, no se infiere.
   - Se añadió la regla `GROOVY24_INVALID_XMLSLURPER_IMPORT` (`CRITICAL -30`) en `skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs`.
 
 ---
@@ -43,17 +78,6 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
   2. **Handler Central de Tokens (`Timer` + `LocalIntegrationProcess` + Global `Data Store`)**: Refresco programado de credenciales OAuth almacenadas en un `DataStoreOperations` con `<value>global</value>` y `<value>true</value>` en `encrypt`.
   3. **XSD Envelope Tolerante**: En esquemas `.xsd` para Message Mapping de payloads dinámicos o logs, usar `minOccurs="0" nillable="true"` en campos hoja para evitar que la ausencia de un nodo aborte el mapeo.
   4. **Detección de `scriptBundleId`, `.mmap` y `.xsd`**: `inspect-iflow-zip.mjs` cataloga ahora mapeos gráficos (`.mmap`), esquemas (`.xsd`), colecciones externas referenciadas mediante `scriptBundleId` y posibles variables sin `def`/tipo en Groovy (`UNDECLARED_BINDING_VARIABLE`).
-
----
-
-## Plantilla para Nuevas Lecciones
-
-```markdown
-### `LL-XXX` — <Título corto del error o patrón>
-- **Síntoma en SAP CPI**: <Mensaje de error exacto o comportamiento observado>
-- **Causa Raíz Técnica**: <Explicación técnica de por qué ocurre en SAP CPI>
-- **Solución Codificada**: <Regla añadida en los scripts CLI y archivos actualizados>
-```
 
 ---
 
@@ -118,6 +142,7 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 ---
 
 ### `LL-011` — Expansión MCP a 20 Herramientas Granulares: Mock Suite Packaging, Matriz de Endpoints Inbound/Outbound, Lector de Archivos en Memoria y Plantillas Canónicas Groovy 100/100
+- **Nota**: «20 herramientas» es la cifra de la fecha de esta entrada; el número actual figura en el `README` y lo imprime `verify-all.mjs`.
 - **Contexto**: Solicitud de granularidad técnica avanzada en el servidor MCP local para responder a consultas específicas de desarrollo e integración sin requerir flujos de trabajo monolíticos.
 - **Aprendizajes y Correcciones Codificadas**:
   1. **Empaquetador de Suites de Mock Data en MCP (`cpi_pack_mock_suite`)**: Se completó la cobertura 100% de las 8 skills en MCP exponiendo la generación de suites de prueba E2E con correlación de identificadores cruzados (Request, Response, Lookup, Error) en archivos `.zip` o JSON.
@@ -285,6 +310,7 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 ### `LL-030` — Un `$batch` OData devuelve 200 aunque falle una operación, y detalles del API de scripts
 - **Síntoma**: un iFlow termina en verde tras un `$batch` cuyas operaciones han fallado con 4xx; el error solo se ve dentro del cuerpo de la respuesta. Un script de comprobación pensado para un POST suelto no registra nada en el monitor porque llama a un método que no existe.
 - **Causa Raíz Técnica**: (1) el envoltorio HTTP del `$batch` es 200 y cada operación lleva su propio `statusCode`; (2) los avisos de negocio viajan en la cabecera `sap-messages` con `numericSeverity` 3 (aviso) o 4 (error) y no son un fallo; (3) `message.getMessageLog()` no existe: el log se obtiene con `messageLogFactory?.getMessageLog(message)`; (4) la respuesta de un GET puede llegar en XML aunque se esperase JSON, según la cabecera `Accept` y el adaptador; (5) las propiedades que lee un Router se comparan como texto (`'true'`), y un nombre ambiguo hace que el flujo vaya a la rama contraria.
+- **Solución Codificada**: patrón F de `canonical-patterns.md` (paso de comprobación de la respuesta del `$batch`) y lista de comprobación de esta lección; el validador de Groovy ya cubre el uso de `JsonSlurperClassic` y la lectura del body por `Reader`.
 - **Reglas generales**: recorre **todos** los `statusCode` de las partes y falla si alguno es ≥ 400; no trates un aviso (severidad 3) como error; deja en el MPL cuántas operaciones fueron correctas; parsea la respuesta aceptando JSON y XML; usa nombres de propiedad cuyo `true` signifique lo que el Router espera y comprueba la condición de cada ruta en una prueba con los dos valores; un caso «no encontrado» que debe decidir un Router se señala con una propiedad (`...Skipped`, motivo) y devolviendo el cuerpo original, no con una excepción.
 - **Archivos**: `skills/sap-cpi-groovy-generator/references/canonical-patterns.md`.
 
@@ -307,5 +333,12 @@ Este documento constituye la memoria histórica viva de **`sap-cpi-skills-pack`*
 - **Causa Raíz Técnica**: (1) con tipo de proxy On-Premise el canal HTTP solo admite `http://`; el HTTPS lo define la entrada del Cloud Connector hacia el destino; (2) el Cloud Connector rechaza la petición si no hay una entrada con el host y el puerto virtuales exactos **en el Cloud Connector cuyo Location ID envía el canal**: una entrada creada en otro Cloud Connector, otra subcuenta o con un puerto con errata (433 en lugar de 443) da el mismo error; (3) un nombre de bucket de S3 es el nombre exacto, a menudo con un sufijo de cuenta y región, y el campo de región del adaptador no lo completa; (4) la configuración antigua se cuela por valores por defecto escritos en scripts (bucket, alias de Secure Parameter) y por Data Stores que guardan payloads ya construidos (con las referencias al bucket antiguo) y los reutilizan en los reintentos; (5) las colas JMS conservan mensajes hasta que caducan y se entregan con la configuración nueva.
 - **Solución Codificada**: lista de comprobación de este caso en la presente lección y en `skills/sap-cpi-architect/references/s4hana-api-docs.md` (sección de la ayuda de SAP); no hay heurística de inspector porque el esquema y el Location ID suelen venir de parámetros externalizados.
 - **Reglas generales**: antes de mover un iFlow, inventaria productor, consumidor y Script Collection compartida; usa `http://host-virtual:puerto` con proxy On-Premise y comprueba en el Cloud Connector la entrada exacta (host, puerto, ruta con subrutas) y el Location ID; copia el nombre del bucket completo; elimina de los scripts los valores por defecto que apunten al entorno antiguo (que falle si falta el parámetro); antes de reanudar, vacía las colas JMS y los Data Stores de payloads y cuarentena, y decide de forma explícita si se conserva la marca de última consulta; pausa el productor antes que el consumidor y reanuda al revés; prueba con un modo de prueba que no haga el POST para revisar las referencias generadas.
+- **Archivos**: `docs/LESSONS_LEARNED.md`.
+
+### `LL-034` — `No such column` en un campo propio de Salesforce: el campo, el permiso o el entorno
+- **Síntoma**: una consulta SOQL lanzada desde el adaptador de Salesforce falla con `INVALID_FIELD ... No such column '<Campo>__c' on entity '<Objeto>'`, aunque el nombre está bien escrito y otros campos del mismo objeto funcionan.
+- **Causa Raíz Técnica**: Salesforce usa el mismo mensaje para cuatro situaciones distintas: (1) el campo aún no está creado en **esa** org (los campos no se sincronizan solos entre desarrollo, QA y producción); (2) el campo existe pero el usuario de integración no tiene acceso de lectura por *Field-Level Security*; (3) el canal conecta con una org distinta de la que se cree (otra URL de instancia u otras credenciales); (4) el nombre de API no coincide (falta el sufijo `__c` o hay una errata). Además, el adaptador **omite los campos vacíos** en el XML de salida, así que la ausencia de un campo en una respuesta no prueba que no exista.
+- **Solución Codificada**: no es detectable por código; se deja la lista de comprobación de las reglas generales.
+- **Reglas generales**: (1) confirma primero contra qué org conecta el canal (URL de instancia y credenciales); (2) haz una consulta de control sobre un campo que ya funciona y otra con el campo nuevo: si solo falla la segunda, el resto de la conexión está bien; (3) lista los campos que ve el usuario con la operación de petición personalizada: `GET /services/data/v<versión>/sobjects/<Objeto>/describe` devuelve cada campo con su tipo y sus indicadores `createable` y `updateable`; (4) para distinguir «vacío» de «inexistente» usa `SELECT ... WHERE <Campo> != null`: sin error y con cero filas significa que existe y aún no tiene datos; (5) antes de escribirlo, comprueba en la descripción que `updateable` es `true` y su tipo (fecha o fecha y hora), que decide el formato; (6) no añadas un campo nuevo a la consulta del flujo hasta confirmar que existe y es visible para el usuario de integración: mientras tanto, deja la consulta anterior para no romper cada ejecución.
 - **Archivos**: `docs/LESSONS_LEARNED.md`.
 
