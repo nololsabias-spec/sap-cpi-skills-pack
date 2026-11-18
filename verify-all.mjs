@@ -163,6 +163,15 @@ const CHECKS = [
     }
   },
   {
+    skill: 'sap-cpi-groovy-generator (respuestas OData: getMessageLog y éxito solo 200/201)',
+    script: 'skills/sap-cpi-groovy-generator/scripts/odata-response.selftest.mjs',
+    args: [],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.legacyFlagsGetMessageLog && data.legacyFlagsOnly200 && data.fixedClean;
+    }
+  },
+  {
     skill: 'Estándar de documentación (plantilla Groovy --comments + --docs)',
     script: 'skills/sap-cpi-groovy-generator/scripts/validate-groovy.mjs',
     args: ['--template', 'xml-slurper', '--api', 'v2', '--groovy', '4', '--comments', '--json'],

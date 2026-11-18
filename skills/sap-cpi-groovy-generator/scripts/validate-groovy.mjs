@@ -587,6 +587,34 @@ export function lintGroovyScript(code, fileName = 'Script.groovy', options = {})
     );
   }
 
+  // 12b. message.getMessageLog() does not exist on the CPI Message interface (LL-030, HIGH -15)
+  if (/\bmessage\s*\.\s*getMessageLog\s*\(\s*\)/.test(codeNoStr)) {
+    addFinding(
+      'HIGH',
+      'Observabilidad & MPL',
+      'MESSAGE_GETMESSAGELOG',
+      'message.getMessageLog() no existe',
+      '`Message` no tiene `getMessageLog()`: la llamada lanza MissingMethodException y, si un catch la silencia, los custom headers no se escriben nunca.',
+      'Usa `def messageLog = messageLogFactory?.getMessageLog(message)` y `messageLog?.addCustomHeaderProperty(...)`.',
+      findLineNumber(/\bmessage\s*\.\s*getMessageLog\s*\(\s*\)/)
+    );
+  }
+
+  // 12c. OData success detected only by literal 200/201 (LL-034, MEDIUM -5): PATCH and DELETE answer 204.
+  const literalSuccess = /HTTP\/1\.1 20[01]\b|<statusCode>\s*20[01]\s*<\/statusCode>/;
+  const anyTwoXx = /204|2\\d\\d|2\[0-9\]|startsWith\s*\(\s*["']2["']\s*\)|\b(?:200|2\d\d)\s*\.\.\s*(?:299|2\d\d)\b/;
+  if (literalSuccess.test(cleanCode) && !anyTwoXx.test(cleanCode)) {
+    addFinding(
+      'MEDIUM',
+      'Robustez & Contrato',
+      'ODATA_SUCCESS_ONLY_200_201',
+      'Éxito OData detectado solo con 200/201',
+      'El script da por buena una respuesta solo si contiene el texto 200 o 201. Un PATCH o un DELETE de OData V4 responde 204 y se tratará como error, y un 200 en una parte no garantiza que las demás partes del $batch sean correctas.',
+      'Recoge todos los códigos (`<statusCode>nnn</statusCode>` y `HTTP/1.1 nnn`) y da éxito solo si hay alguno y todos empiezan por 2.',
+      findLineNumber(literalSuccess)
+    );
+  }
+
   // 13. Overwriting reserved headers Camel* or SAP_* (MEDIUM -5)
   // Excludes official SAP CPI writable MPL monitoring headers and standard dynamic routing headers:
   const writableSapHeaders = new Set([
