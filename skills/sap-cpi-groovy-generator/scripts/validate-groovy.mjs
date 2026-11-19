@@ -681,6 +681,20 @@ export function lintGroovyScript(code, fileName = 'Script.groovy', options = {})
     );
   }
 
+  // 11e. ITApiFactory.getService is the old accessor (LL-041, LOW -2): getApi is the documented one for
+  //      SecureStoreService, ValueMappingApi, PartnerDirectoryService...
+  if (/\bITApiFactory\s*\.\s*getService\s*\(/.test(codeNoStr)) {
+    addFinding(
+      'LOW',
+      'Upgrade Readiness & Imports',
+      'ITAPIFACTORY_GETSERVICE',
+      'ITApiFactory.getService() en lugar de getApi()',
+      'La API de scripts de CPI documenta `ITApiFactory.getApi(Clase.class, null)` para obtener SecureStoreService, ValueMappingApi o PartnerDirectoryService; `getService` es el acceso antiguo.',
+      'Sustituye `ITApiFactory.getService(X.class, null)` por `ITApiFactory.getApi(X.class, null)`; el resto del código no cambia.',
+      findLineNumber(/\bITApiFactory\s*\.\s*getService\s*\(/)
+    );
+  }
+
   // 12. Static MessageLogFactory call (MEDIUM -5)
   if (/\bMessageLogFactory\.getMessageLog\b/.test(codeNoStr)) {
     addFinding(

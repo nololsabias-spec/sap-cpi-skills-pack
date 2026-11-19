@@ -38,7 +38,7 @@ node mcp-server.mjs --self-test  # Autoverificación de las 22 tools y 9 resourc
 El directorio temporal del sistema siempre está permitido. `setup-skills.mjs --mcp` registra el servidor con ruta absoluta, de modo que arranca aunque el IDE se abra desde otro directorio.
 
 ### 1.2. `verify-all.mjs` (Suite de Auto-Verificación)
-Ejecuta pruebas integrales sobre los 20 módulos deterministas y el servidor MCP creando artefactos sintéticos en memoria/temporal y verificando su salida.
+Ejecuta pruebas integrales sobre los 25 módulos deterministas y el servidor MCP creando artefactos sintéticos en memoria/temporal y verificando su salida.
 
 ```bash
 node verify-all.mjs
@@ -63,6 +63,7 @@ node skills/sap-cpi-zip-inspector/scripts/inspect-iflow-zip.mjs <archivo.zip | a
 - `--extract-dir <carpeta>`: Extrae físicamente todos los recursos internos del `.zip` en la carpeta indicada.
 - `--show-prop-values`: Muestra los valores reales de los archivos `.prop` (por defecto se redactan como `[REDACTED]` por privacidad).
 - `--json`: Devuelve el inventario de archivos, hallazgos de auditoría y `availableRemediations` en formato JSON.
+- Avisos que no restan score (LL-041): `unusedParameters` (`IFLW-011`), `bareHostsNotExternalized` (`IFLW-012`), `secretHeadersNotDeleted` (`IFLW-013`) y `nameIdMismatch` (`MANIFEST-NAME-ID`), en consola y en el JSON.
 
 ---
 

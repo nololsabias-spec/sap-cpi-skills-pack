@@ -332,6 +332,38 @@ export function analyzeIflwLocally(iflwXml) {
     }
   }
 
+  // 5h. Bare host written in a channel instead of an externalized parameter (IFLW-012): e.g. the S3 or SFTP host.
+  //     Not a URL (that is IFLW-003), so it escaped the hardcoded-endpoint check and cannot be changed per tenant.
+  const bareHostsNotExternalized = [];
+  {
+    const flowRx = /<bpmn2:messageFlow\b([^>]*)>([\s\S]*?)<\/bpmn2:messageFlow>/gi;
+    let fl;
+    while ((fl = flowRx.exec(iflwXml)) !== null) {
+      const flowAttrs = parseXmlAttributes(fl[1]);
+      for (const cp of readChannelProps(fl[2] || '')) {
+        if (!/^(?:host|hostname|server|serverhost|endpointhost)$/i.test(cp.key)) continue;
+        const v = (cp.val || '').trim();
+        if (!v || v.includes('{{') || v.includes('${') || !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?$/i.test(v)) continue;
+        bareHostsNotExternalized.push({ id: flowAttrs.id || 'MessageFlow', name: flowAttrs.name || flowAttrs.id || 'Channel', key: cp.key, val: v });
+      }
+    }
+  }
+
+  // 5i. Secret header forwarded to a receiver and never deleted afterwards (IFLW-013): with trace enabled its
+  //     value is visible in the message monitor. A Content Modifier with Action=Delete for that header clears it.
+  const secretHeadersNotDeleted = [];
+  {
+    const plain = iflwXml.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+    const allowed = properties.filter((x) => x.key === 'allowedRequestHeaders' && x.val).flatMap((x) => x.val.split('|'));
+    const secretNames = [...new Set(allowed.map((s) => s.trim()).filter((s) => /api[-_]?key|authorization|token|secret/i.test(s) && s !== '*'))];
+    for (const name of secretNames) {
+      const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const deleted = new RegExp(`<row>(?:(?!</row>)[\\s\\S])*<cell id='Action'>Delete</cell>(?:(?!</row>)[\\s\\S])*<cell id='Name'>${esc}</cell>`, 'i').test(plain) ||
+        new RegExp(`<row>(?:(?!</row>)[\\s\\S])*<cell id='Name'>${esc}</cell>(?:(?!</row>)[\\s\\S])*<cell id='Action'>Delete</cell>`, 'i').test(plain);
+      if (!deleted) secretHeadersNotDeleted.push({ header: name });
+    }
+  }
+
   const channelsCount = (iflwXml.match(/<bpmn2:messageFlow\b/gi) || []).length;
   const routersCount = (iflwXml.match(/<bpmn2:exclusiveGateway\b/gi) || []).length;
   const groovyCalls = properties.filter(
@@ -386,6 +418,8 @@ export function analyzeIflwLocally(iflwXml) {
     routersWithoutDefaultRoute,
     odataQueryWithoutDollar,
     orphanLocalProcesses,
+    bareHostsNotExternalized,
+    secretHeadersNotDeleted,
     basicAuthChannels,
     csrfDisabledChannels,
     contentModifiersReadingBodyToProperty,
@@ -625,6 +659,25 @@ export function inspectBundle(inputPathOrDemo, extractDir = null, options = {}) 
         }
       }
     : analyzeIflwLocally(iflwFiles[0]?.text || '');
+
+  // IFLW-011: externalized parameters configured in parameters.prop that the iFlow no longer references ({{key}}).
+  // Keys only: values are never read here.
+  heuristics.unusedParameters = [];
+  if (iflwFiles.length > 0) {
+    const propFile = parameterFiles.find((f) => /(^|\/)parameters\.prop$/i.test(f.path));
+    if (propFile) {
+      const used = new Set(iflwFiles.flatMap((f) => [...(f.text || '').matchAll(/\{\{([^}]+)\}\}/g)].map((m) => m[1].trim())));
+      const keys = (propFile.text || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^[#!]/.test(l))
+        .map((l) => (/^((?:\\.|[^=:\s\\])+)/.exec(l) || [])[1]).filter(Boolean).map((k) => k.replace(/\\(.)/g, '$1'));
+      heuristics.unusedParameters = [...new Set(keys)].filter((k) => !used.has(k));
+    }
+  }
+  // MANIFEST-NAME-ID: the name shown in the package differs from the artifact ID. The ID cannot be renamed in CPI.
+  {
+    const id = String(manifestData.symbolicName || '').split(';')[0].trim();
+    const name = String(manifestData.name || '').trim();
+    heuristics.nameIdMismatch = id && name && id !== name ? { name, id } : null;
+  }
 
   heuristics.groovyAuditResults = groovyAuditResults;
   for (const ga of groovyAuditResults) {
@@ -1145,6 +1198,10 @@ if (isMain) {
       if (report.heuristics.manifestIssues && report.heuristics.manifestIssues.length > 0) {
         report.heuristics.manifestIssues.forEach((mi) => console.log(`  [!] ${mi}`));
       }
+      if (report.heuristics.nameIdMismatch) {
+        const nm = report.heuristics.nameIdMismatch;
+        console.log(`  [AVISO MANIFEST-NAME-ID] Nombre "${nm.name}" distinto del ID "${nm.id}": en CPI el ID no se puede cambiar; se importa y se transporta con el ID.`);
+      }
       console.log(`Catálogo: ${report.catalog.iflwFiles.length} .iflw | ${report.catalog.groovyScripts.length} .groovy | ${report.catalog.xsltMappings.length} .xslt | ${report.catalog.messageMappings.length} .mmap | ${report.catalog.xsdSchemas.length} .xsd | ${report.catalog.parameterFiles.length} .prop`);
       if (report.nestedBundles && report.nestedBundles.length > 0) {
         console.log(`\n--- PAQUETES ANIDADOS DETECTADOS (${report.nestedBundles.length}) ---`);
@@ -1187,6 +1244,12 @@ if (isMain) {
         (h.odataQueryWithoutDollar || []).forEach((q) => console.log(`   - [AVISO] Canal ${q.name} (${q.id}): "${q.option}=" debe ser "$${q.option}="`));
         console.log(`5g. Procesos locales que nadie invoca: ${(h.orphanLocalProcesses || []).length} detectado(s)`);
         (h.orphanLocalProcesses || []).forEach((o) => console.log(`   - [AVISO] Proceso "${o.name}" (${o.id}): ningún paso lo llama; revisa si falta enlazarlo`));
+        console.log(`5h. Hosts escritos en un canal sin externalizar: ${(h.bareHostsNotExternalized || []).length} detectado(s)`);
+        (h.bareHostsNotExternalized || []).forEach((b) => console.log(`   - [AVISO] Canal ${b.name} (${b.id}): ${b.key} = ${b.val}; externalízalo como {{...}} para poder cambiarlo por tenant`));
+        console.log(`5i. Cabeceras con secretos que siguen en el mensaje tras la llamada: ${(h.secretHeadersNotDeleted || []).length} detectado(s)`);
+        (h.secretHeadersNotDeleted || []).forEach((s) => console.log(`   - [AVISO] ${s.header}: ningún Content Modifier la borra; con el trace activado se ve en el monitor`));
+        console.log(`5j. Parámetros configurados que el iFlow no usa: ${(h.unusedParameters || []).length} detectado(s)`);
+        (h.unusedParameters || []).forEach((k) => console.log(`   - [AVISO] ${k}: está en parameters.prop pero el .iflw no lo referencia; quítalo o vuelve a enlazarlo`));
         if (report.heuristics.referencedScriptCollections?.length > 0 || report.heuristics.referencedScripts?.length > 0) {
           console.log(`6. Dependencias de Scripts:`);
           if (report.heuristics.referencedScriptCollections?.length > 0) {

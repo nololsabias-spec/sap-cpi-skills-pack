@@ -138,6 +138,15 @@ const CHECKS = [
     }
   },
   {
+    skill: 'sap-cpi-zip-inspector (preparación para otro tenant: IFLW-011/012/013 y MANIFEST-NAME-ID)',
+    script: 'skills/sap-cpi-zip-inspector/scripts/qa-readiness.selftest.mjs',
+    args: [],
+    verify: (out) => {
+      const d = JSON.parse(out);
+      return d.unusedParamFlagged && d.bareHostFlagged && d.secretHeaderFlagged && d.deletedHeaderClean && d.nameIdFlagged && d.sameNameClean;
+    }
+  },
+  {
     skill: 'sap-cpi-zip-inspector (Reversible Sanitizer)',
     script: 'skills/sap-cpi-zip-inspector/scripts/sanitize-iflow-zip.mjs',
     args: ['--demo', '--json'],
