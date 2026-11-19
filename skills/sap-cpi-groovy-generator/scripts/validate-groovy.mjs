@@ -120,6 +120,83 @@ function hasMultipleTopLevelSetBodyArgs(code) {
 }
 
 /** Normalizes a user-supplied Groovy runtime version to '2.4' | '4' | null (unknown). */
+const GROOVY_WORDS = new Set(('abstract as assert boolean break byte case catch char class const continue def default do double else enum extends false final finally float for goto if implements import in instanceof int interface long native new null package private protected public return short static strictfp super switch synchronized this throw throws transient true try void volatile while var it trait ' +
+  'message messageLogFactory binding out println print printf sleep args owner delegate thisObject sprintf evaluate getBinding properties metaClass length size').split(' '));
+const DECL_TYPE = '(?:final\\s+)?(?:def|var|(?:boolean|int|long|double|float|char|byte|short)(?:\\[\\])?|(?:[a-z]\\w*\\.)*[A-Z]\\w*(?:\\.[A-Z]\\w*)*(?:\\s*<[^=;()\\n]*?>)?(?:\\[\\])?)';
+
+/**
+ * Finds the first local variable declared twice in the same or an enclosing block (one declaration per line start).
+ * @param {string[]} lines code lines with comments and string contents blanked
+ * @returns {{name:string,line:number,first:number}|null}
+ */
+export function findDuplicateLocalDeclaration(lines) {
+  const declRe = new RegExp(`^\\s*${DECL_TYPE}[ \\t]+([a-zA-Z_]\\w*)\\s*(?:=(?!=)|$)`);
+  const scopes = [new Map()];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const m = declRe.exec(line);
+    if (m && !/^\s*(?:return|throw|new|else|import|package)\b/.test(line)) {
+      const name = m[1];
+      // depth 0 is the script body: methods do not see its locals, so only block scopes are compared
+      for (let d = scopes.length - 1; d >= 1; d--) {
+        if (scopes[d].has(name)) return { name, line: i + 1, first: scopes[d].get(name) };
+      }
+      scopes[scopes.length - 1].set(name, i + 1);
+    }
+    for (const ch of line) {
+      if (ch === '{') scopes.push(new Map());
+      else if (ch === '}' && scopes.length > 1) scopes.pop();
+    }
+  }
+  return null;
+}
+
+/**
+ * Finds the first lower-case identifier that is read as a value but never declared anywhere in the script
+ * (declarations, method and closure parameters, for/catch variables). Conservative: names that could be methods,
+ * map keys, named arguments or properties are ignored.
+ * @param {string} code code with comments and string contents blanked
+ * @returns {{name:string,line:number}|null}
+ */
+export function findUndeclaredRead(code) {
+  // slashy regex literals (/[^0-9A-Za-z]/) are not masked as strings: blank them so their letters are not read as names
+  code = code.replace(/([(,=~!]\s*)\/(?![\/*\s])((?:\\.|[^\/\n])+)\//g, (m, pre, body) => pre + '/' + ' '.repeat(body.length) + '/');
+  const declared = new Set();
+  const add = (n) => n && declared.add(n);
+  // type and name on the same line; `x as List` / `instanceof Map` / `new Foo` are not declarations
+  for (const m of code.matchAll(new RegExp(`(?<!\\b(?:as|instanceof|new)[ \\t]+)\\b${DECL_TYPE}[ \\t]+([a-zA-Z_]\\w*)`, 'g'))) add(m[1]);
+  for (const m of code.matchAll(/\bdef\s*\(([^)]*)\)/g)) m[1].split(',').forEach((v) => add(v.trim().split(/\s+/).pop()));
+  // method parameters: name(Type a, Type b = x) {
+  for (const m of code.matchAll(/\b[a-zA-Z_]\w*\s*\(([^()]*)\)\s*(?:throws\s+[\w.,\s]+)?\{/g)) {
+    m[1].split(',').forEach((p) => add(p.replace(/=.*$/, '').trim().split(/\s+/).pop()));
+  }
+  // closure parameters: { a, String b = 'x' ->
+  for (const m of code.matchAll(/\{\s*([^{}]*?)->/g)) {
+    m[1].split(',').forEach((p) => add(p.replace(/=.*$/, '').trim().split(/\s+/).pop()));
+  }
+  for (const m of code.matchAll(/\bfor\s*\(\s*(?:[\w.<>\[\]]+\s+)?([a-zA-Z_]\w*)\s+(?:in|:)/g)) add(m[1]);
+  for (const m of code.matchAll(/\bcatch\s*\(\s*(?:[\w.|\s]+\s+)?([a-zA-Z_]\w*)\s*\)/g)) add(m[1]);
+  const lines = code.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(?:import|package)\b/.test(line)) continue;
+    for (const m of line.matchAll(/(?<![\w.$@'"])([a-z_][a-zA-Z0-9_]*)\b(?!\s*[(:{]|\s*=(?!=)|\s*->|['"])/g)) {
+      const name = m[1];
+      if (declared.has(name) || GROOVY_WORDS.has(name)) continue;
+      // package prefix of a fully qualified class (java.io.Reader, groovy.json.JsonOutput)
+      if (/^\.[a-z]\w*(?:\.[a-zA-Z]\w*)*/.test(line.slice(m.index + name.length)) && /^(?:java|javax|groovy|com|org|net|sun|jdk)$/.test(name)) continue;
+      const before = line.slice(0, m.index);
+      const after = line.slice(m.index + name.length);
+      // value positions only: after = , ( [ + - * / ? : , return or a comparison, and not a command-call name
+      if (!/(?:[=(\[+\-*/?:,!<>&|]|\breturn)\s*$/.test(before)) continue;
+      if (/^\s+[a-zA-Z_'"(\[]/.test(after)) continue;
+      // `?:` and ternary `: value` are values; `key: value` map entries were excluded by the lookahead on `:`
+      return { name, line: i + 1 };
+    }
+  }
+  return null;
+}
+
 export function normalizeGroovyVersion(v) {
   const s = String(v ?? '').trim().toLowerCase().replace(/^groovy\s*/, '');
   if (!s) return null;
@@ -571,6 +648,36 @@ export function lintGroovyScript(code, fileName = 'Script.groovy', options = {})
       'En Groovy, asignar una variable sin `def` ni tipo explícito la inyecta en el `Binding` compartido de la instancia `Script`, causando retención de memoria y condiciones de carrera entre hilos concurrentes.',
       `Declara explícitamente el ámbito local con \`def ${undeclaredVars[0].varName} = ...\` o \`String ${undeclaredVars[0].varName} = ...\`.`,
       undeclaredVars[0].lineNo
+    );
+  }
+
+  // 11c. Local variable declared twice in the same scope (LL-040, CRITICAL -30): Groovy refuses to compile
+  //      ("The current scope already contains a variable of the name x"). Typical after pasting a block twice.
+  const dupDecl = findDuplicateLocalDeclaration(linesNoStr);
+  if (dupDecl) {
+    addFinding(
+      'CRITICAL',
+      'Compilación Groovy',
+      'DUPLICATE_LOCAL_VARIABLE',
+      `Variable \`${dupDecl.name}\` declarada dos veces en el mismo ámbito`,
+      `La línea ${dupDecl.line} vuelve a declarar \`${dupDecl.name}\` (ya declarada en la línea ${dupDecl.first}). El script no compila: MultipleCompilationErrorsException "The current scope already contains a variable of the name ${dupDecl.name}". Suele ser un bloque pegado dos veces.`,
+      'Deja una sola declaración; si el segundo bloque es una copia, bórralo entero y revisa que no se haya perdido otra línea al pegar.',
+      dupDecl.line
+    );
+  }
+
+  // 11d. Local variable read but never declared (LL-040, HIGH -15): it compiles, but at runtime Groovy looks it up
+  //      in the Binding and throws MissingPropertyException. Typical when a paste replaces the declaring line.
+  const undeclaredRead = findUndeclaredRead(codeNoStr);
+  if (undeclaredRead) {
+    addFinding(
+      'HIGH',
+      'Robustez & Contrato',
+      'UNDECLARED_VARIABLE_READ',
+      `Se usa \`${undeclaredRead.name}\` pero no se declara en ninguna parte`,
+      `\`${undeclaredRead.name}\` no es una variable declarada, un parámetro ni una variable de bucle o catch. En ejecución el paso falla con MissingPropertyException: No such property: ${undeclaredRead.name}. Suele pasar cuando al pegar un bloque se sustituye la línea que la declaraba.`,
+      `Declara la variable antes de usarla (\`def ${undeclaredRead.name} = ...\`) o recupera la línea que faltaba.`,
+      undeclaredRead.line
     );
   }
 

@@ -188,7 +188,8 @@ const CHECKS = [
     args: [],
     verify: (out) => {
       const data = JSON.parse(out);
-      return data.pastedFlagged && data.ownFileClean && data.duplicatedCloseFlagged && data.legacyHeaderFlagged;
+      return data.pastedFlagged && data.ownFileClean && data.duplicatedCloseFlagged && data.legacyHeaderFlagged &&
+        data.pasteDuplicateFlagged && data.pasteMissingDeclFlagged && data.goodVarsClean;
     }
   },
   {
