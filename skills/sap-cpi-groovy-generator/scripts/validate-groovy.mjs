@@ -615,6 +615,44 @@ export function lintGroovyScript(code, fileName = 'Script.groovy', options = {})
     );
   }
 
+  // 12d. Stray comment terminator (LL-039, CRITICAL -30): a line with only `*/` after the block comment is closed
+  //      (typically a duplicated header end) is a MultipleCompilationErrorsException when the step runs.
+  const strayIdx = lines.findIndex((l) => /^\s*\*+\/\s*$/.test(l));
+  if (strayIdx >= 0) {
+    addFinding(
+      'CRITICAL',
+      'Compilación Groovy',
+      'STRAY_COMMENT_CLOSE',
+      'Cierre de comentario `*/` sin apertura',
+      'Hay una línea con `*/` fuera de cualquier comentario de bloque (suele ser un cierre de cabecera duplicado). El script no compila y el paso falla en el tenant con MultipleCompilationErrorsException.',
+      'Deja un solo `*/` al final de la cabecera `/** ... */` y vuelve a validar.',
+      strayIdx + 1
+    );
+  }
+
+  // 12e. Script identity (LL-039, MEDIUM -5): the name the script declares (header "Name.groovy - ..." or
+  //      "CPI-ERR: Name failed") must match the file. A mismatch usually means code pasted into the wrong
+  //      script of a Script Collection: it runs in another iFlow, without the properties it expects.
+  const baseName = path.basename(String(fileName || '')).replace(/\.(groovy|gsh)$/i, '');
+  if (baseName && baseName !== 'Script' && /^[A-Za-z][A-Za-z0-9_]*$/.test(baseName)) {
+    const declared = new Set();
+    for (const m of code.matchAll(/CPI-ERR:\s*([A-Z][A-Za-z0-9_]{2,})\s+failed\b/g)) declared.add(m[1]);
+    const head = code.split(/\r?\n/).slice(0, 15).join('\n');
+    for (const m of head.matchAll(/^\s*(?:\/\*+|\*|\/\/)\s*([A-Za-z][A-Za-z0-9_]*)\.groovy\b/gm)) declared.add(m[1]);
+    const others = [...declared].filter((n) => n !== baseName);
+    if (others.length) {
+      addFinding(
+        'MEDIUM',
+        'Robustez & Contrato',
+        'SCRIPT_NAME_MISMATCH',
+        `El script se declara como ${others[0]} pero el archivo es ${baseName}.groovy`,
+        'La cabecera o el mensaje de error nombran otro script. Suele indicar que el código se pegó en el script equivocado de la Script Collection: se ejecutará en otro iFlow, sin las propiedades que espera, y el error apuntará a un archivo que no es el que falla.',
+        'Comprueba que el contenido corresponde a este archivo (y que el script nombrado no se ha quedado sin su código); si solo es un nombre desactualizado, corrige la cabecera y el mensaje de error.',
+        findLineNumber(new RegExp(`\\b${others[0]}\\b`))
+      );
+    }
+  }
+
   // 13. Overwriting reserved headers Camel* or SAP_* (MEDIUM -5)
   // Excludes official SAP CPI writable MPL monitoring headers and standard dynamic routing headers:
   const writableSapHeaders = new Set([

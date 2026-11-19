@@ -133,6 +133,8 @@ def Message processData(Message message) {
     def url = "https://api.acme-demo.corp/v1/orders"
     message.setHeader("Reply-To", "integration.team@acme-demo.corp")
     message.setProperty("fallbackIp", "10.20.30.40")
+    String bucket = (message.getProperty('S3Bucket') ?: 'acme-demo-dev-documents').toString()
+    message.setProperty("archive", "s3://acme-demo-archive/orders/")
     return message
 }
 `;
@@ -161,8 +163,10 @@ def Message processData(Message message) {
   const before = readZipEntries(original);
   const after = restored.ok ? readZipEntries(restored.buffer) : [];
   const mismatches = compareEntries(before, after);
+  const groovyOut = sanitizedEntries.find((e) => e.path.endsWith('Enrich.groovy'))?.data.toString('utf8') || '';
   return {
     sanitized: { files: r.files, totals: r.totals, aliases: r.aliasesUsed.length, droppedSamples: r.dropped.length },
+    bucketsSanitized: !/acme-demo-(dev-documents|archive)/.test(groovyOut) && groovyOut.includes("getProperty('S3Bucket')"),
     leaks,
     restore: { ok: restored.ok, unknownAliases: restored.unknownAliases, missingAliases: restored.missingAliases, readdedFiles: restored.readdedFiles },
     roundTripIdentical: restored.ok && mismatches.length === 0 && before.length === after.length,

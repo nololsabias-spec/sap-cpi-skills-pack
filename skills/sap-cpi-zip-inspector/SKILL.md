@@ -101,7 +101,7 @@ If `inspect-iflow-zip.mjs` detects Groovy scripts in `src/main/resources/script/
 - `parseManifestContent` devuelve `symbolicName` sin directivas y `symbolicNameDirectives` (p. ej. `['singleton:=true']`).
 - La consola muestra también Basic Auth/CSRF (`IFLW-008`), splitters, routers, opciones OData sin `$` (`IFLW-009`) y procesos locales que nadie invoca (`IFLW-010`). Vía MCP, `extractDir` escribe los `.prop` redactados.
 - `cpi_get_iflow_endpoints` (MCP) devuelve los endpoints sender/receiver sin valores de `parameters.prop`.
-- `sanitize-iflow-zip.mjs` (LL-027) sustituye URLs, hosts, emails, IPv4, URNs privados, alias de credenciales, secretos y valores de `.prop` (también donde se reutilizan en Groovy, XSD, `.iflw` o `MANIFEST.MF`) por alias consistentes entre varios zips. `--restore` devuelve cada archivo byte a byte (el `MANIFEST.MF`, equivalente semánticamente). `--check` falla si el bundle aún contiene alias.
+- `sanitize-iflow-zip.mjs` (LL-027) sustituye URLs, hosts, emails, IPv4, URNs privados, alias de credenciales, secretos, nombres de bucket (`s3://` y literales junto a un nombre con `bucket`, LL-039) y valores de `.prop` (también donde se reutilizan en Groovy, XSD, `.iflw` o `MANIFEST.MF`) por alias consistentes entre varios zips. `--restore` devuelve cada archivo byte a byte (el `MANIFEST.MF`, equivalente semánticamente). `--check` falla si el bundle aún contiene alias.
 
 ## Protocolo de Aprendizaje Continuo (Self-Improving Harness)
 

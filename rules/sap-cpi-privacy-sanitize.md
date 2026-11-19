@@ -39,6 +39,7 @@ O vía MCP: `cpi_restore_zip`. La restauración vuelve a poner los valores reale
 
 ## 4. Límites
 
-- Detecta URLs, hosts, emails, IPv4, alias de credenciales en `.iflw`, valores de `.prop` (y su reutilización en otros archivos), PEM, claves AWS, JWT, tokens Bearer, asignaciones de `password`/`secret`/`token`, URNs privados y los términos indicados.
+- Detecta URLs, hosts, emails, IPv4, alias de credenciales en `.iflw`, valores de `.prop` (y su reutilización en otros archivos), PEM, claves AWS, JWT, tokens Bearer, asignaciones de `password`/`secret`/`token`, URNs privados, nombres de bucket (`s3://` y literales junto a un nombre con `bucket`) y los términos indicados.
+- No detecta identificadores de negocio sin contexto (por ejemplo, `sys_id` de ServiceNow en un Value Mapping): no son endpoints ni credenciales, pero pueden diferir entre entornos.
 - No detecta nombres propios en texto libre que no estén en `--terms`. Revisa los recuentos del informe.
 - Los metadatos estándar del adaptador (`cmdVariantUri`, `Vendor`) y los namespaces estándar (W3C, OMG, SAP, `xml.org`…) no se tocan.

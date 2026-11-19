@@ -143,7 +143,7 @@ const CHECKS = [
     args: ['--demo', '--json'],
     verify: (out) => {
       const data = JSON.parse(out);
-      return Array.isArray(data.leaks) && data.leaks.length === 0 && data.roundTripIdentical === true && data.mismatches.length === 0;
+      return Array.isArray(data.leaks) && data.leaks.length === 0 && data.roundTripIdentical === true && data.mismatches.length === 0 && data.bucketsSanitized === true;
     }
   },
   {
@@ -180,6 +180,15 @@ const CHECKS = [
     verify: (out) => {
       const data = JSON.parse(out);
       return data.legacyFlagsGetMessageLog && data.legacyFlagsOnly200 && data.fixedClean;
+    }
+  },
+  {
+    skill: 'sap-cpi-groovy-generator (identidad del script y cierre de comentario suelto)',
+    script: 'skills/sap-cpi-groovy-generator/scripts/script-identity.selftest.mjs',
+    args: [],
+    verify: (out) => {
+      const data = JSON.parse(out);
+      return data.pastedFlagged && data.ownFileClean && data.duplicatedCloseFlagged && data.legacyHeaderFlagged;
     }
   },
   {

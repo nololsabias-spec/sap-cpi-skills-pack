@@ -8,6 +8,7 @@
  *   user-001@sanitized.invalid   (email)
  *   198.51.100.1                 (IPv4, RFC 5737 documentation range)
  *   urn:sanitized:ns-001         (private URN namespace)
+ *   bucket-001.sanitized.invalid (object storage bucket: s3:// URIs and literals next to a "bucket" name)
  *   SANITIZED_CRED_001 / SANITIZED_PARAM_001 / SANITIZED_SECRET_001 / SANITIZED_TERM_001
  *
  * The alias -> original table is returned (and written by the CLI to a local map file that must
@@ -20,7 +21,7 @@ import { readZipEntries, createZipBuffer } from './zip-utils.mjs';
 import { parseManifestSections, serializeManifestSections } from './manifest-utils.mjs';
 
 export const SANITIZER_MAP_VERSION = 1;
-export const SANITIZE_CATEGORIES = ['secrets', 'urls', 'namespaces', 'emails', 'ips', 'hosts', 'credentials', 'params', 'terms'];
+export const SANITIZE_CATEGORIES = ['secrets', 'urls', 'buckets', 'namespaces', 'emails', 'ips', 'hosts', 'credentials', 'params', 'terms'];
 const FIXED_ZIP_DATE = new Date(2020, 0, 1, 0, 0, 0);
 const MAX_PER_KIND = 999;
 
@@ -82,6 +83,7 @@ export class AliasRegistry {
     let alias;
     switch (kind) {
       case 'host': alias = `host-${pad(n)}.sanitized.invalid`; break;
+      case 'bucket': alias = `bucket-${pad(n)}.sanitized.invalid`; break;
       case 'email': alias = `user-${pad(n)}@sanitized.invalid`; break;
       case 'ns': alias = `urn:sanitized:ns-${pad(n)}`; break;
       case 'ip': alias = n <= 254 ? `198.51.100.${n}` : `203.0.113.${n - 254}`; if (n > 508) throw new Error('Demasiadas IPs distintas (máximo 508).'); break;
@@ -164,6 +166,25 @@ export function sanitizeText(text, { reg, path: entryPath = '', enabled, terms =
         const core = authority.slice(0, authority.length - (portMatch ? portMatch[0].length : 0));
         bump('urls');
         return scheme + reg.get('host', core) + (portMatch ? portMatch[0] : '');
+      }
+    );
+  }
+
+  // 3b. object storage buckets (LL-039): s3:// URIs and literals assigned next to a "bucket" name, e.g. a
+  //     hardcoded fallback `prop('S3Bucket') ?: 'team-dev-documents'`. The alias stays a valid bucket name.
+  if (on('buckets')) {
+    t = t.replace(/\b(s3a?:\/\/)([a-z0-9][a-z0-9.-]{1,61}[a-z0-9])(?=[/"'\s<]|$)/gi, (all, scheme, name) => {
+      if (isAliasLike(name)) return all;
+      bump('buckets');
+      return scheme + reg.get('bucket', name);
+    });
+    t = t.replace(
+      /(\w*bucket\w*['")\]\s]*(?:\?:|=|:|,)\s*\(?\s*['"])([a-z0-9][a-z0-9.-]{1,61}[a-z0-9])(['"])/gi,
+      (all, pre, name, q) => {
+        // only real names: lower case with a separator (property keys, placeholders and constants are skipped)
+        if (isAliasLike(name) || /[A-Z]/.test(name) || !/[.-]/.test(name)) return all;
+        bump('buckets');
+        return pre + reg.get('bucket', name) + q;
       }
     );
   }
